@@ -60,7 +60,7 @@ try {
 }
 const currencyName = (code) => currencyNames?.of(code) ?? code;
 
-// A time to come: months under two years, whole years after that.
+// A span of time: months under two years, whole years after that.
 function duration(months) {
   if (months < 24) return months === 1 ? "1 month" : `${months} months`;
   return `${Math.round(months / 12)} years`;
@@ -367,7 +367,14 @@ function viewDashboard() {
         ? h("a", { href: "#portfolio" }, "Add pay-ins")
         : `${money(m.payIn.average)} a month paid in, average of ${m.payIn.months === 12 ? "the last 12 months" : m.payIn.months === 1 ? "1 month" : `${m.payIn.months} months`}`),
     tile("Portfolio", m.portfolio === null ? "–" : money(m.portfolio),
-      m.latestMonth ? `as of ${monthLabel(m.latestMonth)}` : h("a", { href: "#portfolio" }, "Add broker values")),
+      m.series.length >= 2
+        ? `${signedMoney(m.portfolio - m.series.at(-2).value)} in ${monthLabel(m.latestMonth)} (${money(m.series.at(-1).payIn)} paid in)`
+        : m.latestMonth ? `as of ${monthLabel(m.latestMonth)}` : h("a", { href: "#portfolio" }, "Add broker values")),
+    tile(`Gains, last ${m.gains === null || m.gains.months === 12 ? "12 months" : m.gains.months === 1 ? "month" : `${m.gains.months} months`}`,
+      m.gains === null ? "–" : signedMoney(m.gains.gain),
+      m.gains === null ? "needs values for two months" : m.gains.rate === null ? "change in value minus pay-ins" : `a return of ${percent.format(m.gains.rate)}, not counting pay-ins`),
+    tile("Expenses covered", m.coveredMonths === null ? "–" : duration(m.coveredMonths),
+      m.coveredMonths === null ? "needs expenses and a portfolio value" : `by the portfolio, at ${money(m.expenses)} a month`),
     tile("FI number", expenses.length ? money(m.fiNumber) : "–",
       `${plain.format(m.multiple)} × yearly expenses (${percentUnit.format(withdrawalRate)} withdrawal rate)`),
     tile("FI reached", m.fiProgress === null ? "–" : percent.format(m.fiProgress),

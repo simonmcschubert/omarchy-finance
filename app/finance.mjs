@@ -438,6 +438,23 @@ export function projectToGoal(start, payIn, returnPercent, goal) {
   return null;
 }
 
+// What the portfolio gained over the last `window` months besides pay-ins:
+// the change in value minus what was paid in, from the month before the
+// window (the first month when there are fewer). rate is a Modified Dietz
+// return: the gain ÷ (that first value + each pay-in weighted by the part of
+// the time it was invested, from the middle of its month). Returns
+// { gain, months, rate } (rate null when nothing was invested), or null
+// with less than two months.
+export function gains(series, window = 12) {
+  if (series.length < 2) return null;
+  const months = Math.min(window, series.length - 1);
+  const start = series.at(-1 - months);
+  const recent = series.slice(-months);
+  const gain = series.at(-1).value - start.value - sum(recent.map((m) => m.payIn));
+  const invested = start.value + sum(recent.map((m, i) => (m.payIn * (months - i - 0.5)) / months));
+  return { gain, months, rate: invested > 0 ? gain / invested : null };
+}
+
 // Current numbers for the dashboard. Amounts are in cents and may carry
 // fractions of a cent; round when displaying. Ratios are fractions (0.25).
 export function metrics(store) {
@@ -471,6 +488,9 @@ export function metrics(store) {
     // when it takes more than 100 years.
     fiMonths: ahead ? ahead.length : null,
     projection: ahead ? ahead.map((value, i) => ({ month: addMonths(last.month, i + 1), value })) : null,
+    gains: gains(series),
+    // Whole months of expenses the portfolio pays for.
+    coveredMonths: last && expenses > 0 ? Math.floor(last.value / expenses) : null,
   };
 }
 

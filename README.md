@@ -111,12 +111,15 @@ The data file stays.
 | Monthly income | Sum of income, each divided by its months (a yearly bonus counts one twelfth) |
 | Monthly expenses | Sum of active expenses the same way, plus the buffer |
 | Investment rate | Average monthly pay-in over the last 12 months ÷ monthly income |
-| Portfolio | Sum of all accounts in the latest month |
+| Portfolio | Sum of all accounts in the latest month, and its change since the month before |
+| Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins. The return is that gain ÷ (the value 12 months ago + each pay-in for the part of the 12 months it was invested, from the middle of its month) |
+| Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them |
 | FI number | Monthly expenses × 12 ÷ withdrawal rate (× 25 at 4 %) |
 | FI reached | Portfolio ÷ FI number |
 | Time to FI | Months until the portfolio reaches the FI number: from the latest month it grows by the expected return (compounded monthly) and gets the average monthly pay-in each month. Years from two years on; nothing beyond 100 years |
 
-With less than 12 months of history, the average uses the months there are.
+With less than 12 months of history, the average uses the months there
+are, and so do the gains, from the first month on.
 
 The chart shows the portfolio value and the running total of pay-ins per
 month. **Up to FI number** scales it to the FI number and continues the
