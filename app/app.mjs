@@ -747,7 +747,7 @@ function categoryList(store, kind) {
 function importCard(store) {
   const plan = state.importPlan;
   const textarea = h("textarea", { id: "import-text", rows: 8, spellcheck: "false", "aria-label": "CSV text",
-    placeholder: "month;account;value;pay_in\n2025-01;Trade Republic;12.345,67;500\n2025-01;ING;8.000;0",
+    placeholder: "date;account;value;pay_in\n31.01.2025;Trade Republic;12.345,67;500\n31.01.2025;ING;8.000;0",
     oninput: (event) => {
       // The checked rows no longer match the text: take back the Import button.
       state.importText = event.target.value;
@@ -759,8 +759,9 @@ function importCard(store) {
   return h("section", { class: "card" },
     h("details", { open: state.importText !== "" || null },
       h("summary", null, h("h2", null, "Import past months from CSV")),
-      h("p", null, "One row per account and month, with the columns ", h("code", null, "month"), ", ", h("code", null, "account"), ", ",
-        h("code", null, "value"), " and ", h("code", null, "pay_in"), ". Semicolons, commas or tabs work, and so do amounts like 1.234,56 or 1,234.56. ",
+      h("p", null, "One row per account and month, with the columns ", h("code", null, "date"), ", ", h("code", null, "account"), ", ",
+        h("code", null, "value"), " and ", h("code", null, "pay_in"), ". Dates as 2025-01-31, 2025.01.31 or 31.01.2025: a row counts for the month of its date. ",
+        "Semicolons, commas or tabs work, and so do amounts like 1.234,56 or 1,234.56. ",
         "Rows for a month and account that already exist replace the old values. New account names become new accounts."),
       h("div", { class: "form-actions" },
         h("label", { class: "file" }, "Choose a file…", h("input", { type: "file", accept: ".csv,.tsv,.txt,text/csv,text/plain", onchange: async (event) => {
@@ -798,7 +799,7 @@ function exportCard(store) {
   const rows = store.records.length;
   const months = new Set(store.records.map((r) => r.month)).size;
   return card("Export portfolio to CSV",
-    h("p", null, "Every monthly value with the columns ", h("code", null, "month"), ", ", h("code", null, "account"), ", ",
+    h("p", null, "Every monthly value with the columns ", h("code", null, "date"), " (the last day of the month), ", h("code", null, "account"), ", ",
       h("code", null, "value"), " and ", h("code", null, "pay_in"), ": opens in a spreadsheet, and the import above reads it back."),
     h("div", { class: "form-actions" },
       h("button", { type: "button", disabled: rows === 0, onclick: () => {

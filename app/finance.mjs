@@ -298,24 +298,33 @@ export function currentMonth(date = new Date()) {
   return monthFromIndex(date.getFullYear() * 12 + date.getMonth());
 }
 
-// Reads "2026-10", "2026-10-31", "2026/10", "10/2026", "10.2026",
-// "31.10.2026" or "10/31/2026"-free formats; returns "YYYY-MM" or null.
-export function parseMonth(text) {
+export function daysInMonth(month) {
+  return new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
+}
+
+// Reads a date as "2026-10-31", "2026.10.31" or "31.10.2026" (day and
+// month may have one digit). Returns "YYYY-MM-DD", or null for any other
+// format or a day the month does not have.
+export function parseDate(text) {
   const s = String(text ?? "").trim();
   let year;
   let month;
+  let day;
   let m;
-  if ((m = /^([0-9]{4})[-/.]([0-9]{1,2})(?:[-/.]([0-9]{1,2}))?$/.exec(s))) {
-    [year, month] = [m[1], m[2]];
-  } else if ((m = /^(?:([0-9]{1,2})[./-])?([0-9]{1,2})[./-]([0-9]{4})$/.exec(s))) {
-    [year, month] = [m[3], m[2]];
+  if ((m = /^([0-9]{4})([-.])([0-9]{1,2})\2([0-9]{1,2})$/.exec(s))) {
+    [year, month, day] = [m[1], m[3], m[4]];
+  } else if ((m = /^([0-9]{1,2})\.([0-9]{1,2})\.([0-9]{4})$/.exec(s))) {
+    [day, month, year] = [m[1], m[2], m[3]];
   } else {
     return null;
   }
   const y = Number(year);
   const mo = Number(month);
+  const d = Number(day);
   if (mo < 1 || mo > 12 || y < 1900 || y > 2200) return null;
-  return `${year}-${String(mo).padStart(2, "0")}`;
+  const ym = `${year}-${String(mo).padStart(2, "0")}`;
+  if (d < 1 || d > daysInMonth(ym)) return null;
+  return `${ym}-${String(d).padStart(2, "0")}`;
 }
 
 // ---------------------------------------------------------------- metrics
@@ -524,7 +533,7 @@ export function deleteCategory(store, kind, name) {
 // ---------------------------------------------------------------- CSV import
 
 const COLUMN_NAMES = {
-  month: ["month", "date"],
+  date: ["date"],
   account: ["account", "broker"],
   value: ["value"],
   payIn: ["payin", "payins", "deposit", "deposits"],
@@ -582,8 +591,8 @@ export function parseCsv(text) {
   return { delimiter, rows: rows.filter((r) => r.fields.some((f) => f.trim() !== "")) };
 }
 
-// Checks CSV text with the columns month, account, value and (optional)
-// pay_in. Returns { errors, entries, newAccounts, added, replaced }; import
+// Checks CSV text with the columns date, account, value and (optional)
+// pay_in. A row counts for the month of its date. Returns { errors, entries, newAccounts, added, replaced }; import
 // only when errors is empty.
 export function planImport(store, text) {
   const errors = [];
@@ -596,9 +605,10 @@ export function planImport(store, text) {
     const at = header.findIndex((h) => names.includes(h));
     if (at !== -1) column[key] = at;
   }
-  const missing = ["month", "account", "value"].filter((key) => !(key in column));
+  const missing = ["date", "account", "value"].filter((key) => !(key in column));
   if (missing.length > 0) {
-    const message = `The first line must name the columns month, account, value and pay_in (missing: ${missing.join(", ")})`;
+    let message = `The first line must name the columns date, account, value and pay_in (missing: ${missing.join(", ")})`;
+    if (missing.includes("date") && header.includes("month")) message += ". The month column is now date, with a whole date such as 2026-10-31";
     return { errors: [{ line: rows[0].line, message }], entries: [], newAccounts: [], added: 0, replaced: 0 };
   }
 
@@ -612,12 +622,13 @@ export function planImport(store, text) {
       errors.push({ line, message });
       continue;
     }
-    const month = parseMonth(fields[column.month]);
+    const date = parseDate(fields[column.date]);
+    const month = date?.slice(0, 7);
     const accountName = fields[column.account].trim();
     const value = parseMoney(fields[column.value]);
     const payInText = column.payIn === undefined ? "" : fields[column.payIn].trim();
     const payIn = payInText === "" ? { ok: true, cents: 0 } : parseMoney(payInText);
-    if (!month) errors.push({ line, message: `"${fields[column.month]}" is not a month (use 2026-10)` });
+    if (!month) errors.push({ line, message: `"${fields[column.date].trim()}" is not a date (use 2026-10-31, 2026.10.31 or 31.10.2026)` });
     if (accountName === "") errors.push({ line, message: "The account is empty" });
     if (!value.ok) errors.push({ line, message: `Value: ${value.error}` });
     else if (value.cents < 0) errors.push({ line, message: "Value: must not be negative" });
@@ -663,7 +674,7 @@ export function applyImport(store, plan) {
 // ---------------------------------------------------------------- CSV export
 
 // Every monthly value as CSV in the format planImport reads, so an export
-// can be imported again. Amounts have two decimals and no thousands
+// can be imported again. The date is the last day of the month. Amounts have two decimals and no thousands
 // separators. With decimal "," the columns are separated by semicolons, as
 // spreadsheets with a decimal comma expect.
 export function exportCsv(store, { decimal = "." } = {}) {
@@ -674,9 +685,9 @@ export function exportCsv(store, { decimal = "." } = {}) {
     return `${cents < 0 ? "-" : ""}${Math.floor(abs / 100)}${decimal}${String(abs % 100).padStart(2, "0")}`;
   };
   const field = (text) => (/[";,\t\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text);
-  const lines = [["month", "account", "value", "pay_in"].join(delimiter)];
+  const lines = [["date", "account", "value", "pay_in"].join(delimiter)];
   for (const r of sortRecords(store, [...store.records])) {
-    lines.push([r.month, field(names.get(r.account)), amount(r.value), amount(r.payIn)].join(delimiter));
+    lines.push([`${r.month}-${daysInMonth(r.month)}`, field(names.get(r.account)), amount(r.value), amount(r.payIn)].join(delimiter));
   }
   return lines.join("\n") + "\n";
 }

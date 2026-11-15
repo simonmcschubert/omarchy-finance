@@ -66,19 +66,29 @@ test("parsePercent takes up to the given number of decimals", () => {
   assert.equal(F.parsePercent(".", six).ok, false);
 });
 
-test("parseMonth reads common month and date formats", () => {
+test("parseDate reads YYYY-MM-DD, YYYY.MM.DD and DD.MM.YYYY", () => {
   const cases = {
-    "2026-10": "2026-10",
-    "2026-1": "2026-01",
-    "2026-10-31": "2026-10",
-    "2026/10": "2026-10",
-    "10/2026": "2026-10",
-    "10.2026": "2026-10",
-    "31.10.2026": "2026-10",
-    "1.3.2025": "2025-03",
+    "2026-10-31": "2026-10-31",
+    "2026.10.31": "2026-10-31",
+    "31.10.2026": "2026-10-31",
+    " 2026-1-5 ": "2026-01-05",
+    "1.3.2025": "2025-03-01",
+    "29.02.2024": "2024-02-29",
   };
-  for (const [text, month] of Object.entries(cases)) assert.equal(F.parseMonth(text), month, text);
-  for (const text of ["2026-13", "13/2026", "10/31/2026", "Oct 2026", "", "2026"]) assert.equal(F.parseMonth(text), null, text);
+  for (const [text, date] of Object.entries(cases)) assert.equal(F.parseDate(text), date, text);
+  const wrong = [
+    "2026-10", "10.2026", "10/2026", // a month without a day
+    "2026/10/31", "10/31/2026", "31-10-2026", "2026-10.31", "Oct 31 2026", "", "2026",
+    "2026-13-01", "32.10.2026", "31.11.2026", "29.02.2026", "0.10.2026", "31.10.1899",
+  ];
+  for (const text of wrong) assert.equal(F.parseDate(text), null, text);
+});
+
+test("daysInMonth", () => {
+  assert.equal(F.daysInMonth("2026-01"), 31);
+  assert.equal(F.daysInMonth("2026-02"), 28);
+  assert.equal(F.daysInMonth("2024-02"), 29);
+  assert.equal(F.daysInMonth("2026-11"), 30);
 });
 
 test("month arithmetic", () => {
@@ -229,9 +239,9 @@ test("store changes leave the original untouched", () => {
 });
 
 test("parseCsv handles delimiters and quotes", () => {
-  assert.deepEqual(F.parseCsv('month;account;value\n2026-10;"A; B";"1.234,56"\r\n\n').rows, [
-    { line: 1, fields: ["month", "account", "value"] },
-    { line: 2, fields: ["2026-10", "A; B", "1.234,56"] },
+  assert.deepEqual(F.parseCsv('date;account;value\n2026-10-31;"A; B";"1.234,56"\r\n\n').rows, [
+    { line: 1, fields: ["date", "account", "value"] },
+    { line: 2, fields: ["2026-10-31", "A; B", "1.234,56"] },
   ]);
   assert.equal(F.parseCsv("a\tb\tc\n1\t2\t3").delimiter, "\t");
   assert.deepEqual(F.parseCsv('a,b\n"say ""hi""",2').rows[1].fields, ['say "hi"', "2"]);
@@ -243,10 +253,10 @@ test("planImport and applyImport: German semicolon file", () => {
   s = F.saveMonth(s, "2026-01", [{ account: tr, value: 1, payIn: 0 }]);
 
   const csv = [
-    "Month;Account;Value;Pay-in",
-    "2026-01;trade republic;12.345,67;500",
-    "01.02.2026;Trade Republic;13.000;500,00",
-    "2026-02;ING;8.000;",
+    "Date;Account;Value;Pay-in",
+    "31.01.2026;trade republic;12.345,67;500",
+    "2026.02.01;Trade Republic;13.000;500,00",
+    "2026-02-28;ING;8.000;",
   ].join("\n");
   const plan = F.planImport(s, csv);
   assert.deepEqual(plan.errors, []);
@@ -266,21 +276,27 @@ test("planImport and applyImport: German semicolon file", () => {
 
 test("planImport reports every problem with its line", () => {
   const csv = [
-    "month,account,value,pay_in",
-    "2026-13,A,1,0",
-    "2026-10,,1,0",
-    "2026-10,A,x,0",
-    "2026-10,A,-5,0",
-    "2026-10,A,1,0",
-    "2026-10,a,2,0",
-    "2026-11,A,1,234,56,0",
+    "date,account,value,pay_in",
+    "31.02.2026,A,1,0",
+    "2026-10-31,,1,0",
+    "2026-10-31,A,x,0",
+    "2026-10-31,A,-5,0",
+    "2026-10-31,A,1,0",
+    "2026-10-15,a,2,0",
+    "2026-11-30,A,1,234,56,0",
+    "2026-12,A,1,0",
   ].join("\n");
   const { errors } = F.planImport(F.emptyStore(), csv);
-  assert.deepEqual(errors.map((e) => e.line), [2, 3, 4, 5, 7, 8]);
+  assert.deepEqual(errors.map((e) => e.line), [2, 3, 4, 5, 7, 8, 9]);
+  assert.match(errors[0].message, /"31.02.2026" is not a date/);
   assert.match(errors[4].message, /already on line 6/);
   assert.match(errors[5].message, /decimal comma/);
+  assert.match(errors[6].message, /"2026-12" is not a date/);
 
-  assert.match(F.planImport(F.emptyStore(), "date,broker\n2026-10,A").errors[0].message, /missing: value/);
+  assert.match(F.planImport(F.emptyStore(), "date,broker\n2026-10-31,A").errors[0].message, /missing: value/);
+  const old = F.planImport(F.emptyStore(), "month,account,value\n2026-10,A,1").errors[0].message;
+  assert.match(old, /missing: date/);
+  assert.match(old, /month column is now date/);
   assert.match(F.planImport(F.emptyStore(), "").errors[0].message, /empty/);
   assert.throws(() => F.applyImport(F.emptyStore(), F.planImport(F.emptyStore(), csv)));
 });
@@ -359,14 +375,14 @@ test("exportCsv writes what planImport reads", () => {
   s = F.saveMonth(s, "2026-01", [{ account: ing, value: 7, payIn: 0 }, { account: tr, value: 100000, payIn: 50000 }]);
 
   assert.equal(F.exportCsv(s), [
-    "month,account,value,pay_in",
-    "2026-01,Trade Republic,1000.00,500.00",
-    '2026-01,"ING; ""Extra""",0.07,0.00',
-    "2026-02,Trade Republic,1234567.89,-50.05",
+    "date,account,value,pay_in",
+    "2026-01-31,Trade Republic,1000.00,500.00",
+    '2026-01-31,"ING; ""Extra""",0.07,0.00',
+    "2026-02-28,Trade Republic,1234567.89,-50.05",
     "",
   ].join("\n"));
-  assert.equal(F.exportCsv(s, { decimal: "," }).split("\n")[3], "2026-02;Trade Republic;1234567,89;-50,05");
-  assert.equal(F.exportCsv(F.emptyStore()), "month,account,value,pay_in\n");
+  assert.equal(F.exportCsv(s, { decimal: "," }).split("\n")[3], "2026-02-28;Trade Republic;1234567,89;-50,05");
+  assert.equal(F.exportCsv(F.emptyStore()), "date,account,value,pay_in\n");
 
   for (const decimal of [".", ","]) {
     const plan = F.planImport(s, F.exportCsv(s, { decimal }));
