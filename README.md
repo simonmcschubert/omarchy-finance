@@ -45,9 +45,10 @@ The data file stays.
 ## Use
 
 - **Expenses** and **Income**: regular payments with a name, a category, an
-  amount, and how often they are paid (monthly, every 2 months, quarterly,
-  every 6 months, yearly). Enter income after tax. Only current amounts: when
-  the rent goes up, edit it and the numbers change.
+  amount, and how often they are paid, in months (1 monthly, 3 quarterly,
+  12 yearly, 24 every two years, or any other number up to 120). Enter income
+  after tax. Only current amounts: when the rent goes up, edit it and the
+  numbers change.
 - **Portfolio**: broker accounts, and per month each account's value at month
   end and what was paid in that month (negative for withdrawals). An account
   without a value in a month counts with its last value.

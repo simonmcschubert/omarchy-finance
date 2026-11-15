@@ -30,6 +30,7 @@ const INTERVALS = [
   [3, "Quarterly"],
   [6, "Every 6 months"],
   [12, "Yearly"],
+  [24, "Every 2 years"],
 ];
 const intervalLabel = (n) => INTERVALS.find(([v]) => v === n)?.[1] ?? `Every ${n} months`;
 
@@ -391,6 +392,7 @@ function viewItems(kind) {
       if (name === "") error = "Enter a name.";
       else if (!amount.ok) error = `Amount: ${amount.error}.`;
       else if (amount.cents <= 0) error = "Amount: must be more than zero.";
+      else if (!Number.isInteger(everyMonths) || everyMonths < 1 || everyMonths > 120) error = "Paid every: enter whole months from 1 to 120.";
       state.formError[kind] = error;
       if (error) {
         render();
@@ -406,9 +408,9 @@ function viewItems(kind) {
     h("label", null, "Category", h("input", { name: "category", list: listId, autocomplete: "off", value: editing?.category ?? "", placeholder: kind === "expenses" ? "Housing" : "Work" })),
     h("datalist", { id: listId }, F.categories(store, kind).map((c) => h("option", { value: c }))),
     h("label", null, kind === "income" ? "Amount (net)" : "Amount", h("input", { name: "amount", inputmode: "decimal", autocomplete: "off", required: true, value: editing ? inputMoney(editing.amount) : "", placeholder: "0,00" })),
-    h("label", null, "Paid",
-      h("select", { name: "everyMonths", value: String(editing?.everyMonths ?? 1) },
-        [...INTERVALS, ...(editing && !INTERVALS.some(([v]) => v === editing.everyMonths) ? [[editing.everyMonths, intervalLabel(editing.everyMonths)]] : [])].map(([v, label]) => h("option", { value: String(v) }, label)))),
+    h("label", null, "Paid every … months",
+      h("input", { name: "everyMonths", type: "number", min: 1, max: 120, step: 1, required: true, list: "intervals", value: String(editing?.everyMonths ?? 1) })),
+    h("datalist", { id: "intervals" }, INTERVALS.map(([v, label]) => h("option", { value: String(v), label }))),
     h("div", { class: "form-actions" },
       h("button", { type: "submit", class: "primary" }, editing ? "Save" : "Add"),
       editing ? h("button", { type: "button", onclick: () => { state.editing[kind] = null; state.formError[kind] = null; render(); } }, "Cancel") : null),
@@ -601,7 +603,13 @@ function viewPortfolio() {
   const plan = state.importPlan;
   const textarea = h("textarea", { id: "import-text", rows: 8, spellcheck: "false", "aria-label": "CSV text",
     placeholder: "month;account;value;pay_in\n2025-01;Trade Republic;12.345,67;500\n2025-01;ING;8.000;0",
-    oninput: (event) => { state.importText = event.target.value; state.importPlan = null; } });
+    oninput: (event) => {
+      // The checked rows no longer match the text: take back the Import button.
+      state.importText = event.target.value;
+      state.importPlan = null;
+      document.getElementById("import-go")?.remove();
+      document.getElementById("import-result")?.remove();
+    } });
   textarea.value = state.importText;
   const importCard = h("section", { class: "card" },
     h("details", { open: state.importText !== "" || null },
@@ -622,7 +630,8 @@ function viewPortfolio() {
       h("div", { class: "form-actions" },
         h("button", { type: "button", onclick: () => { state.importPlan = F.planImport(store, state.importText); render(); } }, "Check"),
         plan && plan.errors.length === 0 && plan.entries.length > 0
-          ? h("button", { type: "button", class: "primary", onclick: () => {
+          ? h("button", { id: "import-go", type: "button", class: "primary", onclick: () => {
+              if (state.importPlan !== plan) return;
               const count = plan.entries.length;
               const next = F.applyImport(store, plan);
               state.importText = "";
@@ -637,15 +646,15 @@ function viewPortfolio() {
 
 function importResult(plan) {
   if (plan.errors.length > 0) {
-    return h("div", { class: "import-result error", role: "alert" },
+    return h("div", { id: "import-result", class: "import-result error", role: "alert" },
       h("p", null, `Nothing imported. Fix ${plan.errors.length === 1 ? "this line" : `these ${plan.errors.length} problems`} and check again:`),
       h("ul", null, plan.errors.slice(0, 50).map((e) => h("li", null, e.line ? `Line ${e.line}: ${e.message}` : e.message))),
       plan.errors.length > 50 ? h("p", null, `…and ${plan.errors.length - 50} more.`) : null);
   }
-  if (plan.entries.length === 0) return h("div", { class: "import-result error", role: "alert" }, h("p", null, "There are no rows below the column names."));
+  if (plan.entries.length === 0) return h("div", { id: "import-result", class: "import-result error", role: "alert" }, h("p", null, "There are no rows below the column names."));
   const months = new Set(plan.entries.map((e) => e.month));
   const sorted = [...months].sort();
-  return h("div", { class: "import-result" },
+  return h("div", { id: "import-result", class: "import-result" },
     h("p", null, `${plan.entries.length} rows for ${months.size} ${months.size === 1 ? "month" : "months"} (${monthLabel(sorted[0])} to ${monthLabel(sorted.at(-1))}): `,
       `${plan.added} new`, plan.replaced ? `, ${plan.replaced} replace existing values` : "", "."),
     plan.newAccounts.length ? h("p", null, `New accounts: ${plan.newAccounts.join(", ")}.`) : null);
