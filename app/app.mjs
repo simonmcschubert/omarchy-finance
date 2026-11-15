@@ -10,6 +10,9 @@ import { startUpdates } from "./update.mjs";
 const locale = navigator.language || "de-DE";
 const percent = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 });
 const plain = new Intl.NumberFormat(locale, { maximumFractionDigits: 2, useGrouping: false });
+// The withdrawal rate takes more decimals than other numbers, e.g. 3.333333.
+const RATE_DECIMALS = 6;
+const plainRate = new Intl.NumberFormat(locale, { maximumFractionDigits: RATE_DECIMALS, useGrouping: false });
 // Only "," or ".", the two the CSV import reads.
 const decimalSign = plain.formatToParts(1.5).find((part) => part.type === "decimal")?.value === "," ? "," : ".";
 
@@ -341,7 +344,7 @@ function viewDashboard() {
     tile("Portfolio", m.portfolio === null ? "–" : money(m.portfolio),
       m.latestMonth ? `as of ${monthLabel(m.latestMonth)}` : h("a", { href: "#portfolio" }, "Add broker values")),
     tile("FI number", store.expenses.length ? money(m.fiNumber) : "–",
-      `${plain.format(m.multiple)} × yearly expenses (${plain.format(withdrawalRate)} % withdrawal rate)`),
+      `${plain.format(m.multiple)} × yearly expenses (${plainRate.format(withdrawalRate)} % withdrawal rate)`),
     tile("FI reached", m.fiProgress === null ? "–" : percent.format(m.fiProgress),
       m.fiProgress === null ? "needs expenses and a portfolio value" : m.fiProgress >= 1 ? "Financially independent" : `${money(m.fiNumber - m.portfolio)} to go`,
       progress),
@@ -647,11 +650,11 @@ function settingsForm(store) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const chosen = String(data.get("currency"));
-    const rate = F.parsePercent(data.get("withdrawalRate"));
+    const rate = F.parsePercent(data.get("withdrawalRate"), { decimals: RATE_DECIMALS });
     const buffer = F.parsePercent(data.get("bufferPercent"));
     let error = null;
     if (!F.isCurrency(chosen)) error = "Currency: choose one from the list.";
-    else if (!rate.ok || !(rate.value > 0 && rate.value <= 100)) error = "Withdrawal rate: enter a percentage above 0 and at most 100.";
+    else if (!rate.ok || !(rate.value > 0 && rate.value <= 100)) error = `Withdrawal rate: enter a percentage above 0 and at most 100, with up to ${RATE_DECIMALS} decimals.`;
     else if (!buffer.ok || !(buffer.value >= 0 && buffer.value <= 100)) error = "Buffer: enter a percentage from 0 to 100.";
     if (error) return showError(event.currentTarget, error);
     commit(F.saveSettings(store, { currency: chosen, withdrawalRate: rate.value, bufferPercent: buffer.value }), "Settings saved.");
@@ -659,7 +662,7 @@ function settingsForm(store) {
     h("label", null, "Currency",
       h("select", { name: "currency", value: code }, codes.sort().map((c) => h("option", { value: c }, `${c} – ${currencyName(c)}`)))),
     h("p", { class: "muted" }, "How amounts are shown. Changing it does not convert amounts already entered."),
-    h("label", null, "Safe withdrawal rate (%)", h("input", { name: "withdrawalRate", inputmode: "decimal", value: plain.format(withdrawalRate), required: true })),
+    h("label", null, "Safe withdrawal rate (%)", h("input", { name: "withdrawalRate", inputmode: "decimal", value: plainRate.format(withdrawalRate), required: true })),
     h("p", { class: "muted" }, "The share of the portfolio you plan to spend each year once financially independent. FI number = yearly expenses ÷ this rate: at 4 % that is 25 × yearly expenses. Many use 3 to 3.5 % for longer retirements or to allow for taxes."),
     h("label", null, "Buffer on expenses (%)", h("input", { name: "bufferPercent", inputmode: "decimal", value: plain.format(bufferPercent), required: true })),
     h("p", { class: "muted" }, "Added on top of regular expenses for irregular costs such as holidays and repairs."),
