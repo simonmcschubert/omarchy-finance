@@ -121,6 +121,10 @@ The data file stays.
 With less than 12 months of history, the average uses the months there
 are, and so do the gains, from the first month on.
 
+When last month has no values yet, the Portfolio tile says so ("Okt. 2026
+not entered yet", or how many months are missing) and links to the first
+month without values.
+
 The chart shows the portfolio value and the running total of pay-ins per
 month. **Up to FI number** scales it to the FI number and continues the
 value as a dotted projection until it gets there, the way Time to FI counts;

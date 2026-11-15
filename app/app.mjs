@@ -354,6 +354,10 @@ function viewDashboard() {
   const expenses = F.counted(store.expenses);
 
   const progress = m.fiProgress === null ? null : h("div", { class: "meter", role: "presentation" }, h("div", { class: "meter-fill" }));
+  // Opens the portfolio on the first month without values.
+  const missing = F.missingMonths(m.latestMonth);
+  const nudge = missing && h("a", { class: "tile-nudge", href: "#portfolio", onclick: () => { state.month = missing.from; } },
+    missing.count === 1 ? `${monthLabel(missing.from)} not entered yet` : `${missing.count} months not entered yet`);
 
   const tiles = h("div", { class: "tiles" },
     tile("Monthly income", store.income.length ? money(m.income) : "–",
@@ -369,7 +373,8 @@ function viewDashboard() {
     tile("Portfolio", m.portfolio === null ? "–" : money(m.portfolio),
       m.series.length >= 2
         ? `${signedMoney(m.portfolio - m.series.at(-2).value)} in ${monthLabel(m.latestMonth)} (${money(m.series.at(-1).payIn)} paid in)`
-        : m.latestMonth ? `as of ${monthLabel(m.latestMonth)}` : h("a", { href: "#portfolio" }, "Add broker values")),
+        : m.latestMonth ? `as of ${monthLabel(m.latestMonth)}` : h("a", { href: "#portfolio" }, "Add broker values"),
+      nudge),
     tile(`Gains, last ${m.gains === null || m.gains.months === 12 ? "12 months" : m.gains.months === 1 ? "month" : `${m.gains.months} months`}`,
       m.gains === null ? "–" : signedMoney(m.gains.gain),
       m.gains === null ? "needs values for two months" : m.gains.rate === null ? "change in value minus pay-ins" : `a return of ${percent.format(m.gains.rate)}, not counting pay-ins`),

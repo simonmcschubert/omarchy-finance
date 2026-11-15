@@ -252,6 +252,23 @@ main > div {
   font-size: 12px;
 }
 
+.tile-nudge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+/* A warning dot: the text says what is missing. */
+.tile-nudge::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--yellow);
+}
+
 .meter {
   height: 6px;
   border-radius: 3px;

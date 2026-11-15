@@ -455,6 +455,16 @@ export function gains(series, window = 12) {
   return { gain, months, rate: invested > 0 ? gain / invested : null };
 }
 
+// The months after `latest` up to last month: values are entered once a
+// month is over, so this month never counts. Returns { from, to, count },
+// or null when last month has values, or no month has.
+export function missingMonths(latest, now = currentMonth()) {
+  const to = addMonths(now, -1);
+  if (!latest || latest >= to) return null;
+  const from = addMonths(latest, 1);
+  return { from, to, count: monthIndex(to) - monthIndex(from) + 1 };
+}
+
 // Current numbers for the dashboard. Amounts are in cents and may carry
 // fractions of a cent; round when displaying. Ratios are fractions (0.25).
 export function metrics(store) {
