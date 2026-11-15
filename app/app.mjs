@@ -7,29 +7,45 @@ import { startUpdates } from "./update.mjs";
 
 // ---------------------------------------------------------------- formatting
 
+// Dates and currency names follow the system language. Numbers follow the
+// number format in settings, written as German or US English write them,
+// currency and percent signs included: "1.234,56 €" or "€1,234.56".
 const locale = navigator.language || "de-DE";
-const percent = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 });
-const plain = new Intl.NumberFormat(locale, { maximumFractionDigits: 2, useGrouping: false });
+const NUMBER_LOCALES = { "1.000.000,00": "de-DE", "1,000,000.00": "en-US" };
 // The withdrawal rate takes more decimals than other numbers, e.g. 3.333333.
 const RATE_DECIMALS = 6;
-const plainRate = new Intl.NumberFormat(locale, { maximumFractionDigits: RATE_DECIMALS, useGrouping: false });
-// Only "," or ".", the two the CSV import reads.
-const decimalSign = plain.formatToParts(1.5).find((part) => part.type === "decimal")?.value === "," ? "," : ".";
+// The CSV export writes numbers the way spreadsheets on this system read
+// them, so it follows the system language, not the number format. Only ","
+// or ".", the two the CSV import reads.
+const decimalSign = new Intl.NumberFormat(locale).formatToParts(1.5).find((part) => part.type === "decimal")?.value === "," ? "," : ".";
 
-// Money formats for the currency in settings; render() switches them.
-let currency = null;
+// Number formats for the currency and number format in settings; render()
+// switches them.
+let formatsFor = null;
+let percent;
+let percentUnit;
+let plain;
+let plainRate;
+let zero;
 let whole;
 let exact;
 let axis;
-function useCurrency(code) {
-  if (code === currency) return;
-  currency = code;
-  whole = new Intl.NumberFormat(locale, { style: "currency", currency: code, maximumFractionDigits: 0 });
+function useFormats({ currency: code, numberFormat }) {
+  if (formatsFor === `${code} ${numberFormat}`) return;
+  formatsFor = `${code} ${numberFormat}`;
+  const numbers = NUMBER_LOCALES[numberFormat];
+  percent = new Intl.NumberFormat(numbers, { style: "percent", maximumFractionDigits: 1 });
+  // For settings that are in percent already: 4 is "4 %" or "4%".
+  percentUnit = new Intl.NumberFormat(numbers, { style: "unit", unit: "percent", maximumFractionDigits: RATE_DECIMALS });
+  plain = new Intl.NumberFormat(numbers, { maximumFractionDigits: 2, useGrouping: false });
+  plainRate = new Intl.NumberFormat(numbers, { maximumFractionDigits: RATE_DECIMALS, useGrouping: false });
+  zero = new Intl.NumberFormat(numbers, { minimumFractionDigits: 2 }).format(0);
+  whole = new Intl.NumberFormat(numbers, { style: "currency", currency: code, maximumFractionDigits: 0 });
   // Two decimals for every currency, since amounts are stored in hundredths.
-  exact = new Intl.NumberFormat(locale, { style: "currency", currency: code, minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  axis = new Intl.NumberFormat(locale, { style: "currency", currency: code, notation: "compact", maximumFractionDigits: 1 });
+  exact = new Intl.NumberFormat(numbers, { style: "currency", currency: code, minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  axis = new Intl.NumberFormat(numbers, { style: "currency", currency: code, notation: "compact", maximumFractionDigits: 1 });
 }
-useCurrency(F.DEFAULT_SETTINGS.currency);
+useFormats(F.DEFAULT_SETTINGS);
 
 const money = (cents) => whole.format(Math.round(cents / 100));
 const moneyExact = (cents) => exact.format(cents / 100);
@@ -267,7 +283,7 @@ function viewFromHash() {
 
 function render() {
   resizeObserver?.disconnect();
-  if (state.store) useCurrency(state.store.settings.currency);
+  if (state.store) useFormats(state.store.settings);
   const nav = document.getElementById("nav");
   nav.replaceChildren(
     ...VIEWS.map(([view, label], i) => h("a", {
@@ -338,7 +354,7 @@ function viewDashboard() {
       store.income.length ? `net, ${money(m.income * 12)} a year` : h("a", { href: "#income" }, "Add income")),
     tile("Monthly expenses", expenses.length ? money(m.expenses) : "–",
       expenses.length
-        ? `incl. ${plain.format(bufferPercent)} % buffer (${money(m.buffer)})`
+        ? `incl. ${percentUnit.format(bufferPercent)} buffer (${money(m.buffer)})`
         : h("a", { href: "#expenses" }, store.expenses.length ? "All expenses are inactive" : "Add expenses")),
     tile("Investment rate", m.investmentRate === null ? "–" : percent.format(m.investmentRate),
       m.payIn === null
@@ -347,7 +363,7 @@ function viewDashboard() {
     tile("Portfolio", m.portfolio === null ? "–" : money(m.portfolio),
       m.latestMonth ? `as of ${monthLabel(m.latestMonth)}` : h("a", { href: "#portfolio" }, "Add broker values")),
     tile("FI number", expenses.length ? money(m.fiNumber) : "–",
-      `${plain.format(m.multiple)} × yearly expenses (${plainRate.format(withdrawalRate)} % withdrawal rate)`),
+      `${plain.format(m.multiple)} × yearly expenses (${percentUnit.format(withdrawalRate)} withdrawal rate)`),
     tile("FI reached", m.fiProgress === null ? "–" : percent.format(m.fiProgress),
       m.fiProgress === null ? "needs expenses and a portfolio value" : m.fiProgress >= 1 ? "Financially independent" : `${money(m.fiNumber - m.portfolio)} to go`,
       progress),
@@ -441,7 +457,7 @@ function viewItems(kind) {
     const buffer = (monthlyTotal * store.settings.bufferPercent) / 100;
     summary = h("dl", { class: "summary" },
       h("div", null, h("dt", null, "Regular expenses"), h("dd", { class: "num" }, `${money(monthlyTotal)} / month`)),
-      h("div", null, h("dt", null, `Buffer, ${plain.format(store.settings.bufferPercent)} %`), h("dd", { class: "num" }, `${money(buffer)} / month`)),
+      h("div", null, h("dt", null, `Buffer, ${percentUnit.format(store.settings.bufferPercent)}`), h("dd", { class: "num" }, `${money(buffer)} / month`)),
       h("div", null, h("dt", null, "Total"), h("dd", { class: "num strong" }, `${money(monthlyTotal + buffer)} / month · ${money((monthlyTotal + buffer) * 12)} / year`)),
       inactive.length
         ? h("div", null, h("dt", null, "Inactive, not counted"), h("dd", { class: "num muted" }, `${money(monthly(inactive))} / month`))
@@ -480,7 +496,7 @@ function viewItems(kind) {
       h("select", { name: "category", value: editing?.category ?? "" },
         h("option", { value: "" }, "No category"),
         categories.map((c) => h("option", { value: c }, c)))),
-    h("label", null, kind === "income" ? "Amount (net)" : "Amount", h("input", { name: "amount", inputmode: "decimal", autocomplete: "off", required: true, value: editing ? inputMoney(editing.amount) : "", placeholder: "0,00" })),
+    h("label", null, kind === "income" ? "Amount (net)" : "Amount", h("input", { name: "amount", inputmode: "decimal", autocomplete: "off", required: true, value: editing ? inputMoney(editing.amount) : "", placeholder: zero })),
     h("label", null, "Paid every … months",
       h("input", { name: "everyMonths", type: "number", min: 1, max: 120, step: 1, required: true, list: "intervals", value: String(editing?.everyMonths ?? 1) })),
     h("datalist", { id: "intervals" }, INTERVALS.map(([v, label]) => h("option", { value: String(v), label }))),
@@ -604,9 +620,9 @@ function viewPortfolio() {
             return h("tr", null,
               h("th", { scope: "row" }, account.name),
               h("td", null, h("input", { name: `value-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} value`,
-                value: record ? inputMoney(record.value) : "", placeholder: before ? `last: ${inputMoney(before.value)}` : "0,00" })),
+                value: record ? inputMoney(record.value) : "", placeholder: before ? `last: ${inputMoney(before.value)}` : zero })),
               h("td", null, h("input", { name: `payin-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} pay-in`,
-                value: record && record.payIn !== 0 ? inputMoney(record.payIn) : "", placeholder: "0,00" })));
+                value: record && record.payIn !== 0 ? inputMoney(record.payIn) : "", placeholder: zero })));
           })))),
     store.accounts.length
       ? h("div", { class: "form-actions" },
@@ -665,25 +681,30 @@ function viewSettings() {
 }
 
 function settingsForm(store) {
-  const { withdrawalRate, bufferPercent, currency: code } = store.settings;
+  const { withdrawalRate, bufferPercent, currency: code, numberFormat } = store.settings;
   const codes = Intl.supportedValuesOf("currency");
   if (!codes.includes(code)) codes.push(code);
   return h("form", { class: "settings-form", onsubmit: (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const chosen = String(data.get("currency"));
+    const format = String(data.get("numberFormat"));
     const rate = F.parsePercent(data.get("withdrawalRate"), { decimals: RATE_DECIMALS });
     const buffer = F.parsePercent(data.get("bufferPercent"));
     let error = null;
     if (!F.isCurrency(chosen)) error = "Currency: choose one from the list.";
+    else if (!F.NUMBER_FORMATS.includes(format)) error = "Number format: choose one from the list.";
     else if (!rate.ok || !(rate.value > 0 && rate.value <= 100)) error = `Withdrawal rate: enter a percentage above 0 and at most 100, with up to ${RATE_DECIMALS} decimals.`;
     else if (!buffer.ok || !(buffer.value >= 0 && buffer.value <= 100)) error = "Buffer: enter a percentage from 0 to 100.";
     if (error) return showError(event.currentTarget, error);
-    commit(F.saveSettings(store, { currency: chosen, withdrawalRate: rate.value, bufferPercent: buffer.value }), "Settings saved.");
+    commit(F.saveSettings(store, { currency: chosen, numberFormat: format, withdrawalRate: rate.value, bufferPercent: buffer.value }), "Settings saved.");
   } },
     h("label", null, "Currency",
       h("select", { name: "currency", value: code }, codes.sort().map((c) => h("option", { value: c }, `${c} – ${currencyName(c)}`)))),
     h("p", { class: "muted" }, "How amounts are shown. Changing it does not convert amounts already entered."),
+    h("label", null, "Number format",
+      h("select", { name: "numberFormat", value: numberFormat }, F.NUMBER_FORMATS.map((f) => h("option", { value: f }, f)))),
+    h("p", { class: "muted" }, "How amounts and percentages are shown. Amounts can be typed either way."),
     h("label", null, "Safe withdrawal rate (%)", h("input", { name: "withdrawalRate", inputmode: "decimal", value: plainRate.format(withdrawalRate), required: true })),
     h("p", { class: "muted" }, "The share of the portfolio you plan to spend each year once financially independent. FI number = yearly expenses ÷ this rate: at 4 % that is 25 × yearly expenses. Many use 3 to 3.5 % for longer retirements or to allow for taxes."),
     h("label", null, "Buffer on expenses (%)", h("input", { name: "bufferPercent", inputmode: "decimal", value: plain.format(bufferPercent), required: true })),

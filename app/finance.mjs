@@ -4,11 +4,14 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 3;
+export const VERSION = 4;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
-export const DEFAULT_SETTINGS = Object.freeze({ withdrawalRate: 4, bufferPercent: 10, currency: "EUR" });
+// How numbers are shown, named by how they write a million.
+export const NUMBER_FORMATS = Object.freeze(["1.000.000,00", "1,000,000.00"]);
+
+export const DEFAULT_SETTINGS = Object.freeze({ withdrawalRate: 4, bufferPercent: 10, currency: "EUR", numberFormat: NUMBER_FORMATS[0] });
 
 // What a new data file starts with; categories can be changed in Settings.
 export const STARTER_CATEGORIES = Object.freeze({
@@ -31,7 +34,7 @@ export function emptyStore() {
 // ---------------------------------------------------------------- file format
 
 const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records"];
-const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency"];
+const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active"];
 const ACCOUNT_KEYS = ["id", "name"];
@@ -101,11 +104,18 @@ function upgradeFromVersion1(value) {
 
 // Version 2 could not set an expense inactive: every expense was active.
 function upgradeFromVersion2(value) {
-  const next = { ...value, version: VERSION };
+  const next = { ...value, version: 3 };
   if (Array.isArray(value.expenses)) {
     next.expenses = value.expenses.map((item) => (isObject(item) ? { ...item, active: true } : item));
   }
   return next;
+}
+
+// Version 3 had no number format: numbers were shown as the system language
+// writes them. Upgraded files get the default.
+function upgradeFromVersion3(value) {
+  checkKeys(value.settings, ["withdrawalRate", "bufferPercent", "currency"], "settings");
+  return { ...value, version: 4, settings: { ...value.settings, numberFormat: DEFAULT_SETTINGS.numberFormat } };
 }
 
 // Checks a parsed data file. Returns { ok: true, store } or { ok: false, error }.
@@ -115,6 +125,7 @@ export function parseStore(value) {
   try {
     if (isObject(value) && value.version === 1) value = upgradeFromVersion1(value);
     if (isObject(value) && value.version === 2) value = upgradeFromVersion2(value);
+    if (isObject(value) && value.version === 3) value = upgradeFromVersion3(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -122,7 +133,7 @@ export function parseStore(value) {
     if (value.version !== VERSION) throw new Error(`unsupported version ${JSON.stringify(value.version)}`);
 
     checkKeys(value.settings, SETTINGS_KEYS, "settings");
-    const { withdrawalRate, bufferPercent, currency } = value.settings;
+    const { withdrawalRate, bufferPercent, currency, numberFormat } = value.settings;
     if (typeof withdrawalRate !== "number" || !(withdrawalRate > 0 && withdrawalRate <= 100)) {
       throw new Error("settings.withdrawalRate must be above 0 and at most 100");
     }
@@ -130,6 +141,9 @@ export function parseStore(value) {
       throw new Error("settings.bufferPercent must be between 0 and 100");
     }
     if (!isCurrency(currency)) throw new Error("settings.currency must be a three-letter code such as EUR");
+    if (!NUMBER_FORMATS.includes(numberFormat)) {
+      throw new Error(`settings.numberFormat must be ${NUMBER_FORMATS.map((f) => JSON.stringify(f)).join(" or ")}`);
+    }
 
     checkKeys(value.categories, KINDS, "categories");
     for (const kind of KINDS) {
