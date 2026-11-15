@@ -112,6 +112,29 @@ test("metrics: income, expenses with buffer, FI number", () => {
   assert.equal(m.fiProgress, null);
 });
 
+test("inactive expenses count nowhere until they are active again", () => {
+  const rent = { id: "e1", name: "Rent", category: "Housing", amount: 1000 * EUR, everyMonths: 1, active: true };
+  const gym = { id: "e2", name: "Gym", category: "Leisure", amount: 600 * EUR, everyMonths: 12, active: false };
+  const s = store({
+    settings: { withdrawalRate: 4, bufferPercent: 10, currency: "EUR" },
+    expenses: [rent, gym],
+    accounts: [{ id: "a", name: "A" }],
+    records: [{ month: "2026-10", account: "a", value: 33000 * EUR, payIn: 0 }],
+  });
+  const m = F.metrics(s);
+  assert.equal(m.baseExpenses, 1000 * EUR);
+  assert.equal(m.buffer, 100 * EUR);
+  assert.equal(m.fiNumber, 1100 * 12 * 25 * EUR);
+  assert.equal(m.fiProgress, 33000 / 330000);
+  assert.deepEqual(F.counted(s.expenses), [rent]);
+  assert.deepEqual(F.counted(s.income), []);
+  assert.equal(F.parseStore(JSON.parse(JSON.stringify(s))).ok, true);
+
+  const again = F.saveItem(s, "expenses", { ...gym, active: true });
+  assert.equal(F.metrics(again).baseExpenses, 1050 * EUR);
+  assert.equal(s.expenses[1].active, false, "the original is untouched");
+});
+
 test("portfolio: accounts keep their last value through gaps", () => {
   const s = store({
     accounts: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
@@ -178,7 +201,8 @@ test("byCategory groups and sorts by monthly total", () => {
 
 test("parseStore accepts what the app writes and refuses unknown fields", () => {
   let s = F.emptyStore();
-  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1 });
+  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, active: true });
+  s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1 });
   s = F.saveAccount(s, null, "Broker").store;
   s = F.saveMonth(s, "2026-10", [{ account: s.accounts[0].id, value: 5, payIn: -2 }]);
   const roundTrip = JSON.parse(JSON.stringify(s));
@@ -187,7 +211,7 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
 
   const broken = [
     [{ ...roundTrip, extra: 1 }, /unknown field "extra"/],
-    [{ ...roundTrip, version: 3 }, /newer version of Finance/],
+    [{ ...roundTrip, version: F.VERSION + 1 }, /newer version of Finance/],
     [{ ...roundTrip, version: "2" }, /unsupported version/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, withdrawalRate: 0 } }, /withdrawalRate/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, currency: "eur" } }, /currency/],
@@ -197,6 +221,9 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], category: "Nope" }] }, /not in categories.expenses/],
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], amount: 1.5 }] }, /amount/],
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], note: "x" }] }, /unknown field "note"/],
+    [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], active: "yes" }] }, /active must be true or false/],
+    [{ ...roundTrip, expenses: [{ id: "e", name: "Rent", category: "", amount: 100, everyMonths: 1 }] }, /missing "active"/],
+    [{ ...roundTrip, income: [{ ...roundTrip.income[0], active: false }] }, /unknown field "active"/],
     [{ ...roundTrip, records: [{ ...roundTrip.records[0], account: "nope" }] }, /unknown account/],
     [{ ...roundTrip, records: [roundTrip.records[0], roundTrip.records[0]] }, /repeats a month/],
     [{ ...roundTrip, records: [{ ...roundTrip.records[0], value: -1 }] }, /value/],
@@ -306,12 +333,41 @@ test("a version 1 file is upgraded: euros, and the categories its items use", ()
   assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR" });
   assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: ["Work"] });
   assert.deepEqual(s.expenses.map((e) => e.category), ["Housing", "Housing", "", "Car"]);
+  assert.deepEqual(s.expenses.map((e) => e.active), [true, true, true, true], "every expense was active");
+  assert.equal("active" in s.income[0], false);
   assert.deepEqual(s.records, v1.records);
   assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records"]);
   assert.equal(v1.expenses[1].category, "housing", "the parsed value is left alone");
 
   assert.match(F.parseStore({ ...v1, extra: 1 }).error, /unknown field "extra"/);
   assert.match(F.parseStore({ ...v1, settings: { ...v1.settings, currency: "EUR" } }).error, /unknown field "currency"/);
+});
+
+test("a version 2 file is upgraded: every expense is active", () => {
+  const v2 = {
+    version: 2,
+    settings: { withdrawalRate: 4, bufferPercent: 10, currency: "USD" },
+    categories: { expenses: ["Housing"], income: ["Work"] },
+    expenses: [
+      { id: "e1", name: "Rent", category: "Housing", amount: 100, everyMonths: 1 },
+      { id: "e2", name: "Gym", category: "", amount: 30, everyMonths: 12 },
+    ],
+    income: [{ id: "i1", name: "Salary", category: "Work", amount: 300, everyMonths: 1 }],
+    accounts: [],
+    records: [],
+  };
+  const result = F.parseStore(v2);
+  assert.equal(result.ok, true, result.error);
+  const s = result.store;
+  assert.equal(s.version, F.VERSION);
+  assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true })));
+  assert.deepEqual(s.income, v2.income);
+  assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records"]);
+  assert.equal("active" in v2.expenses[0], false, "the parsed value is left alone");
+  assert.equal(F.metrics(s).baseExpenses, 100 + 30 / 12);
+
+  assert.match(F.parseStore({ ...v2, extra: 1 }).error, /unknown field "extra"/);
+  assert.match(F.parseStore({ ...v2, expenses: [{ ...v2.expenses[0], note: "x" }] }).error, /unknown field "note"/);
 });
 
 test("a new store starts with a few categories", () => {
@@ -324,7 +380,7 @@ test("a new store starts with a few categories", () => {
 
 test("categories: add, rename with their items, delete", () => {
   let s = { ...F.emptyStore(), categories: { expenses: ["Housing"], income: ["Work"] } };
-  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1 });
+  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, active: true });
   s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1 });
 
   const added = F.saveCategory(s, "expenses", null, "  Car ");
