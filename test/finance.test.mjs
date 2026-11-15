@@ -126,7 +126,7 @@ test("inactive expenses count nowhere until they are active again", () => {
   const rent = { id: "e1", name: "Rent", category: "Housing", amount: 1000 * EUR, everyMonths: 1, active: true };
   const gym = { id: "e2", name: "Gym", category: "Leisure", amount: 600 * EUR, everyMonths: 12, active: false };
   const s = store({
-    settings: { withdrawalRate: 4, bufferPercent: 10, currency: "EUR", numberFormat: "1.000.000,00" },
+    settings: { withdrawalRate: 4, bufferPercent: 10, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 5 },
     expenses: [rent, gym],
     accounts: [{ id: "a", name: "A" }],
     records: [{ month: "2026-10", account: "a", value: 33000 * EUR, payIn: 0 }],
@@ -228,6 +228,9 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
     [{ ...roundTrip, settings: { withdrawalRate: 4, bufferPercent: 10, numberFormat: "1.000.000,00" } }, /missing "currency"/],
     [{ ...roundTrip, settings: { withdrawalRate: 4, bufferPercent: 10, currency: "EUR" } }, /missing "numberFormat"/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, numberFormat: "1 000 000,00" } }, /numberFormat must be "1.000.000,00" or "1,000,000.00"/],
+    [{ ...roundTrip, settings: { withdrawalRate: 4, bufferPercent: 10, currency: "EUR", numberFormat: "1.000.000,00" } }, /missing "expectedReturn"/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, expectedReturn: -1 } }, /expectedReturn must be between 0 and 100/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, expectedReturn: "5" } }, /expectedReturn must be between 0 and 100/],
     [{ ...roundTrip, categories: { ...roundTrip.categories, expenses: ["Food", "food"] } }, /repeats the name/],
     [{ ...roundTrip, categories: { ...roundTrip.categories, income: [""] } }, /not a name/],
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], category: "Nope" }] }, /not in categories.expenses/],
@@ -348,7 +351,7 @@ test("a version 1 file is upgraded: euros, and the categories its items use", ()
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00" });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 5 });
   assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: ["Work"] });
   assert.deepEqual(s.expenses.map((e) => e.category), ["Housing", "Housing", "", "Car"]);
   assert.deepEqual(s.expenses.map((e) => e.active), [true, true, true, true], "every expense was active");
@@ -378,7 +381,7 @@ test("a version 2 file is upgraded: every expense is active", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00" });
+  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 5 });
   assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true })));
   assert.deepEqual(s.income, v2.income);
   assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records"]);
@@ -403,12 +406,84 @@ test("a version 3 file is upgraded: the default number format", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00" });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 5 });
   assert.deepEqual({ ...s, version: 3, settings: v3.settings }, v3, "nothing else changes");
   assert.equal("numberFormat" in v3.settings, false, "the parsed value is left alone");
 
   assert.match(F.parseStore({ ...v3, extra: 1 }).error, /unknown field "extra"/);
   assert.match(F.parseStore({ ...v3, settings: { ...v3.settings, numberFormat: "1,000,000.00" } }).error, /unknown field "numberFormat"/);
+});
+
+test("a version 4 file is upgraded: the default expected return", () => {
+  const v4 = {
+    version: 4,
+    settings: { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1,000,000.00" },
+    categories: { expenses: ["Housing"], income: [] },
+    expenses: [{ id: "e1", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, active: true }],
+    income: [],
+    accounts: [{ id: "a", name: "Broker" }],
+    records: [{ month: "2026-10", account: "a", value: 5, payIn: 1 }],
+  };
+  const result = F.parseStore(v4);
+  assert.equal(result.ok, true, result.error);
+  const s = result.store;
+  assert.equal(s.version, F.VERSION);
+  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 5 });
+  assert.deepEqual({ ...s, version: 4, settings: v4.settings }, v4, "nothing else changes");
+  assert.equal("expectedReturn" in v4.settings, false, "the parsed value is left alone");
+
+  assert.match(F.parseStore({ ...v4, extra: 1 }).error, /unknown field "extra"/);
+  assert.match(F.parseStore({ ...v4, settings: { ...v4.settings, expectedReturn: 5 } }).error, /unknown field "expectedReturn"/);
+});
+
+test("projectToGoal: monthly values until the goal", () => {
+  // No return: only pay-ins, 100 a month from 250 to 1000 takes 8 months.
+  assert.deepEqual(F.projectToGoal(250, 100, 0, 1000), [350, 450, 550, 650, 750, 850, 950, 1050]);
+  assert.deepEqual(F.projectToGoal(1000, 100, 0, 1000), [], "already there");
+  assert.equal(F.projectToGoal(0, 0, 0, 1000), null, "never");
+  assert.equal(F.projectToGoal(1000, -100, 5, 2000), null, "withdrawals faster than growth");
+  assert.equal(F.projectToGoal(1, 0, 1, 1e6), null, "more than 100 years");
+
+  // 12 % a year compounds monthly to 12 % a year, not 12.68 %.
+  const year = F.projectToGoal(100000, 0, 12, 112001);
+  assert.equal(year.length, 13);
+  assert.ok(Math.abs(year[11] - 112000) < 0.001, String(year[11]));
+});
+
+test("metrics: time to FI from the latest month with the average pay-in", () => {
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, expectedReturn: 0 },
+    expenses: [{ id: "e", name: "Rent", category: "", amount: 100 * EUR, everyMonths: 1, active: true }],
+    accounts: [{ id: "a", name: "A" }],
+    records: [
+      { month: "2026-09", account: "a", value: 27000 * EUR, payIn: 500 * EUR },
+      { month: "2026-10", account: "a", value: 28000 * EUR, payIn: 1500 * EUR },
+    ],
+  });
+  // FI number 100 × 12 × 25 = 30,000: 2,000 to go at 1,000 a month.
+  const m = F.metrics(s);
+  assert.equal(m.fiNumber, 30000 * EUR);
+  assert.equal(m.fiMonths, 2);
+  assert.deepEqual(m.projection, [
+    { month: "2026-11", value: 29000 * EUR },
+    { month: "2026-12", value: 30000 * EUR },
+  ]);
+
+  const grown = F.metrics(F.saveSettings(s, { expectedReturn: 5 }));
+  assert.equal(grown.fiMonths, 2, "the return makes it no later");
+  assert.ok(grown.projection[0].value > 29000 * EUR);
+
+  const reached = F.metrics(F.saveMonth(s, "2026-11", [{ account: "a", value: 30000 * EUR, payIn: 0 }]));
+  assert.equal(reached.fiMonths, 0);
+  assert.deepEqual(reached.projection, []);
+
+  const never = F.metrics(F.saveMonth(s, "2026-11", [{ account: "a", value: 28000 * EUR, payIn: -2000 * EUR }]));
+  assert.equal(never.fiMonths, null, "the average pay-in is 0");
+  assert.equal(never.projection, null);
+
+  const none = F.metrics(store());
+  assert.equal(none.fiMonths, null);
+  assert.equal(none.projection, null);
 });
 
 test("a new store starts with a few categories", () => {

@@ -1,5 +1,6 @@
 // Portfolio chart: one inline SVG with the portfolio value, the running total
-// of pay-ins, and the FI number as a goal line. One y-axis in money. A
+// of pay-ins, and the FI number as a goal line. Scaled up to the FI number,
+// it also projects the value until it gets there. One y-axis in money. A
 // crosshair tooltip follows the pointer or the arrow keys.
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -40,8 +41,14 @@ export function goalVisible(series, fiNumber, scale) {
   return fiNumber > 0 && (scale === "goal" || series.some((m) => m.value >= fiNumber || m.paidIn >= fiNumber));
 }
 
-// options: { series, fiNumber, scale: "goal" | "data", format, formatAxis,
-// formatMonth, monthNumber }
+// The projection shows only when the chart is scaled up to the FI number,
+// and only when it gets there.
+export function projectionVisible(projection, scale) {
+  return scale === "goal" && Boolean(projection?.length);
+}
+
+// options: { series, projection: [{ month, value }] or null, fiNumber,
+// scale: "goal" | "data", format, formatAxis, formatMonth, monthNumber }
 export function renderChart(root, options) {
   const { series, fiNumber, scale, format, formatAxis, formatMonth, monthNumber } = options;
   root.replaceChildren();
@@ -49,13 +56,16 @@ export function renderChart(root, options) {
   const plotW = width - MARGIN.left - MARGIN.right;
   const plotH = HEIGHT - MARGIN.top - MARGIN.bottom;
 
-  const values = series.flatMap((m) => [m.value, m.paidIn]);
+  // The months after the series, when the projection shows.
+  const ahead = projectionVisible(options.projection, scale) ? options.projection : [];
+  const points = [...series, ...ahead];
+  const values = [...series.flatMap((m) => [m.value, m.paidIn]), ...ahead.map((m) => m.value)];
   const showGoal = goalVisible(series, fiNumber, scale);
   const top = Math.max(...values, showGoal ? fiNumber : 0, 10000);
   const ticks = niceTicks(Math.min(0, ...values), top);
   const yMin = ticks[0];
   const yMax = ticks.at(-1);
-  const x = (i) => MARGIN.left + (series.length === 1 ? plotW / 2 : (i * plotW) / (series.length - 1));
+  const x = (i) => MARGIN.left + (points.length === 1 ? plotW / 2 : (i * plotW) / (points.length - 1));
   const y = (v) => MARGIN.top + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
 
   const chart = svg("svg", {
@@ -65,7 +75,7 @@ export function renderChart(root, options) {
     class: "chart",
     role: "img",
     tabindex: 0,
-    "aria-label": "Portfolio value and total paid in, by month. Use the arrow keys to read each month.",
+    "aria-label": `Portfolio value and total paid in, by month${ahead.length ? ", and the projected value until it reaches the FI number" : ""}. Use the arrow keys to read each month.`,
   });
 
   for (const tick of ticks) {
@@ -75,9 +85,9 @@ export function renderChart(root, options) {
     chart.append(label);
   }
 
-  const every = labelEvery(series.length);
-  series.forEach((m, i) => {
-    if (monthNumber(m.month) % every !== 0 && series.length > 1) return;
+  const every = labelEvery(points.length);
+  points.forEach((m, i) => {
+    if (monthNumber(m.month) % every !== 0 && points.length > 1) return;
     const label = svg("text", { class: "axis", x: x(i), y: HEIGHT - 8, "text-anchor": "middle" });
     label.textContent = formatMonth(m.month, every >= 12);
     chart.append(label);
@@ -90,10 +100,13 @@ export function renderChart(root, options) {
     chart.append(label);
   }
 
-  const path = (key) => series.map((m, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(m[key]).toFixed(1)}`).join(" ");
+  const path = (key, from = 0, to = series.length) =>
+    points.slice(from, to).map((m, i) => `${i === 0 ? "M" : "L"}${x(from + i).toFixed(1)},${y(m[key]).toFixed(1)}`).join(" ");
+  const last = series.length - 1;
+  // From the latest month, so that it continues the value line.
+  if (ahead.length) chart.append(svg("path", { class: "line projection", d: path("value", last, points.length) }));
   chart.append(svg("path", { class: "line paid", d: path("paidIn") }));
   chart.append(svg("path", { class: "line value", d: path("value") }));
-  const last = series.length - 1;
   chart.append(svg("circle", { class: "end value", cx: x(last), cy: y(series[last].value), r: 4 }));
 
   // Hover layer: crosshair, two dots, and an HTML tooltip.
@@ -110,20 +123,26 @@ export function renderChart(root, options) {
 
   let current = -1;
   function show(i) {
-    current = Math.max(0, Math.min(last, i));
-    const m = series[current];
-    for (const el of [cross, dotValue, dotPaid]) el.setAttribute("visibility", "visible");
+    current = Math.max(0, Math.min(points.length - 1, i));
+    const m = points[current];
+    const projected = current > last;
+    for (const el of [cross, dotValue]) el.setAttribute("visibility", "visible");
+    dotPaid.setAttribute("visibility", projected ? "hidden" : "visible");
     cross.setAttribute("x1", x(current));
     cross.setAttribute("x2", x(current));
     dotValue.setAttribute("cx", x(current));
     dotValue.setAttribute("cy", y(m.value));
-    dotPaid.setAttribute("cx", x(current));
-    dotPaid.setAttribute("cy", y(m.paidIn));
+    if (!projected) {
+      dotPaid.setAttribute("cx", x(current));
+      dotPaid.setAttribute("cy", y(m.paidIn));
+    }
 
-    const rows = [
-      ["value", format(m.value), "Portfolio value"],
-      ["paid", format(m.paidIn), "Paid in, total"],
-    ];
+    const rows = projected
+      ? [["projection", format(m.value), "Projected value"]]
+      : [
+          ["value", format(m.value), "Portfolio value"],
+          ["paid", format(m.paidIn), "Paid in, total"],
+        ];
     const title = document.createElement("div");
     title.className = "tip-title";
     title.textContent = formatMonth(m.month, false);
@@ -154,7 +173,7 @@ export function renderChart(root, options) {
   function nearest(event) {
     const box = chart.getBoundingClientRect();
     const px = ((event.clientX - box.left) / box.width) * width;
-    return series.length === 1 ? 0 : Math.round(((px - MARGIN.left) / plotW) * last);
+    return points.length === 1 ? 0 : Math.round(((px - MARGIN.left) / plotW) * (points.length - 1));
   }
 
   hit.addEventListener("pointermove", (event) => show(nearest(event)));

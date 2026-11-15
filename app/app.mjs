@@ -2,7 +2,7 @@
 // time, and saves every change straight away.
 
 import * as F from "./finance.mjs";
-import { goalVisible, renderChart } from "./chart.mjs";
+import { goalVisible, projectionVisible, renderChart } from "./chart.mjs";
 import { startUpdates } from "./update.mjs";
 
 // ---------------------------------------------------------------- formatting
@@ -59,6 +59,12 @@ try {
   // codes only
 }
 const currencyName = (code) => currencyNames?.of(code) ?? code;
+
+// A time to come: months under two years, whole years after that.
+function duration(months) {
+  if (months < 24) return months === 1 ? "1 month" : `${months} months`;
+  return `${Math.round(months / 12)} years`;
+}
 
 function monthLabel(month, yearOnly = false) {
   const date = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1);
@@ -343,7 +349,7 @@ function tile(label, value, detail, extra) {
 function viewDashboard() {
   const store = state.store;
   const m = F.metrics(store);
-  const { withdrawalRate, bufferPercent } = store.settings;
+  const { withdrawalRate, bufferPercent, expectedReturn } = store.settings;
   const empty = store.income.length === 0 && store.expenses.length === 0 && store.records.length === 0;
   const expenses = F.counted(store.expenses);
 
@@ -367,6 +373,13 @@ function viewDashboard() {
     tile("FI reached", m.fiProgress === null ? "–" : percent.format(m.fiProgress),
       m.fiProgress === null ? "needs expenses and a portfolio value" : m.fiProgress >= 1 ? "Financially independent" : `${money(m.fiNumber - m.portfolio)} to go`,
       progress),
+    tile("Time to FI",
+      m.fiProgress === null ? "–" : m.fiMonths === 0 ? "Now" : m.fiMonths === null ? "Over 100 years" : duration(m.fiMonths),
+      m.fiProgress === null
+        ? "needs expenses and a portfolio value"
+        : m.fiMonths === 0
+          ? `as of ${monthLabel(m.latestMonth)}`
+          : `${m.fiMonths === null ? "" : `around ${monthLabel(m.projection.at(-1).month, m.fiMonths >= 24)}, `}at ${percentUnit.format(expectedReturn)} return and ${money(m.payIn.average)} a month`),
   );
   if (progress) progress.firstChild.style.width = `${Math.min(100, m.fiProgress * 100)}%`;
 
@@ -388,6 +401,7 @@ function viewDashboard() {
         h("div", { class: "legend" },
           h("span", null, h("span", { class: "key value" }), "Portfolio value"),
           h("span", null, h("span", { class: "key paid" }), "Paid in, total"),
+          projectionVisible(m.projection, state.chartScale) ? h("span", null, h("span", { class: "key projection" }), "Projection") : null,
           goalVisible(m.series, chartGoal(m), state.chartScale) ? h("span", null, h("span", { class: "key goal" }), "FI number") : null),
         h("div", { class: "segmented", role: "group", "aria-label": "Chart scale" }, scaleButton("goal", "Up to FI number"), scaleButton("data", "Fit to data"))),
       h("div", { id: "chart", class: "chart-box" })));
@@ -422,6 +436,7 @@ function drawChart() {
   const draw = () =>
     renderChart(box, {
       series: m.series,
+      projection: m.projection,
       fiNumber: chartGoal(m),
       scale: state.chartScale,
       format: money,
@@ -681,7 +696,7 @@ function viewSettings() {
 }
 
 function settingsForm(store) {
-  const { withdrawalRate, bufferPercent, currency: code, numberFormat } = store.settings;
+  const { withdrawalRate, bufferPercent, currency: code, numberFormat, expectedReturn } = store.settings;
   const codes = Intl.supportedValuesOf("currency");
   if (!codes.includes(code)) codes.push(code);
   return h("form", { class: "settings-form", onsubmit: (event) => {
@@ -691,13 +706,15 @@ function settingsForm(store) {
     const format = String(data.get("numberFormat"));
     const rate = F.parsePercent(data.get("withdrawalRate"), { decimals: RATE_DECIMALS });
     const buffer = F.parsePercent(data.get("bufferPercent"));
+    const growth = F.parsePercent(data.get("expectedReturn"));
     let error = null;
     if (!F.isCurrency(chosen)) error = "Currency: choose one from the list.";
     else if (!F.NUMBER_FORMATS.includes(format)) error = "Number format: choose one from the list.";
     else if (!rate.ok || !(rate.value > 0 && rate.value <= 100)) error = `Withdrawal rate: enter a percentage above 0 and at most 100, with up to ${RATE_DECIMALS} decimals.`;
     else if (!buffer.ok || !(buffer.value >= 0 && buffer.value <= 100)) error = "Buffer: enter a percentage from 0 to 100.";
+    else if (!growth.ok || !(growth.value >= 0 && growth.value <= 100)) error = "Expected return: enter a percentage from 0 to 100.";
     if (error) return showError(event.currentTarget, error);
-    commit(F.saveSettings(store, { currency: chosen, numberFormat: format, withdrawalRate: rate.value, bufferPercent: buffer.value }), "Settings saved.");
+    commit(F.saveSettings(store, { currency: chosen, numberFormat: format, withdrawalRate: rate.value, bufferPercent: buffer.value, expectedReturn: growth.value }), "Settings saved.");
   } },
     h("label", null, "Currency",
       h("select", { name: "currency", value: code }, codes.sort().map((c) => h("option", { value: c }, `${c} – ${currencyName(c)}`)))),
@@ -709,6 +726,8 @@ function settingsForm(store) {
     h("p", { class: "muted" }, "The share of the portfolio you plan to spend each year once financially independent. FI number = yearly expenses ÷ this rate: at 4 % that is 25 × yearly expenses. Many use 3 to 3.5 % for longer retirements or to allow for taxes."),
     h("label", null, "Buffer on expenses (%)", h("input", { name: "bufferPercent", inputmode: "decimal", value: plain.format(bufferPercent), required: true })),
     h("p", { class: "muted" }, "Added on top of regular expenses for irregular costs such as holidays and repairs."),
+    h("label", null, "Expected return (%)", h("input", { name: "expectedReturn", inputmode: "decimal", value: plain.format(expectedReturn), required: true })),
+    h("p", { class: "muted" }, "The portfolio's yearly return after inflation, for Time to FI on the dashboard. After inflation, because the FI number is in today's money. World stocks have returned about 5 % a year after inflation over the long run, with many years far above or below that."),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, "Save")));
 }
 
