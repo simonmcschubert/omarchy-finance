@@ -445,6 +445,12 @@ textarea {
   min-width: 0;
 }
 
+/* As tall as a text field (line height + padding + border), so labels in a
+   row line up. */
+select {
+  height: calc(1.5em + 14px);
+}
+
 input::placeholder,
 textarea::placeholder {
   color: var(--fg-muted);
@@ -533,6 +539,10 @@ form.inline input {
 
 .settings-form input {
   max-width: 160px;
+}
+
+.settings-form select {
+  max-width: 360px;
 }
 
 .settings-form .form-actions {
@@ -681,13 +691,13 @@ table.entry th {
   text-align: left;
 }
 
-.accounts {
+.name-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.accounts li {
+.name-list li {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -695,7 +705,7 @@ table.entry th {
   border-bottom: 1px solid var(--border);
 }
 
-.accounts li form.inline {
+.name-list li form.inline {
   flex: 1;
   margin: 0;
 }

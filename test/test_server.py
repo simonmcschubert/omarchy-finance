@@ -12,7 +12,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
 
-STORE = {"version": 1, "settings": {"withdrawalRate": 4, "bufferPercent": 10}, "expenses": [], "income": [], "accounts": [], "records": []}
+STORE = {
+    "version": 2,
+    "settings": {"withdrawalRate": 4, "bufferPercent": 10, "currency": "EUR"},
+    "categories": {"expenses": [], "income": []},
+    "expenses": [],
+    "income": [],
+    "accounts": [],
+    "records": [],
+}
 
 
 class ServerTest(unittest.TestCase):
@@ -75,8 +83,11 @@ class ServerTest(unittest.TestCase):
     def test_refuses_non_json_writes(self):
         response, _ = self.request("PUT", "/api/data", {"revision": "none", "data": STORE}, {"Content-Type": "text/plain"})
         self.assertEqual(response.status, 415)
-        response, _ = self.request("PUT", "/api/data", {"revision": "none", "data": {"version": 2}})
-        self.assertEqual(response.status, 400)
+        for version in [1, 3]:
+            response, data = self.request("PUT", "/api/data", {"revision": "none", "data": {**STORE, "version": version}})
+            self.assertEqual(response.status, 400)
+            self.assertIn("reload the page", json.loads(data)["error"])
+        self.assertFalse(self.data_file.exists())
 
     def test_an_idle_connection_blocks_nothing(self):
         # Browsers open connections ahead of time and may never use them.
@@ -108,7 +119,7 @@ class ServerTest(unittest.TestCase):
     def test_stale_revision_is_a_conflict(self):
         _, data = self.request("PUT", "/api/data", {"revision": "none", "data": STORE})
         first = json.loads(data)["revision"]
-        changed = {**STORE, "settings": {"withdrawalRate": 3, "bufferPercent": 10}}
+        changed = {**STORE, "settings": {**STORE["settings"], "withdrawalRate": 3}}
         response, _ = self.request("PUT", "/api/data", {"revision": first, "data": changed})
         self.assertEqual(response.status, 200)
 
