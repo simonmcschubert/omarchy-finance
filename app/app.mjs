@@ -77,7 +77,6 @@ const state = {
   notice: null, // { kind: "error" | "info", text }
   view: "dashboard",
   editing: { expenses: null, income: null }, // item id being edited
-  formError: { expenses: null, income: null, month: null, account: null, settings: null },
   renaming: null, // account id
   month: null,
   importText: "",
@@ -255,6 +254,17 @@ function card(title, ...children) {
   return h("section", { class: "card" }, title ? h("h2", null, title) : null, ...children);
 }
 
+// Shows a validation message under a form without re-rendering, so nothing
+// typed into the form is lost. The next render clears it.
+function showError(form, text) {
+  let p = form.nextElementSibling;
+  if (!p?.classList.contains("form-error")) {
+    p = h("p", { class: "form-error", role: "alert" });
+    form.after(p);
+  }
+  p.textContent = text;
+}
+
 // ---------------------------------------------------------------- dashboard
 
 function tile(label, value, detail, extra) {
@@ -393,11 +403,7 @@ function viewItems(kind) {
       else if (!amount.ok) error = `Amount: ${amount.error}.`;
       else if (amount.cents <= 0) error = "Amount: must be more than zero.";
       else if (!Number.isInteger(everyMonths) || everyMonths < 1 || everyMonths > 120) error = "Paid every: enter whole months from 1 to 120.";
-      state.formError[kind] = error;
-      if (error) {
-        render();
-        return;
-      }
+      if (error) return showError(event.currentTarget, error);
       const item = { id: editing?.id ?? F.newId(), name, category, amount: amount.cents, everyMonths };
       state.editing[kind] = null;
       state.focus = "#item-name";
@@ -413,7 +419,7 @@ function viewItems(kind) {
     h("datalist", { id: "intervals" }, INTERVALS.map(([v, label]) => h("option", { value: String(v), label }))),
     h("div", { class: "form-actions" },
       h("button", { type: "submit", class: "primary" }, editing ? "Save" : "Add"),
-      editing ? h("button", { type: "button", onclick: () => { state.editing[kind] = null; state.formError[kind] = null; render(); } }, "Cancel") : null),
+      editing ? h("button", { type: "button", onclick: () => { state.editing[kind] = null; render(); } }, "Cancel") : null),
   );
 
   const rows = [];
@@ -426,7 +432,7 @@ function viewItems(kind) {
         h("td", null, intervalLabel(item.everyMonths)),
         h("td", { class: "num" }, money(F.monthlyAmount(item))),
         h("td", { class: "actions" },
-          h("button", { type: "button", class: "link", onclick: () => { state.editing[kind] = item.id; state.formError[kind] = null; state.focus = "#item-name"; render(); } }, "Edit"),
+          h("button", { type: "button", class: "link", onclick: () => { state.editing[kind] = item.id; state.focus = "#item-name"; render(); } }, "Edit"),
           h("button", { type: "button", class: "link danger", onclick: () => {
             if (!confirm(`Delete ${item.name}?`)) return;
             if (state.editing[kind] === item.id) state.editing[kind] = null;
@@ -440,8 +446,7 @@ function viewItems(kind) {
       kind === "income" ? h("p", { class: "muted" }, "Enter amounts after tax. A yearly bonus counts as one twelfth per month.") :
         h("p", { class: "muted" }, "Regular payments only. Pay-ins to broker accounts go under Portfolio, not here."),
       h("h3", null, editing ? `Edit ${editing.name}` : `Add ${info.one === "income" ? "income" : "an expense"}`),
-      form,
-      state.formError[kind] ? h("p", { class: "form-error", role: "alert" }, state.formError[kind]) : null),
+      form),
     items.length
       ? card(null, h("div", { class: "table-wrap" }, h("table", null,
           h("thead", null, h("tr", null, h("th", null, "Name"), h("th", { class: "num" }, "Amount"), h("th", null, "Paid"), h("th", { class: "num" }, "Per month"), h("th"))),
@@ -497,11 +502,7 @@ function viewPortfolio() {
         if (valueText !== "" && value.ok && value.cents >= 0 && payIn.ok) entries.push({ account: account.id, value: value.cents, payIn: payIn.cents });
       }
       if (errors.length === 0 && entries.every((e) => e.value === null) && monthRecords.size === 0) errors.push("Enter at least one value.");
-      state.formError.month = errors.length ? errors.join(" ") : null;
-      if (errors.length) {
-        render();
-        return;
-      }
+      if (errors.length) return showError(event.currentTarget, errors.join(" "));
       commit(F.saveMonth(store, month, entries), `Saved ${monthLabel(month)}.`);
     },
   },
@@ -509,7 +510,6 @@ function viewPortfolio() {
       h("input", { type: "month", name: "month", required: true, value: month, onchange: (event) => {
         if (F.isMonth(event.target.value)) {
           state.month = event.target.value;
-          state.formError.month = null;
           render();
         }
       } })),
@@ -551,7 +551,7 @@ function viewPortfolio() {
       h("tbody", null, [...series].reverse().map((m) => {
         const records = byMonth.get(m.month);
         return h("tr", { class: m.month === month ? "editing" : null },
-          h("th", { scope: "row" }, h("button", { type: "button", class: "link", onclick: () => { state.month = m.month; state.formError.month = null; render(); scrollTo(0, 0); } }, monthLabel(m.month))),
+          h("th", { scope: "row" }, h("button", { type: "button", class: "link", onclick: () => { state.month = m.month; render(); scrollTo(0, 0); } }, monthLabel(m.month))),
           store.accounts.map((a) => {
             const r = records?.get(a.id);
             return h("td", { class: "num" }, r ? money(r.value) : h("span", { class: "muted" }, "–"),
@@ -568,14 +568,13 @@ function viewPortfolio() {
       return h("li", null, h("form", { class: "inline", onsubmit: (event) => {
         event.preventDefault();
         const result = F.saveAccount(store, account.id, new FormData(event.currentTarget).get("name"));
-        state.formError.account = result.ok ? null : `${result.error}.`;
-        if (!result.ok) return render();
+        if (!result.ok) return showError(event.currentTarget, `${result.error}.`);
         state.renaming = null;
         commit(result.store, "Renamed.");
       } },
         h("input", { id: "rename", name: "name", value: account.name, "aria-label": "Account name", autocomplete: "off" }),
         h("button", { type: "submit", class: "primary" }, "Save"),
-        h("button", { type: "button", onclick: () => { state.renaming = null; state.formError.account = null; render(); } }, "Cancel")));
+        h("button", { type: "button", onclick: () => { state.renaming = null; render(); } }, "Cancel")));
     }
     return h("li", null,
       h("span", { class: "grow" }, account.name), h("span", { class: "muted" }, count === 1 ? "1 month" : `${count} months`),
@@ -590,14 +589,12 @@ function viewPortfolio() {
     h("form", { class: "inline", onsubmit: (event) => {
       event.preventDefault();
       const result = F.saveAccount(store, null, new FormData(event.currentTarget).get("name"));
-      state.formError.account = result.ok ? null : `${result.error}.`;
-      if (!result.ok) return render();
+      if (!result.ok) return showError(event.currentTarget, `${result.error}.`);
       state.focus = "#new-account";
       commit(result.store, "Account added.");
     } },
       h("input", { id: "new-account", name: "name", placeholder: "Broker account, e.g. Trade Republic", "aria-label": "New account name", autocomplete: "off" }),
-      h("button", { type: "submit" }, "Add account")),
-    state.formError.account ? h("p", { class: "form-error", role: "alert" }, state.formError.account) : null);
+      h("button", { type: "submit" }, "Add account")));
 
   // ---- CSV import
   const plan = state.importPlan;
@@ -631,9 +628,16 @@ function viewPortfolio() {
         h("button", { type: "button", onclick: () => { state.importPlan = F.planImport(store, state.importText); render(); } }, "Check"),
         plan && plan.errors.length === 0 && plan.entries.length > 0
           ? h("button", { id: "import-go", type: "button", class: "primary", onclick: () => {
-              if (state.importPlan !== plan) return;
-              const count = plan.entries.length;
-              const next = F.applyImport(store, plan);
+              // Accounts may have changed since Check: check again against
+              // the current data, and show the new result instead of
+              // importing if it differs from what is on screen.
+              const fresh = F.planImport(state.store, state.importText);
+              if (JSON.stringify(fresh) !== JSON.stringify(plan)) {
+                state.importPlan = fresh;
+                return render();
+              }
+              const count = fresh.entries.length;
+              const next = F.applyImport(state.store, fresh);
               state.importText = "";
               state.importPlan = null;
               commit(next, `Imported ${count} ${count === 1 ? "row" : "rows"}.`);
@@ -641,7 +645,7 @@ function viewPortfolio() {
           : null),
       plan ? importResult(plan) : null));
 
-  return h("div", null, card("Monthly values", monthForm, state.formError.month ? h("p", { class: "form-error", role: "alert" }, state.formError.month) : null), history, accounts, importCard);
+  return h("div", null, card("Monthly values", monthForm), history, accounts, importCard);
 }
 
 function importResult(plan) {
@@ -672,8 +676,7 @@ function viewSettings() {
     let error = null;
     if (!rate.ok || !(rate.value > 0 && rate.value <= 100)) error = "Withdrawal rate: enter a percentage above 0 and at most 100.";
     else if (!buffer.ok || !(buffer.value >= 0 && buffer.value <= 100)) error = "Buffer: enter a percentage from 0 to 100.";
-    state.formError.settings = error;
-    if (error) return render();
+    if (error) return showError(event.currentTarget, error);
     commit(F.saveSettings(state.store, { withdrawalRate: rate.value, bufferPercent: buffer.value }), "Settings saved.");
   } },
     h("label", null, "Safe withdrawal rate (%)", h("input", { name: "withdrawalRate", inputmode: "decimal", value: plain.format(withdrawalRate), required: true })),
@@ -682,7 +685,7 @@ function viewSettings() {
     h("p", { class: "muted" }, "Added on top of regular expenses for irregular costs such as holidays and repairs."),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, "Save")));
   return h("div", null,
-    card("Settings", form, state.formError.settings ? h("p", { class: "form-error", role: "alert" }, state.formError.settings) : null),
+    card("Settings", form),
     card("Data", h("p", null, "Everything is saved in one file on this computer:"), h("p", null, h("code", null, state.file)),
       h("p", { class: "muted" }, "No account and no sync. Copy the file to back it up.")));
 }
