@@ -260,11 +260,18 @@ function groupedWhole(s, sep) {
   return groups.join("");
 }
 
-// A percentage such as "3,5" or "4". Returns { ok, value } or { ok, error }.
-export function parsePercent(text) {
-  const result = parseMoney(String(text ?? "").replace("%", ""));
-  if (!result.ok) return { ok: false, error: result.error.replace("an amount", "a percentage") };
-  return { ok: true, value: result.cents / 100 };
+// A percentage such as "3,5", "4 %" or "3.333333", with at most `decimals`
+// decimals. "." and "," are both read as the decimal sign: unlike money, a
+// percentage has no thousands, so "3.500" is 3.5. Returns { ok, value } or
+// { ok, error }.
+export function parsePercent(text, { decimals = 2 } = {}) {
+  const s = String(text ?? "").replace(/[\s  %]/g, "");
+  if (s === "") return { ok: false, error: "Enter a percentage" };
+  const m = /^([0-9]*)(?:[.,]([0-9]*))?$/.exec(s);
+  if (!m || !/[0-9]/.test(s)) return { ok: false, error: `"${text}" is not a percentage` };
+  const fraction = m[2] ?? "";
+  if (fraction.length > decimals) return { ok: false, error: `"${text}" has more than ${decimals} decimals` };
+  return { ok: true, value: Number(`${m[1] || "0"}.${fraction || "0"}`) };
 }
 
 // ---------------------------------------------------------------- months

@@ -49,6 +49,21 @@ test("parsePercent", () => {
   assert.deepEqual(F.parsePercent("3,5"), { ok: true, value: 3.5 });
   assert.deepEqual(F.parsePercent("4 %"), { ok: true, value: 4 });
   assert.equal(F.parsePercent("x").ok, false);
+  assert.equal(F.parsePercent("").ok, false);
+  assert.equal(F.parsePercent("3.125").ok, false);
+});
+
+test("parsePercent takes up to the given number of decimals", () => {
+  const six = { decimals: 6 };
+  assert.deepEqual(F.parsePercent("3.333333", six), { ok: true, value: 3.333333 });
+  assert.deepEqual(F.parsePercent("3,141593 %", six), { ok: true, value: 3.141593 });
+  assert.deepEqual(F.parsePercent("0.000001", six), { ok: true, value: 0.000001 });
+  // Three decimals are decimals, not a thousands separator as in money.
+  assert.deepEqual(F.parsePercent("3.500", six), { ok: true, value: 3.5 });
+  assert.deepEqual(F.parsePercent(",5", six), { ok: true, value: 0.5 });
+  assert.match(F.parsePercent("3.1234567", six).error, /more than 6 decimals/);
+  assert.equal(F.parsePercent("1.000,5", six).ok, false);
+  assert.equal(F.parsePercent(".", six).ok, false);
 });
 
 test("parseMonth reads common month and date formats", () => {
