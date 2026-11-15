@@ -329,21 +329,24 @@ function viewDashboard() {
   const m = F.metrics(store);
   const { withdrawalRate, bufferPercent } = store.settings;
   const empty = store.income.length === 0 && store.expenses.length === 0 && store.records.length === 0;
+  const expenses = F.counted(store.expenses);
 
   const progress = m.fiProgress === null ? null : h("div", { class: "meter", role: "presentation" }, h("div", { class: "meter-fill" }));
 
   const tiles = h("div", { class: "tiles" },
     tile("Monthly income", store.income.length ? money(m.income) : "–",
       store.income.length ? `net, ${money(m.income * 12)} a year` : h("a", { href: "#income" }, "Add income")),
-    tile("Monthly expenses", store.expenses.length ? money(m.expenses) : "–",
-      store.expenses.length ? `incl. ${plain.format(bufferPercent)} % buffer (${money(m.buffer)})` : h("a", { href: "#expenses" }, "Add expenses")),
+    tile("Monthly expenses", expenses.length ? money(m.expenses) : "–",
+      expenses.length
+        ? `incl. ${plain.format(bufferPercent)} % buffer (${money(m.buffer)})`
+        : h("a", { href: "#expenses" }, store.expenses.length ? "All expenses are inactive" : "Add expenses")),
     tile("Investment rate", m.investmentRate === null ? "–" : percent.format(m.investmentRate),
       m.payIn === null
         ? h("a", { href: "#portfolio" }, "Add pay-ins")
         : `${money(m.payIn.average)} a month paid in, average of ${m.payIn.months === 12 ? "the last 12 months" : m.payIn.months === 1 ? "1 month" : `${m.payIn.months} months`}`),
     tile("Portfolio", m.portfolio === null ? "–" : money(m.portfolio),
       m.latestMonth ? `as of ${monthLabel(m.latestMonth)}` : h("a", { href: "#portfolio" }, "Add broker values")),
-    tile("FI number", store.expenses.length ? money(m.fiNumber) : "–",
+    tile("FI number", expenses.length ? money(m.fiNumber) : "–",
       `${plain.format(m.multiple)} × yearly expenses (${plainRate.format(withdrawalRate)} % withdrawal rate)`),
     tile("FI reached", m.fiProgress === null ? "–" : percent.format(m.fiProgress),
       m.fiProgress === null ? "needs expenses and a portfolio value" : m.fiProgress >= 1 ? "Financially independent" : `${money(m.fiNumber - m.portfolio)} to go`,
@@ -375,7 +378,7 @@ function viewDashboard() {
   }
 
   const breakdown = (kind, total) => {
-    const groups = F.byCategory(store[kind]);
+    const groups = F.byCategory(F.counted(store[kind]));
     if (groups.length === 0) return null;
     const max = groups[0].monthly;
     return card(`${KINDS[kind].title} by category`,
@@ -392,8 +395,8 @@ function viewDashboard() {
   return h("div", null, parts);
 }
 
-// No expenses, no FI number: the chart then has no goal line.
-const chartGoal = (m) => (state.store.expenses.length ? m.fiNumber : 0);
+// No active expenses, no FI number: the chart then has no goal line.
+const chartGoal = (m) => (F.counted(state.store.expenses).length ? m.fiNumber : 0);
 
 let resizeObserver = null;
 function drawChart() {
@@ -427,8 +430,11 @@ function viewItems(kind) {
   const store = state.store;
   const info = KINDS[kind];
   const items = store[kind];
+  const active = F.counted(items);
+  const inactive = items.filter((item) => item.active === false);
   const editing = items.find((item) => item.id === state.editing[kind]) ?? null;
-  const monthlyTotal = items.reduce((t, item) => t + F.monthlyAmount(item), 0);
+  const monthly = (list) => list.reduce((t, item) => t + F.monthlyAmount(item), 0);
+  const monthlyTotal = monthly(active);
 
   let summary;
   if (kind === "expenses") {
@@ -436,7 +442,10 @@ function viewItems(kind) {
     summary = h("dl", { class: "summary" },
       h("div", null, h("dt", null, "Regular expenses"), h("dd", { class: "num" }, `${money(monthlyTotal)} / month`)),
       h("div", null, h("dt", null, `Buffer, ${plain.format(store.settings.bufferPercent)} %`), h("dd", { class: "num" }, `${money(buffer)} / month`)),
-      h("div", null, h("dt", null, "Total"), h("dd", { class: "num strong" }, `${money(monthlyTotal + buffer)} / month · ${money((monthlyTotal + buffer) * 12)} / year`)));
+      h("div", null, h("dt", null, "Total"), h("dd", { class: "num strong" }, `${money(monthlyTotal + buffer)} / month · ${money((monthlyTotal + buffer) * 12)} / year`)),
+      inactive.length
+        ? h("div", null, h("dt", null, "Inactive, not counted"), h("dd", { class: "num muted" }, `${money(monthly(inactive))} / month`))
+        : null);
   } else {
     summary = h("dl", { class: "summary" },
       h("div", null, h("dt", null, "Net income"), h("dd", { class: "num strong" }, `${money(monthlyTotal)} / month · ${money(monthlyTotal * 12)} / year`)));
@@ -460,6 +469,7 @@ function viewItems(kind) {
       else if (!Number.isInteger(everyMonths) || everyMonths < 1 || everyMonths > 120) error = "Paid every: enter whole months from 1 to 120.";
       if (error) return showError(event.currentTarget, error);
       const item = { id: editing?.id ?? F.newId(), name, category, amount: amount.cents, everyMonths };
+      if (kind === "expenses") item.active = editing?.active ?? true;
       state.editing[kind] = null;
       state.focus = "#item-name";
       commit(F.saveItem(store, kind, item), editing ? `Saved ${name}.` : `Added ${name}.`);
@@ -479,23 +489,35 @@ function viewItems(kind) {
       editing ? h("button", { type: "button", onclick: () => { state.editing[kind] = null; render(); } }, "Cancel") : null),
   );
 
+  const row = (item) => h("tr", { class: [item.id === state.editing[kind] && "editing", item.active === false && "inactive"].filter(Boolean).join(" ") || null },
+    // Inactive expenses are listed apart, so they show their category here.
+    h("td", null, item.name, item.active === false && item.category ? h("div", { class: "sub" }, item.category) : null),
+    h("td", { class: "num" }, moneyExact(item.amount)),
+    h("td", null, intervalLabel(item.everyMonths)),
+    h("td", { class: "num" }, money(F.monthlyAmount(item))),
+    h("td", { class: "actions" },
+      h("button", { type: "button", class: "link", onclick: () => { state.editing[kind] = item.id; state.focus = "#item-name"; render(); } }, "Edit"),
+      kind === "expenses"
+        ? h("button", { type: "button", class: "link",
+            title: item.active ? "Keep it in the list, but leave it out of every total and chart" : "Count it again",
+            onclick: () => commit(F.saveItem(store, kind, { ...item, active: !item.active }),
+              item.active ? `${item.name} is inactive: it no longer counts.` : `${item.name} is active again.`) },
+          item.active ? "Deactivate" : "Activate")
+        : null,
+      h("button", { type: "button", class: "link danger", onclick: () => {
+        if (!confirm(`Delete ${item.name}?`)) return;
+        if (state.editing[kind] === item.id) state.editing[kind] = null;
+        commit(F.deleteItem(store, kind, item.id), `Deleted ${item.name}.`);
+      } }, "Delete")));
+
   const rows = [];
-  for (const group of F.byCategory(items)) {
+  for (const group of F.byCategory(active)) {
     rows.push(h("tr", { class: "group" }, h("th", { colspan: 3, scope: "rowgroup" }, group.category || "No category"), h("td", { class: "num" }, money(group.monthly)), h("td")));
-    for (const item of group.items) {
-      rows.push(h("tr", { class: item.id === state.editing[kind] ? "editing" : null },
-        h("td", null, item.name),
-        h("td", { class: "num" }, moneyExact(item.amount)),
-        h("td", null, intervalLabel(item.everyMonths)),
-        h("td", { class: "num" }, money(F.monthlyAmount(item))),
-        h("td", { class: "actions" },
-          h("button", { type: "button", class: "link", onclick: () => { state.editing[kind] = item.id; state.focus = "#item-name"; render(); } }, "Edit"),
-          h("button", { type: "button", class: "link danger", onclick: () => {
-            if (!confirm(`Delete ${item.name}?`)) return;
-            if (state.editing[kind] === item.id) state.editing[kind] = null;
-            commit(F.deleteItem(store, kind, item.id), `Deleted ${item.name}.`);
-          } }, "Delete"))));
-    }
+    rows.push(group.items.map(row));
+  }
+  if (inactive.length) {
+    rows.push(h("tr", { class: "group" }, h("th", { colspan: 3, scope: "rowgroup" }, "Inactive"), h("td", { class: "num" }, h("span", { class: "muted" }, "not counted")), h("td")));
+    rows.push([...inactive].sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name)).map(row));
   }
 
   return h("div", null,

@@ -73,7 +73,9 @@ The data file stays.
   amount, and how often they are paid, in months (1 monthly, 3 quarterly,
   12 yearly, 24 every two years, or any other number up to 120). Enter income
   after tax. Only current amounts: when the rent goes up, edit it and the
-  numbers change.
+  numbers change. **Deactivate** sets an expense inactive: it stays in the
+  list, under Inactive, but counts nowhere (not in the totals, the FI number
+  or the charts) until **Activate** counts it again. New expenses are active.
 - **Portfolio**: per month, each broker account's value at month end and what
   was paid in that month (negative for withdrawals). An account without a
   value in a month counts with its last value.
@@ -98,7 +100,7 @@ The data file stays.
 | Number | How it is calculated |
 | --- | --- |
 | Monthly income | Sum of income, each divided by its months (a yearly bonus counts one twelfth) |
-| Monthly expenses | Sum of expenses the same way, plus the buffer |
+| Monthly expenses | Sum of active expenses the same way, plus the buffer |
 | Investment rate | Average monthly pay-in over the last 12 months ÷ monthly income |
 | Portfolio | Sum of all accounts in the latest month |
 | FI number | Monthly expenses × 12 ÷ withdrawal rate (× 25 at 4 %) |
@@ -144,9 +146,8 @@ commas.
 
 `~/.local/state/omarchy-finance/finance.json`, in a directory only the owner
 can open. Copy it to back it up. Amounts are stored in cents (hundredths of
-the currency). Files from before the currency and category settings are
-upgraded on the first change; older versions of Finance cannot read them
-after that.
+the currency). Files from older versions of Finance are upgraded on the
+first change; those versions cannot read them after that.
 
 If the file cannot be read, Finance shows an error and saves nothing until the
 file is fixed or moved away. When two Finance windows are open, a save from a

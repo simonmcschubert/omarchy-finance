@@ -711,6 +711,10 @@ tr.editing > * {
   background: var(--selection);
 }
 
+tr.inactive td {
+  color: var(--fg-muted);
+}
+
 td.actions {
   text-align: right;
   white-space: nowrap;

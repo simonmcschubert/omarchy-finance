@@ -4,7 +4,7 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 2;
+export const VERSION = 3;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
@@ -33,6 +33,7 @@ export function emptyStore() {
 const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records"];
 const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths"];
+const EXPENSE_KEYS = [...ITEM_KEYS, "active"];
 const ACCOUNT_KEYS = ["id", "name"];
 const RECORD_KEYS = ["month", "account", "value", "payIn"];
 const MAX_CENTS = 1e13; // 100 billion; anything bigger is a typo
@@ -88,7 +89,7 @@ function upgradeFromVersion1(value) {
     categories[kind] = [...names.values()].sort(compareNames);
   }
   return {
-    version: VERSION,
+    version: 2,
     settings: { ...value.settings, currency: "EUR" },
     categories,
     expenses: items.expenses,
@@ -98,12 +99,22 @@ function upgradeFromVersion1(value) {
   };
 }
 
+// Version 2 could not set an expense inactive: every expense was active.
+function upgradeFromVersion2(value) {
+  const next = { ...value, version: VERSION };
+  if (Array.isArray(value.expenses)) {
+    next.expenses = value.expenses.map((item) => (isObject(item) ? { ...item, active: true } : item));
+  }
+  return next;
+}
+
 // Checks a parsed data file. Returns { ok: true, store } or { ok: false, error }.
-// `null` (no file yet) is an empty store. A version 1 file is upgraded.
+// `null` (no file yet) is an empty store. Older versions are upgraded.
 export function parseStore(value) {
   if (value === null) return { ok: true, store: emptyStore() };
   try {
     if (isObject(value) && value.version === 1) value = upgradeFromVersion1(value);
+    if (isObject(value) && value.version === 2) value = upgradeFromVersion2(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -138,7 +149,7 @@ export function parseStore(value) {
       if (!Array.isArray(value[kind])) throw new Error(`${kind} is not a list`);
       value[kind].forEach((item, i) => {
         const where = `${kind}[${i}]`;
-        checkKeys(item, ITEM_KEYS, where);
+        checkKeys(item, kind === "expenses" ? EXPENSE_KEYS : ITEM_KEYS, where);
         if (!isText(item.id) || item.id === "" || ids.has(item.id)) throw new Error(`${where} has a missing or repeated id`);
         ids.add(item.id);
         if (!isText(item.name) || item.name === "") throw new Error(`${where} has no name`);
@@ -149,6 +160,7 @@ export function parseStore(value) {
         if (!Number.isInteger(item.everyMonths) || item.everyMonths < 1 || item.everyMonths > 120) {
           throw new Error(`${where} everyMonths must be a whole number from 1 to 120`);
         }
+        if (kind === "expenses" && typeof item.active !== "boolean") throw new Error(`${where} active must be true or false`);
       });
     }
 
@@ -324,6 +336,13 @@ export function monthlyAmount(item) {
   return item.amount / item.everyMonths;
 }
 
+// The items that count. An inactive expense stays in the list but counts
+// nowhere: not in totals, the FI number or the charts. Income has no
+// inactive items.
+export function counted(items) {
+  return items.filter((item) => item.active !== false);
+}
+
 function sum(values) {
   return values.reduce((total, v) => total + v, 0);
 }
@@ -370,7 +389,7 @@ export function averagePayIn(series, window = 12) {
 export function metrics(store) {
   const { withdrawalRate, bufferPercent } = store.settings;
   const income = sum(store.income.map(monthlyAmount));
-  const baseExpenses = sum(store.expenses.map(monthlyAmount));
+  const baseExpenses = sum(counted(store.expenses).map(monthlyAmount));
   const buffer = (baseExpenses * bufferPercent) / 100;
   const expenses = baseExpenses + buffer;
   const multiple = 100 / withdrawalRate;
