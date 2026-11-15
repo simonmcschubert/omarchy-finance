@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Installs Finance on Omarchy: a user service that runs the local server at
+# login, and a "Finance" web app in the app launcher. Running it again after
+# a `git pull` restarts the server with the new code. `setup --remove` takes
+# both out again; the data file stays.
+set -euo pipefail
+
+NAME=Finance
+UNIT=omarchy-finance.service
+PORT=47219
+URL="http://127.0.0.1:$PORT/"
+DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+UNIT_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT"
+DATA_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-finance/finance.json"
+
+fail() {
+  echo "setup: $*" >&2
+  exit 1
+}
+
+case ${1:-} in
+  "") ;;
+  --remove)
+    systemctl --user disable --now "$UNIT" 2>/dev/null || true
+    rm -f "$UNIT_FILE"
+    systemctl --user daemon-reload
+    if command -v omarchy-webapp-remove >/dev/null; then
+      OMARCHY_REMOVE_NOTIFY=false omarchy-webapp-remove "$NAME" || true
+    fi
+    echo "Removed Finance's service and launcher entry. The data stays in $DATA_FILE."
+    exit 0
+    ;;
+  -h | --help)
+    echo "Usage: setup [--remove]"
+    exit 0
+    ;;
+  *) fail "unknown option: $1" ;;
+esac
+
+command -v omarchy-webapp-install >/dev/null || fail "omarchy-webapp-install not found; is this Omarchy?"
+PYTHON=$(command -v python3) || fail "python3 not found"
+"$PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 11))' || fail "Finance needs Python 3.11 or newer"
+[[ $DIR != *[[:space:]\"\\%]* ]] || fail "move the repository to a path without spaces, quotes, backslashes or %"
+
+mkdir -p "$(dirname "$UNIT_FILE")"
+cat >"$UNIT_FILE" <<EOF
+[Unit]
+Description=Finance: local server for the finance dashboard ($DIR)
+
+[Service]
+ExecStart=$PYTHON $DIR/server.py --port $PORT
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user daemon-reload
+systemctl --user enable "$UNIT" >/dev/null
+systemctl --user restart "$UNIT"
+
+omarchy-webapp-install "$NAME" "$URL" "$DIR/icon.png"
+
+for _ in $(seq 20); do
+  if curl -fs -o /dev/null "$URL"; then
+    echo "Finance runs on $URL"
+    echo "App launcher (Super+Space): Finance. Data: $DATA_FILE"
+    exit 0
+  fi
+  sleep 0.25
+done
+fail "the server did not start; see: journalctl --user -u $UNIT"
