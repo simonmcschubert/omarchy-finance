@@ -34,9 +34,11 @@ there is a release, the button turns into a down arrow with **Update**. Click
 it to download the release, then click **Restart to update** to install it:
 Finance restarts its server with the release and reloads the window. When the
 new server does not answer, Finance goes back to the version it had. A
-notification confirms the update or says why it failed, and so does the
-button when hovered. Like `git pull`, this does not show the changes first;
-the release notes on GitHub list them. Updates never touch the data.
+notification confirms the update or says why it failed. When it fails before
+the restart (local changes in the checkout, for example), the button says
+**Update failed** and why, when hovered. Like `git pull`, this does not show
+the changes first; the release notes on GitHub list them. Updates never touch
+the data.
 
 ![The update button: check, Update, Restart to update, Updating, Up to date](docs/update.png)
 
