@@ -25,4 +25,4 @@ jobs:
         run: python3 -m unittest discover -s test -v
 
       - name: Shell scripts
-        run: shellcheck setup
+        run: shellcheck setup update

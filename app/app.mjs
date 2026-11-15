@@ -3,6 +3,7 @@
 
 import * as F from "./finance.mjs";
 import { goalVisible, renderChart } from "./chart.mjs";
+import { startUpdates } from "./update.mjs";
 
 // ---------------------------------------------------------------- formatting
 
@@ -835,3 +836,4 @@ function importResult(plan) {
 
 state.view = viewFromHash();
 load();
+startUpdates(document.getElementById("update"), { saving: () => inFlight || pending !== null });

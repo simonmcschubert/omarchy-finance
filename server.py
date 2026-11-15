@@ -3,7 +3,8 @@
 
 Listens on 127.0.0.1 only. The data lives in one JSON file,
 ~/.local/state/omarchy-finance/finance.json, in a directory only the owner
-can open. The page's colors come from the current Omarchy theme.
+can open. The page's colors come from the current Omarchy theme. New
+releases come from the update script next to this file.
 
 Python standard library only (3.11 or newer).
 """
@@ -14,17 +15,28 @@ import http.server
 import json
 import os
 import re
+import secrets
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 import tomllib
 from pathlib import Path
 
 PORT = 47219
 APP_DIR = Path(__file__).resolve().parent / "app"
+UPDATE_SCRIPT = Path(__file__).resolve().parent / "update"
 MAX_BODY = 10 * 1024 * 1024
 NO_FILE = "none"
 VERSION = 2  # data file version; matches VERSION in app/finance.mjs
+NO_BODY = object()  # read_json found none it accepts, and said so
+
+# Seconds: the first check for a release after the server starts, and then.
+FIRST_CHECK = 15
+CHECK_EVERY = 4 * 60 * 60
+# The install restarts omarchy-finance.service, so it runs as a unit of its own.
+INSTALL_UNIT = "omarchy-finance-update"
 
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -32,6 +44,7 @@ STATIC = {
     "/app.mjs": ("app.mjs", "text/javascript; charset=utf-8"),
     "/finance.mjs": ("finance.mjs", "text/javascript; charset=utf-8"),
     "/chart.mjs": ("chart.mjs", "text/javascript; charset=utf-8"),
+    "/update.mjs": ("update.mjs", "text/javascript; charset=utf-8"),
     "/icon.svg": ("icon.svg", "image/svg+xml"),
 }
 
@@ -83,6 +96,11 @@ def state_dir():
 
 def theme_file():
     return Path.home() / ".local" / "state" / "omarchy" / "current" / "theme" / "colors.toml"
+
+
+def update_log():
+    base = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    return Path(base) / "omarchy-finance-update.log"
 
 
 def revision_of(data):
@@ -155,15 +173,165 @@ def theme_css(path):
     return ":root {\n" + "\n".join(lines) + "\n}\n"
 
 
+def reason(output):
+    """The update script's reason for failing: its last line, after git's."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    return lines[-1].removeprefix("update: ") if lines else ""
+
+
+class Updater:
+    """Offers new releases of Finance the way a desktop app offers its
+    updates: it checks shortly after the server starts, every four hours, and
+    when the update button asks; it downloads a release when asked, and
+    installs it with a restart of the server. The update script does the
+    work; the page shows the state (app/update.mjs)."""
+
+    def __init__(self, script, log):
+        self.script = Path(script)
+        self.log = Path(log)  # what the install unit writes
+        # Tells the page that the server restarted, after an install.
+        self.boot = secrets.token_hex(8)
+        self.lock = threading.Lock()  # guards the fields below
+        self.work = threading.Lock()  # one run of the script at a time
+        # "": nothing to offer (up to date, not checked yet, offline, or no
+        # git checkout). Otherwise available, downloading, downloaded,
+        # installing, or failed (download or install; error says why).
+        self.status = ""
+        self.version = ""
+        self.error = ""
+        self.checking = False
+        ok, out, _ = self.run("version")
+        # The installed release: "" before the first or without a checkout.
+        self.installed = out.strip() if ok else ""
+
+    def run(self, *args, timeout=60):
+        """(ok, stdout, reason) of a run of the update script."""
+        try:
+            result = subprocess.run(
+                [str(self.script), *args], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            return False, "", f"the update script did not finish within {timeout} seconds"
+        except OSError as error:
+            return False, "", f"can't run {self.script}: {error.strerror}"
+        if result.returncode != 0:
+            return False, result.stdout, reason(result.stderr) or "the update script failed"
+        return True, result.stdout, ""
+
+    def snapshot(self):
+        with self.lock:
+            return {
+                "status": self.status,
+                "version": self.version,
+                "error": self.error,
+                "installed": self.installed,
+                "checking": self.checking,
+                "boot": self.boot,
+            }
+
+    def start(self):
+        def checks():
+            time.sleep(FIRST_CHECK)
+            while True:
+                self.check()
+                time.sleep(CHECK_EVERY)
+
+        threading.Thread(target=checks, daemon=True).start()
+
+    def check(self, asked=False):
+        """Looks for a newer release. Returns why the check failed, or "".
+        A check on the timer keeps what an earlier one found when it fails
+        (offline is no reason to hide a release), and leaves a failed update
+        on show until the button is clicked."""
+        with self.lock:
+            if self.status == "installing" or (self.status == "failed" and not asked):
+                return ""
+        with self.work:
+            with self.lock:
+                self.checking = True
+            ok, out, why = self.run("check")
+            with self.lock:
+                self.checking = False
+                if not ok:
+                    sys.stderr.write(f"update check failed: {why}\n")
+                    return why
+                if self.status in ("downloading", "installing"):
+                    return ""  # what those find comes next
+                words = out.split()
+                if len(words) == 2 and words[0] in ("available", "downloaded"):
+                    self.status, self.version = words
+                else:
+                    self.status, self.version = "", ""
+                self.error = ""
+        return ""
+
+    def download(self):
+        with self.lock:
+            if self.status not in ("available", "failed") or not self.version:
+                return
+            self.status, self.error = "downloading", ""
+            version = self.version
+        with self.work:
+            ok, _, why = self.run("download", version, timeout=180)
+        with self.lock:
+            self.status = "downloaded" if ok else "failed"
+            self.error = why
+
+    def install(self):
+        with self.lock:
+            if self.status != "downloaded":
+                return
+            self.status, self.error = "installing", ""
+            version = self.version
+        threading.Thread(target=self.wait_for_install, args=(version,), daemon=True).start()
+
+    def install_command(self, version):
+        # --wait: it ends when the update script does. The log keeps what the
+        # script says, as nothing here may be left to read it.
+        return [
+            "systemd-run", "--user", "--wait", "--quiet", "--collect", f"--unit={INSTALL_UNIT}",
+            f"--property=StandardOutput=truncate:{self.log}", "--",
+            str(self.script), "install", version,
+        ]  # fmt: skip
+
+    def wait_for_install(self, version):
+        with self.work:
+            self.log.unlink(missing_ok=True)
+            try:
+                result = subprocess.run(
+                    self.install_command(version), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600
+                )
+                ok, why = result.returncode == 0, reason(result.stderr)
+            except subprocess.TimeoutExpired:
+                ok, why = False, "the update did not finish within 10 minutes"
+            except OSError as error:
+                ok, why = False, f"can't start the update: {error.strerror}"
+            try:
+                why = reason(self.log.read_text()) or why
+            except OSError:
+                pass  # systemd-run did not start the script
+        # A successful install restarts this server, so it is still here
+        # only when the install failed, or when it restarted the service
+        # while this is another server (./server.py from the same checkout).
+        with self.lock:
+            if ok:
+                self.status, self.version = "", ""
+            else:
+                self.status, self.error = "failed", why or "the update script failed"
+        if ok:
+            self.check()
+
+
 class FinanceServer(http.server.ThreadingHTTPServer):
     """A thread per connection, so an idle browser connection blocks nothing.
     Saves hold a lock, so they never overlap."""
 
     daemon_threads = True
 
-    def __init__(self, port, data_file, theme_path):
+    def __init__(self, port, data_file, theme_path, updater=None):
         self.data_file = Path(data_file)
         self.theme_path = Path(theme_path)
+        self.updater = updater
         self.lock = threading.Lock()
         super().__init__(("127.0.0.1", port), Handler)
         bound = self.server_address[1]
@@ -220,6 +388,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == "/api/data":
             self.get_data()
+        elif path == "/api/update" and self.server.updater:
+            self.send_json(200, self.server.updater.snapshot())
         elif path == "/theme.css":
             body = theme_css(self.server.theme_path).encode()
             self.send_body(200, body, "text/css; charset=utf-8")
@@ -245,27 +415,58 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def get_data(self):
         self.send_json(200, self.current())
 
+    def read_json(self):
+        """The request's JSON body, or NO_BODY after replying with the problem.
+        Only JSON: a web page cannot send that to another site without the
+        browser asking this server first, which it never allows."""
+        if self.headers.get_content_type() != "application/json":
+            self.send_json(415, {"error": "Send JSON"})
+            return NO_BODY
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            self.send_json(411, {"error": "Content-Length required"})
+            return NO_BODY
+        if length < 0 or length > MAX_BODY:
+            self.send_json(413, {"error": "Too large"})
+            return NO_BODY
+        try:
+            return json.loads(self.rfile.read(length))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.send_json(400, {"error": "Invalid JSON"})
+            return NO_BODY
+
+    def do_POST(self):
+        if not self.allowed():
+            return
+        updater = self.server.updater
+        if self.path.split("?", 1)[0] != "/api/update" or not updater:
+            self.send_json(404, {"error": "Not found"})
+            return
+        body = self.read_json()
+        if body is NO_BODY:
+            return
+        action = body.get("action") if isinstance(body, dict) else None
+        if action == "check":
+            why = updater.check(asked=True)
+            self.send_json(200, {**updater.snapshot(), "checkError": why})
+        elif action == "download":
+            updater.download()
+            self.send_json(200, updater.snapshot())
+        elif action == "install":
+            updater.install()
+            self.send_json(200, updater.snapshot())
+        else:
+            self.send_json(400, {"error": "Expected {action: check, download or install}"})
+
     def do_PUT(self):
         if not self.allowed():
             return
         if self.path.split("?", 1)[0] != "/api/data":
             self.send_json(404, {"error": "Not found"})
             return
-        if self.headers.get_content_type() != "application/json":
-            self.send_json(415, {"error": "Send JSON"})
-            return
-        try:
-            length = int(self.headers.get("Content-Length", ""))
-        except ValueError:
-            self.send_json(411, {"error": "Content-Length required"})
-            return
-        if length < 0 or length > MAX_BODY:
-            self.send_json(413, {"error": "Too large"})
-            return
-        try:
-            body = json.loads(self.rfile.read(length))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self.send_json(400, {"error": "Invalid JSON"})
+        body = self.read_json()
+        if body is NO_BODY:
             return
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, dict) or data.get("version") != VERSION:
@@ -296,10 +497,12 @@ def main():
     parser.add_argument("--data", default=None, help="data file (default: %(default)s)")
     args = parser.parse_args()
     data_file = Path(args.data) if args.data else state_dir() / "finance.json"
+    updater = Updater(UPDATE_SCRIPT, update_log())
     try:
-        server = FinanceServer(args.port, data_file, theme_file())
+        server = FinanceServer(args.port, data_file, theme_file(), updater)
     except OSError as error:
         sys.exit(f"finance: cannot listen on 127.0.0.1:{args.port}: {error.strerror}")
+    updater.start()
     print(f"Finance on http://127.0.0.1:{server.server_address[1]}/ (data: {data_file})", file=sys.stderr, flush=True)
     try:
         server.serve_forever()
