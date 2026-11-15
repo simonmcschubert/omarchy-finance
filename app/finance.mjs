@@ -474,6 +474,17 @@ export function metrics(store) {
   };
 }
 
+// Where the monthly income goes: expenses with the buffer, the average
+// monthly pay-in (withdrawals count as nothing invested), and what is left
+// over. over: how much more than the income those two take. null without
+// income.
+export function incomeSplit(m) {
+  if (!(m.income > 0)) return null;
+  const invested = Math.max(0, m.payIn?.average ?? 0);
+  const rest = m.income - m.expenses - invested;
+  return { expenses: m.expenses, invested, leftOver: Math.max(0, rest), over: Math.max(0, -rest) };
+}
+
 // Groups expenses or income by category, largest monthly total first.
 export function byCategory(items) {
   const groups = new Map();
