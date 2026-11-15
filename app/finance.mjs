@@ -4,14 +4,14 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 4;
+export const VERSION = 5;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
 // How numbers are shown, named by how they write a million.
 export const NUMBER_FORMATS = Object.freeze(["1.000.000,00", "1,000,000.00"]);
 
-export const DEFAULT_SETTINGS = Object.freeze({ withdrawalRate: 4, bufferPercent: 10, currency: "EUR", numberFormat: NUMBER_FORMATS[0] });
+export const DEFAULT_SETTINGS = Object.freeze({ withdrawalRate: 4, bufferPercent: 10, currency: "EUR", numberFormat: NUMBER_FORMATS[0], expectedReturn: 5 });
 
 // What a new data file starts with; categories can be changed in Settings.
 export const STARTER_CATEGORIES = Object.freeze({
@@ -34,7 +34,7 @@ export function emptyStore() {
 // ---------------------------------------------------------------- file format
 
 const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records"];
-const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat"];
+const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active"];
 const ACCOUNT_KEYS = ["id", "name"];
@@ -118,6 +118,13 @@ function upgradeFromVersion3(value) {
   return { ...value, version: 4, settings: { ...value.settings, numberFormat: DEFAULT_SETTINGS.numberFormat } };
 }
 
+// Version 4 had no expected return, so no time to FI. Upgraded files get
+// the default.
+function upgradeFromVersion4(value) {
+  checkKeys(value.settings, ["withdrawalRate", "bufferPercent", "currency", "numberFormat"], "settings");
+  return { ...value, version: 5, settings: { ...value.settings, expectedReturn: DEFAULT_SETTINGS.expectedReturn } };
+}
+
 // Checks a parsed data file. Returns { ok: true, store } or { ok: false, error }.
 // `null` (no file yet) is an empty store. Older versions are upgraded.
 export function parseStore(value) {
@@ -126,6 +133,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 1) value = upgradeFromVersion1(value);
     if (isObject(value) && value.version === 2) value = upgradeFromVersion2(value);
     if (isObject(value) && value.version === 3) value = upgradeFromVersion3(value);
+    if (isObject(value) && value.version === 4) value = upgradeFromVersion4(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -133,12 +141,15 @@ export function parseStore(value) {
     if (value.version !== VERSION) throw new Error(`unsupported version ${JSON.stringify(value.version)}`);
 
     checkKeys(value.settings, SETTINGS_KEYS, "settings");
-    const { withdrawalRate, bufferPercent, currency, numberFormat } = value.settings;
+    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn } = value.settings;
     if (typeof withdrawalRate !== "number" || !(withdrawalRate > 0 && withdrawalRate <= 100)) {
       throw new Error("settings.withdrawalRate must be above 0 and at most 100");
     }
     if (typeof bufferPercent !== "number" || !(bufferPercent >= 0 && bufferPercent <= 100)) {
       throw new Error("settings.bufferPercent must be between 0 and 100");
+    }
+    if (typeof expectedReturn !== "number" || !(expectedReturn >= 0 && expectedReturn <= 100)) {
+      throw new Error("settings.expectedReturn must be between 0 and 100");
     }
     if (!isCurrency(currency)) throw new Error("settings.currency must be a three-letter code such as EUR");
     if (!NUMBER_FORMATS.includes(numberFormat)) {
@@ -407,10 +418,30 @@ export function averagePayIn(series, window = 12) {
   return { average: sum(recent.map((m) => m.payIn)) / recent.length, months: recent.length };
 }
 
+// The longest projection: 100 years.
+export const MAX_PROJECTION_MONTHS = 1200;
+
+// The portfolio at the end of each coming month, from `start`: it grows at
+// the yearly return (percent, compounded monthly) and gets `payIn` each
+// month. Ends with the first month at or above `goal`; empty when `start`
+// is there already. null when it takes more than 100 years, or never comes.
+export function projectToGoal(start, payIn, returnPercent, goal) {
+  if (start >= goal) return [];
+  const rate = (1 + returnPercent / 100) ** (1 / 12) - 1;
+  const values = [];
+  let value = start;
+  while (values.length < MAX_PROJECTION_MONTHS) {
+    value = value * (1 + rate) + payIn;
+    values.push(value);
+    if (value >= goal) return values;
+  }
+  return null;
+}
+
 // Current numbers for the dashboard. Amounts are in cents and may carry
 // fractions of a cent; round when displaying. Ratios are fractions (0.25).
 export function metrics(store) {
-  const { withdrawalRate, bufferPercent } = store.settings;
+  const { withdrawalRate, bufferPercent, expectedReturn } = store.settings;
   const income = sum(store.income.map(monthlyAmount));
   const baseExpenses = sum(counted(store.expenses).map(monthlyAmount));
   const buffer = (baseExpenses * bufferPercent) / 100;
@@ -420,6 +451,8 @@ export function metrics(store) {
   const series = portfolioSeries(store);
   const last = series.at(-1) ?? null;
   const payIn = averagePayIn(series);
+  // From the latest month on, with the average pay-in of the last 12 months.
+  const ahead = last && fiNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, fiNumber) : null;
   return {
     income,
     baseExpenses,
@@ -433,6 +466,11 @@ export function metrics(store) {
     payIn,
     investmentRate: payIn && income > 0 ? payIn.average / income : null,
     fiProgress: last && fiNumber > 0 ? last.value / fiNumber : null,
+    // Months until the portfolio reaches the FI number (0: it has), and the
+    // projected value of each; null without a portfolio and FI number, or
+    // when it takes more than 100 years.
+    fiMonths: ahead ? ahead.length : null,
+    projection: ahead ? ahead.map((value, i) => ({ month: addMonths(last.month, i + 1), value })) : null,
   };
 }
 

@@ -88,6 +88,9 @@ The data file stays.
     either way. Dates follow the system language.
   - Safe withdrawal rate (default 4 %) and a buffer on expenses for irregular
     costs (default 10 %).
+  - Expected return (default 5 %): the portfolio's yearly return after
+    inflation, for Time to FI. After inflation, because the FI number is in
+    today's money.
   - Categories, one list for expenses and one for income. A new data file
     starts with a few common ones. Renaming a category renames it on every
     expense or income that has it; deleting one leaves them without a
@@ -111,11 +114,14 @@ The data file stays.
 | Portfolio | Sum of all accounts in the latest month |
 | FI number | Monthly expenses × 12 ÷ withdrawal rate (× 25 at 4 %) |
 | FI reached | Portfolio ÷ FI number |
+| Time to FI | Months until the portfolio reaches the FI number: from the latest month it grows by the expected return (compounded monthly) and gets the average monthly pay-in each month. Years from two years on; nothing beyond 100 years |
 
 With less than 12 months of history, the average uses the months there are.
 
 The chart shows the portfolio value and the running total of pay-ins per
-month. **Up to FI number** scales it to the FI number; **Fit to data** zooms in.
+month. **Up to FI number** scales it to the FI number and continues the
+value as a dotted projection until it gets there, the way Time to FI counts;
+**Fit to data** zooms in on the months there are.
 
 ### Importing past months
 

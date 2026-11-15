@@ -326,6 +326,10 @@ main > div {
   border-top: 1px dashed var(--green);
 }
 
+.key.projection {
+  border-top: 2px dotted var(--accent);
+}
+
 .chart-box {
   position: relative;
 }
@@ -369,6 +373,11 @@ main > div {
 .chart .line.paid {
   stroke: var(--fg-muted);
   stroke-dasharray: 6 4;
+}
+
+.chart .line.projection {
+  stroke: var(--accent);
+  stroke-dasharray: 0 5;
 }
 
 .chart .goal {
