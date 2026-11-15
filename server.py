@@ -24,6 +24,7 @@ PORT = 47219
 APP_DIR = Path(__file__).resolve().parent / "app"
 MAX_BODY = 10 * 1024 * 1024
 NO_FILE = "none"
+VERSION = 2  # data file version; matches VERSION in app/finance.mjs
 
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -267,8 +268,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(400, {"error": "Invalid JSON"})
             return
         data = body.get("data") if isinstance(body, dict) else None
-        if not isinstance(data, dict) or data.get("version") != 1:
-            self.send_json(400, {"error": "Expected {revision, data} with data.version 1"})
+        if not isinstance(data, dict) or data.get("version") != VERSION:
+            # Also refuses a window still running an older version of the page.
+            self.send_json(400, {"error": f"Expected {{revision, data}} with data.version {VERSION}; reload the page"})
             return
 
         out = (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode()

@@ -1,16 +1,26 @@
 // Finance logic: the data file format, money and month parsing, metrics, and
-// CSV import. No DOM here, so `node --test` covers it.
+// CSV import and export. No DOM here, so `node --test` covers it.
 //
-// Money is stored as whole cents (integers). Months are "YYYY-MM" strings.
+// Money is stored as whole cents (integers): hundredths of the currency set
+// in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 1;
+export const VERSION = 2;
 
-export const DEFAULT_SETTINGS = Object.freeze({ withdrawalRate: 4, bufferPercent: 10 });
+export const KINDS = Object.freeze(["expenses", "income"]);
+
+export const DEFAULT_SETTINGS = Object.freeze({ withdrawalRate: 4, bufferPercent: 10, currency: "EUR" });
+
+// What a new data file starts with; categories can be changed in Settings.
+export const STARTER_CATEGORIES = Object.freeze({
+  expenses: Object.freeze(["Food", "Health", "Housing", "Insurance", "Leisure", "Subscriptions", "Transport"]),
+  income: Object.freeze(["Side income", "Work"]),
+});
 
 export function emptyStore() {
   return {
     version: VERSION,
     settings: { ...DEFAULT_SETTINGS },
+    categories: { expenses: [...STARTER_CATEGORIES.expenses], income: [...STARTER_CATEGORIES.income] },
     expenses: [],
     income: [],
     accounts: [],
@@ -20,12 +30,12 @@ export function emptyStore() {
 
 // ---------------------------------------------------------------- file format
 
-const STORE_KEYS = ["version", "settings", "expenses", "income", "accounts", "records"];
-const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent"];
+const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records"];
+const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths"];
 const ACCOUNT_KEYS = ["id", "name"];
 const RECORD_KEYS = ["month", "account", "value", "payIn"];
-const MAX_CENTS = 1e13; // 100 billion euros; anything bigger is a typo
+const MAX_CENTS = 1e13; // 100 billion; anything bigger is a typo
 
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -51,25 +61,80 @@ function isText(value) {
   return typeof value === "string" && value.trim() === value;
 }
 
+// An ISO 4217 code such as "EUR" or "USD".
+export function isCurrency(value) {
+  return typeof value === "string" && /^[A-Z]{3}$/.test(value);
+}
+
+const compareNames = (a, b) => a.localeCompare(b);
+
+// Version 1 had no currency (always euros) and no list of categories: each
+// item had free text. The categories the items use become the list; the
+// same name in different case becomes one category, spelled as first seen.
+function upgradeFromVersion1(value) {
+  checkKeys(value, ["version", "settings", "expenses", "income", "accounts", "records"], "The file");
+  checkKeys(value.settings, ["withdrawalRate", "bufferPercent"], "settings");
+  const categories = {};
+  const items = {};
+  for (const kind of KINDS) {
+    if (!Array.isArray(value[kind])) throw new Error(`${kind} is not a list`);
+    const names = new Map(); // lower case -> spelling
+    items[kind] = value[kind].map((item) => {
+      if (!isObject(item) || !isText(item.category) || item.category === "") return item;
+      const key = item.category.toLowerCase();
+      if (!names.has(key)) names.set(key, item.category);
+      return { ...item, category: names.get(key) };
+    });
+    categories[kind] = [...names.values()].sort(compareNames);
+  }
+  return {
+    version: VERSION,
+    settings: { ...value.settings, currency: "EUR" },
+    categories,
+    expenses: items.expenses,
+    income: items.income,
+    accounts: value.accounts,
+    records: value.records,
+  };
+}
+
 // Checks a parsed data file. Returns { ok: true, store } or { ok: false, error }.
-// `null` (no file yet) is an empty store.
+// `null` (no file yet) is an empty store. A version 1 file is upgraded.
 export function parseStore(value) {
   if (value === null) return { ok: true, store: emptyStore() };
   try {
+    if (isObject(value) && value.version === 1) value = upgradeFromVersion1(value);
     checkKeys(value, STORE_KEYS, "The file");
+    if (Number.isInteger(value.version) && value.version > VERSION) {
+      throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
+    }
     if (value.version !== VERSION) throw new Error(`unsupported version ${JSON.stringify(value.version)}`);
 
     checkKeys(value.settings, SETTINGS_KEYS, "settings");
-    const { withdrawalRate, bufferPercent } = value.settings;
+    const { withdrawalRate, bufferPercent, currency } = value.settings;
     if (typeof withdrawalRate !== "number" || !(withdrawalRate > 0 && withdrawalRate <= 100)) {
       throw new Error("settings.withdrawalRate must be above 0 and at most 100");
     }
     if (typeof bufferPercent !== "number" || !(bufferPercent >= 0 && bufferPercent <= 100)) {
       throw new Error("settings.bufferPercent must be between 0 and 100");
     }
+    if (!isCurrency(currency)) throw new Error("settings.currency must be a three-letter code such as EUR");
+
+    checkKeys(value.categories, KINDS, "categories");
+    for (const kind of KINDS) {
+      const list = value.categories[kind];
+      if (!Array.isArray(list)) throw new Error(`categories.${kind} is not a list`);
+      const seen = new Set();
+      list.forEach((name, i) => {
+        const where = `categories.${kind}[${i}]`;
+        if (!isText(name) || name === "") throw new Error(`${where} is not a name`);
+        if (seen.has(name.toLowerCase())) throw new Error(`${where} repeats the name "${name}"`);
+        seen.add(name.toLowerCase());
+      });
+    }
 
     const ids = new Set();
-    for (const kind of ["expenses", "income"]) {
+    for (const kind of KINDS) {
       if (!Array.isArray(value[kind])) throw new Error(`${kind} is not a list`);
       value[kind].forEach((item, i) => {
         const where = `${kind}[${i}]`;
@@ -77,7 +142,9 @@ export function parseStore(value) {
         if (!isText(item.id) || item.id === "" || ids.has(item.id)) throw new Error(`${where} has a missing or repeated id`);
         ids.add(item.id);
         if (!isText(item.name) || item.name === "") throw new Error(`${where} has no name`);
-        if (!isText(item.category)) throw new Error(`${where} has an invalid category`);
+        if (item.category !== "" && !value.categories[kind].includes(item.category)) {
+          throw new Error(`${where} has a category that is not in categories.${kind}`);
+        }
         if (!isCents(item.amount, { min: 1 })) throw new Error(`${where} amount must be a positive number of cents`);
         if (!Number.isInteger(item.everyMonths) || item.everyMonths < 1 || item.everyMonths > 120) {
           throw new Error(`${where} everyMonths must be a whole number from 1 to 120`);
@@ -120,13 +187,21 @@ export function parseStore(value) {
 
 // ---------------------------------------------------------------- numbers
 
+// ISO 4217 codes such as EUR or USD, from the JavaScript engine.
+const CURRENCY_CODES = new Set(Intl.supportedValuesOf("currency"));
+
 // Reads an amount typed or pasted in either German or English style:
-// "1.234,56", "1,234.56", "1234,5", "€ 12", "-50". A single separator
-// followed by exactly three digits is a thousands separator ("1.234" is
-// 1234), because money never has three decimals.
+// "1.234,56", "1,234.56", "1234,5", "€ 12", "USD 12", "-50". A single
+// separator followed by exactly three digits is a thousands separator
+// ("1.234" is 1234), because money never has three decimals. Currency signs
+// and a three-letter code before or after the number are left out.
 // Returns { ok: true, cents } or { ok: false, error }.
 export function parseMoney(text) {
-  let s = String(text ?? "").replace(/[\s  ']/g, "").replace(/€|eur/gi, "");
+  let s = String(text ?? "")
+    .replace(/[\s\u00a0\u202f']/g, "")
+    .replace(/\p{Sc}/gu, "")
+    .replace(/^([-−+]?)([a-z]{3})(?=[0-9.,])|(?<=[0-9.,])([a-z]{3})$/i, (match, sign, before, after) =>
+      CURRENCY_CODES.has((before ?? after).toUpperCase()) ? (sign ?? "") : match);
   let sign = 1;
   if (/^[-−]/.test(s)) {
     sign = -1;
@@ -329,8 +404,8 @@ export function byCategory(items) {
   return list.sort((a, b) => b.monthly - a.monthly || a.category.localeCompare(b.category));
 }
 
-export function categories(store, kind) {
-  return [...new Set(store[kind].map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+export function categoryUse(store, kind, name) {
+  return store[kind].filter((item) => item.category === name).length;
 }
 
 // ---------------------------------------------------------------- changes
@@ -407,6 +482,35 @@ export function deleteMonth(store, month) {
 export function saveSettings(store, settings) {
   const next = structuredClone(store);
   next.settings = { ...next.settings, ...settings };
+  return next;
+}
+
+// Adds a category (oldName null) or renames one, and with it every expense
+// or income that has it. Names are unique, ignoring case.
+// Returns { ok: true, store } or { ok: false, error }.
+export function saveCategory(store, kind, oldName, name) {
+  const clean = String(name ?? "").trim();
+  if (clean === "") return { ok: false, error: "Enter a name" };
+  const list = store.categories[kind];
+  if (oldName !== null && !list.includes(oldName)) return { ok: false, error: `"${oldName}" no longer exists` };
+  const other = list.find((c) => c.toLowerCase() === clean.toLowerCase());
+  if (other !== undefined && other !== oldName) return { ok: false, error: `"${other}" already exists` };
+  const next = structuredClone(store);
+  if (oldName === null) {
+    next.categories[kind].push(clean);
+  } else {
+    next.categories[kind] = next.categories[kind].map((c) => (c === oldName ? clean : c));
+    for (const item of next[kind]) if (item.category === oldName) item.category = clean;
+  }
+  next.categories[kind].sort(compareNames);
+  return { ok: true, store: next };
+}
+
+// Removes a category; what had it is left without one.
+export function deleteCategory(store, kind, name) {
+  const next = structuredClone(store);
+  next.categories[kind] = next.categories[kind].filter((c) => c !== name);
+  for (const item of next[kind]) if (item.category === name) item.category = "";
   return next;
 }
 
@@ -547,4 +651,25 @@ export function applyImport(store, plan) {
   }
   for (const [month, entries] of byMonth) next = saveMonth(next, month, entries);
   return next;
+}
+
+// ---------------------------------------------------------------- CSV export
+
+// Every monthly value as CSV in the format planImport reads, so an export
+// can be imported again. Amounts have two decimals and no thousands
+// separators. With decimal "," the columns are separated by semicolons, as
+// spreadsheets with a decimal comma expect.
+export function exportCsv(store, { decimal = "." } = {}) {
+  const delimiter = decimal === "," ? ";" : ",";
+  const names = new Map(store.accounts.map((a) => [a.id, a.name]));
+  const amount = (cents) => {
+    const abs = Math.abs(cents);
+    return `${cents < 0 ? "-" : ""}${Math.floor(abs / 100)}${decimal}${String(abs % 100).padStart(2, "0")}`;
+  };
+  const field = (text) => (/[";,\t\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text);
+  const lines = [["month", "account", "value", "pay_in"].join(delimiter)];
+  for (const r of sortRecords(store, [...store.records])) {
+    lines.push([r.month, field(names.get(r.account)), amount(r.value), amount(r.payIn)].join(delimiter));
+  }
+  return lines.join("\n") + "\n";
 }

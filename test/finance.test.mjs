@@ -25,6 +25,10 @@ test("parseMoney reads German and English amounts", () => {
     "+7": 700,
     ",5": 50,
     "EUR 3": 300,
+    "12 usd": 1200,
+    "CHF 1.234,50": 123450,
+    "$-3": -300,
+    "£ 4": 400,
     "0": 0,
   };
   for (const [text, cents] of Object.entries(cases)) {
@@ -33,7 +37,7 @@ test("parseMoney reads German and English amounts", () => {
 });
 
 test("parseMoney rejects what it cannot read safely", () => {
-  for (const text of ["", "abc", "1,2,3", "0.123", "1.23456", "12.3.4", "1.234.56,7", "1,234,5", "--5", "12a"]) {
+  for (const text of ["", "abc", "1,2,3", "0.123", "1.23456", "12.3.4", "1.234.56,7", "1,234,5", "--5", "12a", "1abc", "abc 5"]) {
     assert.equal(F.parseMoney(text).ok, false, text);
   }
 });
@@ -165,8 +169,14 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
 
   const broken = [
     [{ ...roundTrip, extra: 1 }, /unknown field "extra"/],
-    [{ ...roundTrip, version: 2 }, /unsupported version/],
-    [{ ...roundTrip, settings: { withdrawalRate: 0, bufferPercent: 10 } }, /withdrawalRate/],
+    [{ ...roundTrip, version: 3 }, /newer version of Finance/],
+    [{ ...roundTrip, version: "2" }, /unsupported version/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, withdrawalRate: 0 } }, /withdrawalRate/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, currency: "eur" } }, /currency/],
+    [{ ...roundTrip, settings: { withdrawalRate: 4, bufferPercent: 10 } }, /missing "currency"/],
+    [{ ...roundTrip, categories: { ...roundTrip.categories, expenses: ["Food", "food"] } }, /repeats the name/],
+    [{ ...roundTrip, categories: { ...roundTrip.categories, income: [""] } }, /not a name/],
+    [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], category: "Nope" }] }, /not in categories.expenses/],
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], amount: 1.5 }] }, /amount/],
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], note: "x" }] }, /unknown field "note"/],
     [{ ...roundTrip, records: [{ ...roundTrip.records[0], account: "nope" }] }, /unknown account/],
@@ -255,4 +265,97 @@ test("planImport reports every problem with its line", () => {
   assert.match(F.planImport(F.emptyStore(), "date,broker\n2026-10,A").errors[0].message, /missing: value/);
   assert.match(F.planImport(F.emptyStore(), "").errors[0].message, /empty/);
   assert.throws(() => F.applyImport(F.emptyStore(), F.planImport(F.emptyStore(), csv)));
+});
+
+test("a version 1 file is upgraded: euros, and the categories its items use", () => {
+  const v1 = {
+    version: 1,
+    settings: { withdrawalRate: 3.5, bufferPercent: 5 },
+    expenses: [
+      { id: "e1", name: "Rent", category: "Housing", amount: 100, everyMonths: 1 },
+      { id: "e2", name: "Power", category: "housing", amount: 50, everyMonths: 1 },
+      { id: "e3", name: "Gym", category: "", amount: 30, everyMonths: 1 },
+      { id: "e4", name: "Car", category: "Car", amount: 30, everyMonths: 12 },
+    ],
+    income: [{ id: "i1", name: "Salary", category: "Work", amount: 300, everyMonths: 1 }],
+    accounts: [{ id: "a", name: "Broker" }],
+    records: [{ month: "2026-10", account: "a", value: 5, payIn: 1 }],
+  };
+  const result = F.parseStore(v1);
+  assert.equal(result.ok, true, result.error);
+  const s = result.store;
+  assert.equal(s.version, F.VERSION);
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR" });
+  assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: ["Work"] });
+  assert.deepEqual(s.expenses.map((e) => e.category), ["Housing", "Housing", "", "Car"]);
+  assert.deepEqual(s.records, v1.records);
+  assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records"]);
+  assert.equal(v1.expenses[1].category, "housing", "the parsed value is left alone");
+
+  assert.match(F.parseStore({ ...v1, extra: 1 }).error, /unknown field "extra"/);
+  assert.match(F.parseStore({ ...v1, settings: { ...v1.settings, currency: "EUR" } }).error, /unknown field "currency"/);
+});
+
+test("a new store starts with a few categories", () => {
+  const s = F.emptyStore();
+  assert.ok(s.categories.expenses.includes("Housing"));
+  assert.ok(s.categories.income.includes("Work"));
+  assert.equal(s.settings.currency, "EUR");
+  assert.equal(F.parseStore(s).ok, true);
+});
+
+test("categories: add, rename with their items, delete", () => {
+  let s = { ...F.emptyStore(), categories: { expenses: ["Housing"], income: ["Work"] } };
+  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1 });
+  s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1 });
+
+  const added = F.saveCategory(s, "expenses", null, "  Car ");
+  assert.equal(added.ok, true);
+  assert.deepEqual(added.store.categories.expenses, ["Car", "Housing"]);
+  assert.deepEqual(s.categories.expenses, ["Housing"], "the original is untouched");
+
+  assert.deepEqual(F.saveCategory(s, "expenses", null, "housing"), { ok: false, error: '"Housing" already exists' });
+  assert.deepEqual(F.saveCategory(s, "expenses", null, " "), { ok: false, error: "Enter a name" });
+  assert.equal(F.saveCategory(s, "income", null, "Housing").ok, true, "expenses and income have their own lists");
+  assert.equal(F.saveCategory(s, "expenses", "Gone", "X").ok, false);
+
+  const renamed = F.saveCategory(s, "expenses", "Housing", "Home").store;
+  assert.deepEqual(renamed.categories.expenses, ["Home"]);
+  assert.equal(renamed.expenses[0].category, "Home");
+  assert.equal(renamed.income[0].category, "Work");
+  assert.equal(F.saveCategory(s, "expenses", "Housing", "HOUSING").ok, true, "changing the case is fine");
+  assert.equal(F.categoryUse(renamed, "expenses", "Home"), 1);
+
+  const deleted = F.deleteCategory(renamed, "expenses", "Home");
+  assert.deepEqual(deleted.categories.expenses, []);
+  assert.equal(deleted.expenses[0].category, "");
+  for (const store of [added.store, renamed, deleted]) assert.equal(F.parseStore(JSON.parse(JSON.stringify(store))).ok, true);
+});
+
+test("exportCsv writes what planImport reads", () => {
+  let s = F.emptyStore();
+  s = F.saveAccount(s, null, "Trade Republic").store;
+  s = F.saveAccount(s, null, 'ING; "Extra"').store;
+  const [tr, ing] = s.accounts.map((a) => a.id);
+  s = F.saveMonth(s, "2026-02", [{ account: tr, value: 123456789, payIn: -5005 }]);
+  s = F.saveMonth(s, "2026-01", [{ account: ing, value: 7, payIn: 0 }, { account: tr, value: 100000, payIn: 50000 }]);
+
+  assert.equal(F.exportCsv(s), [
+    "month,account,value,pay_in",
+    "2026-01,Trade Republic,1000.00,500.00",
+    '2026-01,"ING; ""Extra""",0.07,0.00',
+    "2026-02,Trade Republic,1234567.89,-50.05",
+    "",
+  ].join("\n"));
+  assert.equal(F.exportCsv(s, { decimal: "," }).split("\n")[3], "2026-02;Trade Republic;1234567,89;-50,05");
+  assert.equal(F.exportCsv(F.emptyStore()), "month,account,value,pay_in\n");
+
+  for (const decimal of [".", ","]) {
+    const plan = F.planImport(s, F.exportCsv(s, { decimal }));
+    assert.deepEqual(plan.errors, [], decimal);
+    assert.equal(plan.replaced, 3);
+    assert.deepEqual(F.applyImport(s, plan), s, "importing an export changes nothing");
+    const fresh = F.applyImport(F.emptyStore(), F.planImport(F.emptyStore(), F.exportCsv(s, { decimal })));
+    assert.deepEqual(F.portfolioSeries(fresh), F.portfolioSeries(s));
+  }
 });

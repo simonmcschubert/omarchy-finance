@@ -1,5 +1,5 @@
 // Portfolio chart: one inline SVG with the portfolio value, the running total
-// of pay-ins, and the FI number as a goal line. One y-axis in euros. A
+// of pay-ins, and the FI number as a goal line. One y-axis in money. A
 // crosshair tooltip follows the pointer or the arrow keys.
 
 const SVG = "http://www.w3.org/2000/svg";

@@ -49,11 +49,22 @@ The data file stays.
   12 yearly, 24 every two years, or any other number up to 120). Enter income
   after tax. Only current amounts: when the rent goes up, edit it and the
   numbers change.
-- **Portfolio**: broker accounts, and per month each account's value at month
-  end and what was paid in that month (negative for withdrawals). An account
-  without a value in a month counts with its last value.
-- **Settings**: safe withdrawal rate (default 4 %) and a buffer on expenses
-  for irregular costs (default 10 %).
+- **Portfolio**: per month, each broker account's value at month end and what
+  was paid in that month (negative for withdrawals). An account without a
+  value in a month counts with its last value.
+- **Settings**:
+  - Currency (default euro). It only changes how amounts are shown; nothing
+    is converted.
+  - Safe withdrawal rate (default 4 %) and a buffer on expenses for irregular
+    costs (default 10 %).
+  - Categories, one list for expenses and one for income. A new data file
+    starts with a few common ones. Renaming a category renames it on every
+    expense or income that has it; deleting one leaves them without a
+    category.
+  - Broker accounts. Deleting one deletes its monthly values too.
+  - Import past months from CSV, and export all monthly values as CSV.
+
+`Ctrl+1` to `Ctrl+5` open Dashboard, Expenses, Income, Portfolio and Settings.
 
 ![Portfolio](docs/portfolio.png)
 
@@ -75,7 +86,7 @@ month. **Up to FI number** scales it to the FI number; **Fit to data** zooms in.
 
 ### Importing past months
 
-Portfolio → **Import past months from CSV**: choose a file or paste rows
+Settings → **Import past months from CSV**: choose a file or paste rows
 copied from a spreadsheet. One row per account and month:
 
 ```csv
@@ -87,7 +98,7 @@ month;account;value;pay_in
 - Semicolons, commas or tabs between columns.
 - Months as `2025-01`, `01/2025`, `01.2025` or a date such as `31.01.2025`.
 - Amounts like `1.234,56` or `1,234.56`. A separator followed by exactly three
-  digits is a thousands separator: `1.234` is 1234 €.
+  digits is a thousands separator: `1.234` is 1234.
 - `pay_in` is optional; empty means 0.
 - New account names become new accounts. A row for a month and account that
   already exist replaces the old values.
@@ -95,10 +106,22 @@ month;account;value;pay_in
 Check shows what will happen. Nothing is imported while any line has a
 problem.
 
+### Exporting
+
+Settings → **Export CSV** saves every monthly value to
+`finance-portfolio-<date>.csv` in the same columns, so the import reads it
+back. Amounts have two decimals. Where the system language writes a decimal
+comma (German, for example) the file uses decimal commas and semicolons
+between columns, as spreadsheets there expect; otherwise decimal points and
+commas.
+
 ## Data file
 
 `~/.local/state/omarchy-finance/finance.json`, in a directory only the owner
-can open. Copy it to back it up. Amounts are stored in cents.
+can open. Copy it to back it up. Amounts are stored in cents (hundredths of
+the currency). Files from before the currency and category settings are
+upgraded on the first change; older versions of Finance cannot read them
+after that.
 
 If the file cannot be read, Finance shows an error and saves nothing until the
 file is fixed or moved away. When two Finance windows are open, a save from a
@@ -119,7 +142,7 @@ server.py          # local server: page, /api/data (load/save), /theme.css
 app/
 ├── index.html
 ├── app.mjs        # the views; saves every change
-├── finance.mjs    # data format, parsing, metrics, CSV import (no DOM)
+├── finance.mjs    # data format, parsing, metrics, CSV import and export (no DOM)
 ├── chart.mjs      # portfolio chart (SVG)
 └── style.css
 setup              # user service and launcher entry; --remove undoes
