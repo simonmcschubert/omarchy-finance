@@ -28,6 +28,9 @@ test("parseMoney reads German and English amounts", () => {
     "12 usd": 1200,
     "CHF 1.234,50": 123450,
     "$-3": -300,
+    "EUR -50": -5000,
+    "eur+50": 5000,
+    "USD −50,25": -5025,
     "£ 4": 400,
     "0": 0,
   };

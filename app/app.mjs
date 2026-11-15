@@ -21,7 +21,8 @@ function useCurrency(code) {
   if (code === currency) return;
   currency = code;
   whole = new Intl.NumberFormat(locale, { style: "currency", currency: code, maximumFractionDigits: 0 });
-  exact = new Intl.NumberFormat(locale, { style: "currency", currency: code });
+  // Two decimals for every currency, since amounts are stored in hundredths.
+  exact = new Intl.NumberFormat(locale, { style: "currency", currency: code, minimumFractionDigits: 2, maximumFractionDigits: 2 });
   axis = new Intl.NumberFormat(locale, { style: "currency", currency: code, notation: "compact", maximumFractionDigits: 1 });
 }
 useCurrency(F.DEFAULT_SETTINGS.currency);

@@ -200,7 +200,7 @@ export function parseMoney(text) {
   let s = String(text ?? "")
     .replace(/[\s\u00a0\u202f']/g, "")
     .replace(/\p{Sc}/gu, "")
-    .replace(/^([-−+]?)([a-z]{3})(?=[0-9.,])|(?<=[0-9.,])([a-z]{3})$/i, (match, sign, before, after) =>
+    .replace(/^([-−+]?)([a-z]{3})(?=[-−+]?[0-9.,])|(?<=[0-9.,])([a-z]{3})$/i, (match, sign, before, after) =>
       CURRENCY_CODES.has((before ?? after).toUpperCase()) ? (sign ?? "") : match);
   let sign = 1;
   if (/^[-−]/.test(s)) {
