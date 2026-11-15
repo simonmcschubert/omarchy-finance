@@ -119,13 +119,14 @@ Settings → **Import past months from CSV**: choose a file or paste rows
 copied from a spreadsheet. One row per account and month:
 
 ```csv
-month;account;value;pay_in
-2025-01;Trade Republic;12.345,67;500
-2025-01;ING;8.000;0
+date;account;value;pay_in
+31.01.2025;Trade Republic;12.345,67;500
+31.01.2025;ING;8.000;0
 ```
 
 - Semicolons, commas or tabs between columns.
-- Months as `2025-01`, `01/2025`, `01.2025` or a date such as `31.01.2025`.
+- Dates as `2025-01-31`, `2025.01.31` or `31.01.2025`. A row counts for the
+  month of its date, so an account can have only one row per month.
 - Amounts like `1.234,56` or `1,234.56`. A separator followed by exactly three
   digits is a thousands separator: `1.234` is 1234.
 - `pay_in` is optional; empty means 0.
@@ -139,10 +140,10 @@ problem.
 
 Settings → **Export CSV** saves every monthly value to
 `finance-portfolio-<date>.csv` in the same columns, so the import reads it
-back. Amounts have two decimals. Where the system language writes a decimal
-comma (German, for example) the file uses decimal commas and semicolons
-between columns, as spreadsheets there expect; otherwise decimal points and
-commas.
+back. Each row's date is the last day of its month. Amounts have two
+decimals. Where the system language writes a decimal comma (German, for
+example) the file uses decimal commas and semicolons between columns, as
+spreadsheets there expect; otherwise decimal points and commas.
 
 ## Data file
 
