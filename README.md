@@ -89,8 +89,8 @@ The data file stays.
   - Safe withdrawal rate (default 4 %) and a buffer on expenses for irregular
     costs (default 10 %).
   - Expected return (default 5 %): the portfolio's yearly return after
-    inflation, for Time to FI. After inflation, because the FI number is in
-    today's money.
+    inflation, for Time to FI and the Path to FI chart. After inflation,
+    because the FI number is in today's money.
   - Categories, one list for expenses and one for income. A new data file
     starts with a few common ones. Renaming a category renames it on every
     expense or income that has it; deleting one leaves them without a
@@ -125,10 +125,21 @@ When last month has no values yet, the Portfolio tile says so ("Okt. 2026
 not entered yet", or how many months are missing) and links to the first
 month without values.
 
-The chart shows the portfolio value and the running total of pay-ins per
-month. **Up to FI number** scales it to the FI number and continues the
-value as a dotted projection until it gets there, the way Time to FI counts;
-**Fit to data** zooms in on the months there are.
+The **Portfolio** chart has two views; the one picked last stays picked.
+
+- **History**: the portfolio value and what was paid in, per month. Paid in
+  starts with what each account held in its first month, then adds its
+  pay-ins, so the space between the lines is the gain (green) or loss (red)
+  since then. Hovering a month shows the gain in money and percent, and how
+  much of that month's change was paid in and how much came from the market.
+  The FI number shows once the data reaches it.
+- **Path to FI** (needs active expenses): from the latest month, the value
+  goes on growing the way Time to FI counts, as a dotted line until it
+  reaches the FI number, with a band from 2 points below to 2 points above
+  the expected return (3 % to 7 % at 5 %). The line under the chart says
+  when each reaches the FI number.
+
+![Path to FI](docs/path-to-fi.png)
 
 **Where the income goes** splits the monthly income into expenses (with
 the buffer), the average monthly pay-in of the last 12 months, and what is
