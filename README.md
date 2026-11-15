@@ -82,6 +82,10 @@ The data file stays.
 - **Settings**:
   - Currency (default euro). It only changes how amounts are shown; nothing
     is converted.
+  - Number format for amounts and percentages: `1.000.000,00` (default),
+    with the currency sign after the amount (`1.234,56 €`), or
+    `1,000,000.00`, with it before (`€1,234.56`). Amounts can be typed
+    either way. Dates follow the system language.
   - Safe withdrawal rate (default 4 %) and a buffer on expenses for irregular
     costs (default 10 %).
   - Categories, one list for expenses and one for income. A new data file
@@ -143,7 +147,8 @@ Settings → **Export CSV** saves every monthly value to
 back. Each row's date is the last day of its month. Amounts have two
 decimals. Where the system language writes a decimal comma (German, for
 example) the file uses decimal commas and semicolons between columns, as
-spreadsheets there expect; otherwise decimal points and commas.
+spreadsheets there expect; otherwise decimal points and commas. The number
+format in Settings does not change this.
 
 ## Data file
 

@@ -126,7 +126,7 @@ test("inactive expenses count nowhere until they are active again", () => {
   const rent = { id: "e1", name: "Rent", category: "Housing", amount: 1000 * EUR, everyMonths: 1, active: true };
   const gym = { id: "e2", name: "Gym", category: "Leisure", amount: 600 * EUR, everyMonths: 12, active: false };
   const s = store({
-    settings: { withdrawalRate: 4, bufferPercent: 10, currency: "EUR" },
+    settings: { withdrawalRate: 4, bufferPercent: 10, currency: "EUR", numberFormat: "1.000.000,00" },
     expenses: [rent, gym],
     accounts: [{ id: "a", name: "A" }],
     records: [{ month: "2026-10", account: "a", value: 33000 * EUR, payIn: 0 }],
@@ -225,7 +225,9 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
     [{ ...roundTrip, version: "2" }, /unsupported version/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, withdrawalRate: 0 } }, /withdrawalRate/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, currency: "eur" } }, /currency/],
-    [{ ...roundTrip, settings: { withdrawalRate: 4, bufferPercent: 10 } }, /missing "currency"/],
+    [{ ...roundTrip, settings: { withdrawalRate: 4, bufferPercent: 10, numberFormat: "1.000.000,00" } }, /missing "currency"/],
+    [{ ...roundTrip, settings: { withdrawalRate: 4, bufferPercent: 10, currency: "EUR" } }, /missing "numberFormat"/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, numberFormat: "1 000 000,00" } }, /numberFormat must be "1.000.000,00" or "1,000,000.00"/],
     [{ ...roundTrip, categories: { ...roundTrip.categories, expenses: ["Food", "food"] } }, /repeats the name/],
     [{ ...roundTrip, categories: { ...roundTrip.categories, income: [""] } }, /not a name/],
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], category: "Nope" }] }, /not in categories.expenses/],
@@ -346,7 +348,7 @@ test("a version 1 file is upgraded: euros, and the categories its items use", ()
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR" });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00" });
   assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: ["Work"] });
   assert.deepEqual(s.expenses.map((e) => e.category), ["Housing", "Housing", "", "Car"]);
   assert.deepEqual(s.expenses.map((e) => e.active), [true, true, true, true], "every expense was active");
@@ -376,6 +378,7 @@ test("a version 2 file is upgraded: every expense is active", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
+  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00" });
   assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true })));
   assert.deepEqual(s.income, v2.income);
   assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records"]);
@@ -386,11 +389,34 @@ test("a version 2 file is upgraded: every expense is active", () => {
   assert.match(F.parseStore({ ...v2, expenses: [{ ...v2.expenses[0], note: "x" }] }).error, /unknown field "note"/);
 });
 
+test("a version 3 file is upgraded: the default number format", () => {
+  const v3 = {
+    version: 3,
+    settings: { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD" },
+    categories: { expenses: ["Housing"], income: [] },
+    expenses: [{ id: "e1", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, active: false }],
+    income: [],
+    accounts: [{ id: "a", name: "Broker" }],
+    records: [{ month: "2026-10", account: "a", value: 5, payIn: 1 }],
+  };
+  const result = F.parseStore(v3);
+  assert.equal(result.ok, true, result.error);
+  const s = result.store;
+  assert.equal(s.version, F.VERSION);
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00" });
+  assert.deepEqual({ ...s, version: 3, settings: v3.settings }, v3, "nothing else changes");
+  assert.equal("numberFormat" in v3.settings, false, "the parsed value is left alone");
+
+  assert.match(F.parseStore({ ...v3, extra: 1 }).error, /unknown field "extra"/);
+  assert.match(F.parseStore({ ...v3, settings: { ...v3.settings, numberFormat: "1,000,000.00" } }).error, /unknown field "numberFormat"/);
+});
+
 test("a new store starts with a few categories", () => {
   const s = F.emptyStore();
   assert.ok(s.categories.expenses.includes("Housing"));
   assert.ok(s.categories.income.includes("Work"));
   assert.equal(s.settings.currency, "EUR");
+  assert.equal(s.settings.numberFormat, "1.000.000,00");
   assert.equal(F.parseStore(s).ok, true);
 });
 
