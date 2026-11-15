@@ -383,7 +383,10 @@ function sum(values) {
 
 // One entry per month from the first to the last recorded month, gaps
 // included. An account without a value in a month keeps its last value.
-// payIn counts only that month's pay-ins; paidIn is the running total.
+// payIn counts only that month's pay-ins. invested is the running total of
+// what went into the accounts: each account's value in its first month (what
+// it held when tracking began), then its pay-ins. value - invested is the
+// gain since tracking began.
 export function portfolioSeries(store) {
   if (store.records.length === 0) return [];
   const byMonth = new Map();
@@ -397,15 +400,16 @@ export function portfolioSeries(store) {
   const last = Math.max(...indexes);
   const latest = new Map(); // account id -> last known value
   const series = [];
-  let paidIn = 0;
+  let invested = 0;
   for (let index = first; index <= last; index++) {
     let payIn = 0;
     for (const record of byMonth.get(index) ?? []) {
+      // The first value already holds that month's pay-in.
+      invested += latest.has(record.account) ? record.payIn : record.value;
       latest.set(record.account, record.value);
       payIn += record.payIn;
     }
-    paidIn += payIn;
-    series.push({ month: monthFromIndex(index), value: sum([...latest.values()]), payIn, paidIn });
+    series.push({ month: monthFromIndex(index), value: sum([...latest.values()]), payIn, invested });
   }
   return series;
 }
@@ -463,6 +467,54 @@ export function missingMonths(latest, now = currentMonth()) {
   if (!latest || latest >= to) return null;
   const from = addMonths(latest, 1);
   return { from, to, count: monthIndex(to) - monthIndex(from) + 1 };
+}
+
+// Percentage points below and above the expected return for the low and
+// high projection on the chart.
+export const RETURN_SPREAD = 2;
+
+// The chart's projection: where the portfolio goes from `start` (the latest
+// month's value, in month `month`) if `payIn` keeps being paid in at each
+// month end and it grows by `rate` % a year after inflation, as
+// projectToGoal counts; and a low and high one at RETURN_SPREAD points less
+// and more. Everything is in today's money, as the FI number is. Returns
+// null without a goal, otherwise:
+// - rates: { low, mid, high }, percent a year
+// - reach: { low, mid, high }, the first month (YYYY-MM) at or above the
+//   goal: `month` when start is there already, null when not within
+//   MAX_PROJECTION_MONTHS
+// - points: [{ month, low, mid, high }] for the months after `month` that
+//   the chart shows: until the low projection reaches the goal (or 1.5
+//   times as long as the mid one takes, or else the high one), and a
+//   little after; at least a year, at most MAX_PROJECTION_MONTHS. None when
+//   start is at the goal already.
+export function fiProjection({ month, start, payIn, goal, rate }) {
+  if (!(goal > 0)) return null;
+  const rates = { low: rate - RETURN_SPREAD, mid: rate, high: rate + RETURN_SPREAD };
+  const keys = Object.keys(rates);
+  if (start >= goal) return { rates, reach: { low: month, mid: month, high: month }, points: [] };
+  const monthly = Object.fromEntries(keys.map((k) => [k, (1 + rates[k] / 100) ** (1 / 12) - 1]));
+  const values = { low: start, mid: start, high: start };
+  const reach = { low: null, mid: null, high: null }; // months after `month`
+  const points = [];
+  for (let n = 1; n <= MAX_PROJECTION_MONTHS; n++) {
+    const point = { month: addMonths(month, n) };
+    for (const k of keys) {
+      values[k] = Math.max(0, values[k] * (1 + monthly[k]) + payIn);
+      point[k] = values[k];
+      if (reach[k] === null && values[k] >= goal) reach[k] = n;
+    }
+    points.push(point);
+  }
+  let shown = MAX_PROJECTION_MONTHS;
+  if (reach.low !== null) shown = reach.low;
+  else if (reach.mid !== null) shown = reach.mid * 1.5;
+  else if (reach.high !== null) shown = reach.high * 1.5;
+  return {
+    rates,
+    reach: Object.fromEntries(keys.map((k) => [k, reach[k] === null ? null : addMonths(month, reach[k])])),
+    points: points.slice(0, Math.min(MAX_PROJECTION_MONTHS, Math.max(12, Math.ceil(shown * 1.1)))),
+  };
 }
 
 // Current numbers for the dashboard. Amounts are in cents and may carry

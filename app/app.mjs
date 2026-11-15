@@ -2,7 +2,7 @@
 // time, and saves every change straight away.
 
 import * as F from "./finance.mjs";
-import { goalVisible, projectionVisible, renderChart } from "./chart.mjs";
+import { goalVisible, renderChart } from "./chart.mjs";
 import { startUpdates } from "./update.mjs";
 
 // ---------------------------------------------------------------- formatting
@@ -50,6 +50,7 @@ useFormats(F.DEFAULT_SETTINGS);
 const money = (cents) => whole.format(Math.round(cents / 100));
 const moneyExact = (cents) => exact.format(cents / 100);
 const signedMoney = (cents) => (cents > 0 ? "+" : "") + money(cents);
+const signedPercent = (fraction) => (fraction > 0 ? "+" : "") + percent.format(fraction);
 const inputMoney = (cents) => plain.format(cents / 100);
 
 let currencyNames = null;
@@ -118,6 +119,25 @@ function h(tag, props, ...children) {
 
 // ---------------------------------------------------------------- state
 
+// The chart view is remembered in this browser only; it is not data.
+const CHART_VIEW_KEY = "finance.chartView";
+function savedChartView() {
+  try {
+    return localStorage.getItem(CHART_VIEW_KEY) === "path" ? "path" : "history";
+  } catch {
+    return "history";
+  }
+}
+function setChartView(view) {
+  state.chartView = view;
+  try {
+    localStorage.setItem(CHART_VIEW_KEY, view);
+  } catch {
+    // remembered until the window closes
+  }
+  render();
+}
+
 const state = {
   store: null,
   revision: null,
@@ -130,7 +150,7 @@ const state = {
   month: null,
   importText: "",
   importPlan: null,
-  chartScale: "goal",
+  chartView: savedChartView(), // "history" | "path"
   focus: null, // selector to focus after the next render
 };
 
@@ -403,21 +423,7 @@ function viewDashboard() {
       h("p", { class: "muted" }, "Currency and categories are in ", h("a", { href: "#settings" }, "Settings"), ".")));
   }
 
-  if (m.series.length > 0) {
-    const scaleButton = (scale, label) =>
-      h("button", { type: "button", class: state.chartScale === scale ? "seg active" : "seg", "aria-pressed": String(state.chartScale === scale),
-        onclick: () => { state.chartScale = scale; render(); } }, label);
-    parts.push(h("section", { class: "card" },
-      h("div", { class: "card-head" },
-        h("h2", null, "Portfolio"),
-        h("div", { class: "legend" },
-          h("span", null, h("span", { class: "key value" }), "Portfolio value"),
-          h("span", null, h("span", { class: "key paid" }), "Paid in, total"),
-          projectionVisible(m.projection, state.chartScale) ? h("span", null, h("span", { class: "key projection" }), "Projection") : null,
-          goalVisible(m.series, chartGoal(m), state.chartScale) ? h("span", null, h("span", { class: "key goal" }), "FI number") : null),
-        h("div", { class: "segmented", role: "group", "aria-label": "Chart scale" }, scaleButton("goal", "Up to FI number"), scaleButton("data", "Fit to data"))),
-      h("div", { id: "chart", class: "chart-box" })));
-  }
+  if (m.series.length > 0) parts.push(portfolioCard(m));
 
   const breakdown = (kind, total) => {
     const groups = F.byCategory(F.counted(store[kind]));
@@ -467,25 +473,91 @@ function incomeCard(m) {
     split.over > 0 ? h("p", { class: "muted" }, `Expenses and pay-ins are ${money(split.over)} a month more than the income.`) : null);
 }
 
-// No active expenses, no FI number: the chart then has no goal line.
+// No active expenses, no FI number: the chart then has no goal line and no
+// path to FI.
 const chartGoal = (m) => (F.counted(state.store.expenses).length ? m.fiNumber : 0);
+
+function chartView(m) {
+  return state.chartView === "path" && chartGoal(m) > 0 ? "path" : "history";
+}
+
+function projection(m) {
+  return F.fiProjection({ month: m.latestMonth, start: m.portfolio, payIn: m.payIn.average, goal: chartGoal(m), rate: state.store.settings.expectedReturn });
+}
+
+function portfolioCard(m) {
+  const view = chartView(m);
+  const key = (kind, label) => h("span", null, h("span", { class: `key ${kind}` }), label);
+  const viewButton = (name, label) =>
+    h("button", { type: "button", class: view === name ? "seg active" : "seg", "aria-pressed": String(view === name), onclick: () => setChartView(name) }, label);
+
+  let legend;
+  let note;
+  if (view === "path") {
+    const p = projection(m);
+    legend = [key("value", "Portfolio value"),
+      p.points.length ? [key("projection", `At ${percentUnit.format(p.rates.mid)} a year`), key("band", `${percentUnit.format(p.rates.low)} to ${percentUnit.format(p.rates.high)}`)] : null,
+      key("goal", "FI number")];
+    note = pathSummary(m, p);
+  } else {
+    legend = [key("value", "Portfolio value"), key("paid", "Paid in"), key("gain", "Gain"),
+      m.series.some((s) => s.value < s.invested) ? key("loss", "Loss") : null,
+      goalVisible(m.series, chartGoal(m)) ? key("goal", "FI number") : null];
+    note = "Paid in starts with what each account held in its first month, so the shading is the gain or loss since then.";
+  }
+
+  return h("section", { class: "card" },
+    h("div", { class: "card-head" },
+      h("h2", null, "Portfolio"),
+      h("div", { class: "legend" }, legend),
+      chartGoal(m) > 0
+        ? h("div", { class: "segmented", role: "group", "aria-label": "Chart" }, viewButton("history", "History"), viewButton("path", "Path to FI"))
+        : null),
+    h("div", { id: "chart", class: "chart-box" }),
+    h("p", { class: "chart-note muted" }, note));
+}
+
+// When the projection reaches the FI number, in words.
+function pathSummary(m, p) {
+  if (p.points.length === 0) return "The portfolio has reached the FI number.";
+  const rate = (k) => percentUnit.format(p.rates[k]);
+  const year = (k) => monthLabel(p.reach[k], true);
+  const limit = `within ${F.MAX_PROJECTION_MONTHS / 12} years`;
+  let outcome;
+  if (p.reach.mid) {
+    const months = F.monthIndex(p.reach.mid) - F.monthIndex(m.latestMonth);
+    const low = p.reach.low ? `${year("low")} at ${rate("low")}` : `not ${limit} at ${rate("low")}`;
+    outcome = `the portfolio reaches the FI number around ${year("mid")}, in ${duration(months)} (${year("high")} at ${rate("high")}, ${low}).`;
+  } else if (p.reach.high) {
+    outcome = `the portfolio does not reach the FI number ${limit}; at ${rate("high")} it would around ${year("high")}.`;
+  } else {
+    outcome = `the portfolio does not reach the FI number ${limit}, not even at ${rate("high")}.`;
+  }
+  return [`At ${rate("mid")} growth a year after inflation and ${money(m.payIn.average)} paid in a month, ${outcome} In today's money. The expected return is set in `,
+    h("a", { href: "#settings" }, "Settings"), "."];
+}
 
 let resizeObserver = null;
 function drawChart() {
   const box = document.getElementById("chart");
   if (!box) return;
   const m = F.metrics(state.store);
-  const draw = () =>
-    renderChart(box, {
-      series: m.series,
-      projection: m.projection,
-      fiNumber: chartGoal(m),
-      scale: state.chartScale,
-      format: money,
-      formatAxis: (cents) => axis.format(cents / 100),
-      formatMonth: monthLabel,
-      monthNumber: F.monthIndex,
-    });
+  const view = chartView(m);
+  const options = {
+    view,
+    series: m.series,
+    fiNumber: chartGoal(m),
+    projection: view === "path" ? projection(m) : null,
+    format: money,
+    formatSigned: signedMoney,
+    formatPercent: (fraction) => percent.format(fraction),
+    formatSignedPercent: signedPercent,
+    formatRate: (rate) => percentUnit.format(rate),
+    formatAxis: (cents) => axis.format(cents / 100),
+    formatMonth: monthLabel,
+    monthNumber: F.monthIndex,
+  };
+  const draw = () => renderChart(box, options);
   draw();
   resizeObserver?.disconnect();
   let width = box.clientWidth;
@@ -769,7 +841,7 @@ function settingsForm(store) {
     h("label", null, "Buffer on expenses (%)", h("input", { name: "bufferPercent", inputmode: "decimal", value: plain.format(bufferPercent), required: true })),
     h("p", { class: "muted" }, "Added on top of regular expenses for irregular costs such as holidays and repairs."),
     h("label", null, "Expected return (%)", h("input", { name: "expectedReturn", inputmode: "decimal", value: plain.format(expectedReturn), required: true })),
-    h("p", { class: "muted" }, "The portfolio's yearly return after inflation, for Time to FI on the dashboard. After inflation, because the FI number is in today's money. World stocks have returned about 5 % a year after inflation over the long run, with many years far above or below that."),
+    h("p", { class: "muted" }, `The portfolio's yearly return after inflation, for Time to FI and the Path to FI chart on the dashboard; the chart also shows ${F.RETURN_SPREAD} points less and more. After inflation, because the FI number is in today's money. World stocks have returned about 5 % a year after inflation over the long run, with many years far above or below that.`),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, "Save")));
 }
 

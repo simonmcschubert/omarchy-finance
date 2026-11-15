@@ -155,10 +155,26 @@ test("portfolio: accounts keep their last value through gaps", () => {
     ],
   });
   assert.deepEqual(F.portfolioSeries(s), [
-    { month: "2026-01", value: 1500, payIn: 100, paidIn: 100 },
-    { month: "2026-02", value: 1500, payIn: 0, paidIn: 100 },
-    { month: "2026-03", value: 1800, payIn: 100, paidIn: 200 },
+    { month: "2026-01", value: 1500, payIn: 100, invested: 1500 },
+    { month: "2026-02", value: 1500, payIn: 0, invested: 1500 },
+    { month: "2026-03", value: 1800, payIn: 100, invested: 1600 },
   ]);
+});
+
+test("portfolio: what an account held in its first month counts as paid in", () => {
+  // B is tracked from February on and already held 2,000 then, 300 of them
+  // paid in that month. Only the 100 the value rose by beyond pay-ins is gain.
+  const s = store({
+    accounts: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+    records: [
+      { month: "2026-01", account: "a", value: 1000, payIn: 1000 },
+      { month: "2026-02", account: "a", value: 1100, payIn: 50 },
+      { month: "2026-02", account: "b", value: 2000, payIn: 300 },
+    ],
+  });
+  const series = F.portfolioSeries(s);
+  assert.deepEqual(series.map((m) => [m.value, m.payIn, m.invested]), [[1000, 1000, 1000], [3100, 350, 3050]]);
+  assert.deepEqual(F.metrics(s).payIn, { average: 675, months: 2 }, "the pay-in average still counts only pay-ins");
 });
 
 test("investment rate uses the average pay-in of the last 12 months", () => {
@@ -264,6 +280,59 @@ test("missingMonths: after the latest month up to last month", () => {
   assert.equal(F.missingMonths(null, "2026-11"), null, "no values at all");
   assert.deepEqual(F.missingMonths("2026-09", "2026-11"), { from: "2026-10", to: "2026-10", count: 1 });
   assert.deepEqual(F.missingMonths("2025-11", "2026-02"), { from: "2025-12", to: "2026-01", count: 2 });
+});
+
+test("fiProjection: growth at the expected return plus the average pay-in", () => {
+  // At 0 % a year, 100 a month reaches 1,200 after 12 months.
+  const flat = F.fiProjection({ month: "2026-10", start: 0, payIn: 100, goal: 1200, rate: 0 });
+  assert.deepEqual(flat.rates, { low: -2, mid: 0, high: 2 });
+  assert.equal(flat.reach.mid, "2027-10");
+  assert.equal(flat.reach.high, "2027-10", "in the 12th month at 2 % too, a bit above 1,200");
+  assert.equal(flat.reach.low, "2027-11");
+  assert.deepEqual(flat.points[0], { month: "2026-11", low: 100, mid: 100, high: flat.points[0].high });
+
+  // The mid projection counts as Time to FI does.
+  const start = 50000 * EUR;
+  const payIn = 1250 * EUR;
+  const goal = 675000 * EUR;
+  const p = F.fiProjection({ month: "2026-10", start, payIn, goal, rate: 5 });
+  const months = F.projectToGoal(start, payIn, 5, goal).length;
+  assert.equal(p.reach.mid, F.addMonths("2026-10", months));
+  assert.ok(months > 20 * 12 && months < 22 * 12, `${months} months`);
+  assert.equal(p.reach.high, F.addMonths("2026-10", F.projectToGoal(start, payIn, 7, goal).length));
+  assert.equal(p.reach.low, F.addMonths("2026-10", F.projectToGoal(start, payIn, 3, goal).length));
+  const shown = F.monthIndex(p.reach.low) - F.monthIndex("2026-10");
+  assert.equal(p.points.length, Math.ceil(shown * 1.1), "until a little after the low projection gets there");
+  assert.equal(p.points.at(-1).month, F.addMonths("2026-10", p.points.length));
+  for (const point of p.points) assert.ok(point.low <= point.mid && point.mid <= point.high);
+});
+
+test("fiProjection: no goal, at the goal already, out of reach, close by", () => {
+  assert.equal(F.fiProjection({ month: "2026-10", start: 100, payIn: 10, goal: 0, rate: 5 }), null);
+
+  const there = F.fiProjection({ month: "2026-10", start: 1000, payIn: 10, goal: 1000, rate: 5 });
+  assert.deepEqual(there.reach, { low: "2026-10", mid: "2026-10", high: "2026-10" });
+  assert.deepEqual(there.points, []);
+
+  const never = F.fiProjection({ month: "2026-10", start: 100, payIn: 0, goal: 1e9, rate: 1 });
+  assert.deepEqual(never.reach, { low: null, mid: null, high: null });
+  assert.equal(never.points.length, F.MAX_PROJECTION_MONTHS);
+
+  // Only the high return gets there: 1.02^35 is 2.0, so in 35 years; the
+  // mid one at 0 % never does. The chart runs to 1.5 times that, and a bit.
+  const high = F.fiProjection({ month: "2026-10", start: 1000, payIn: 0, goal: 2000, rate: 0 });
+  assert.equal(high.reach.mid, null);
+  assert.equal(high.reach.high, "2061-11");
+  assert.equal(high.points.length, Math.ceil(421 * 1.5 * 1.1));
+
+  // A month away: the chart still shows a year.
+  const soon = F.fiProjection({ month: "2026-10", start: 990, payIn: 10, goal: 1000, rate: 5 });
+  assert.equal(soon.reach.mid, "2026-11");
+  assert.equal(soon.points.length, 12);
+
+  // Withdrawals: the value does not go below zero.
+  const down = F.fiProjection({ month: "2026-10", start: 1000, payIn: -500, goal: 5000, rate: 5 });
+  assert.equal(down.points.at(-1).mid, 0);
 });
 
 test("byCategory groups and sorts by monthly total", () => {
