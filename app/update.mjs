@@ -105,10 +105,16 @@ export function startUpdates(root, { saving }) {
   async function refresh() {
     if (restarting) return;
     const { json } = await call("GET");
-    if (json && !restarting) {
-      server = json;
-      render();
+    if (!json || restarting) return;
+    if (server && json.boot !== server.boot && json.installed !== server.installed) {
+      // Another window or a terminal installed a release: this page is old.
+      restarting = true;
+      while (saving()) await sleep(100);
+      location.reload();
+      return;
     }
+    server = json;
+    render();
   }
 
   async function check() {
