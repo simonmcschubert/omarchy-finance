@@ -38,6 +38,8 @@ notification confirms the update or says why it failed, and so does the
 button when hovered. Like `git pull`, this does not show the changes first;
 the release notes on GitHub list them. Updates never touch the data.
 
+![The update button: check, Update, Restart to update, Updating, Up to date](docs/update.png)
+
 Looking for releases asks the repository Finance was cloned from (GitHub) for
 its tags. Nothing about the data is sent.
 
