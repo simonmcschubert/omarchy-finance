@@ -258,6 +258,14 @@ test("metrics: gains over the last 12 months, expenses covered", () => {
   assert.equal(F.metrics({ ...s, records: [] }).gains, null);
 });
 
+test("missingMonths: after the latest month up to last month", () => {
+  assert.equal(F.missingMonths("2026-10", "2026-11"), null, "last month has values");
+  assert.equal(F.missingMonths("2026-11", "2026-11"), null, "this month has values already");
+  assert.equal(F.missingMonths(null, "2026-11"), null, "no values at all");
+  assert.deepEqual(F.missingMonths("2026-09", "2026-11"), { from: "2026-10", to: "2026-10", count: 1 });
+  assert.deepEqual(F.missingMonths("2025-11", "2026-02"), { from: "2025-12", to: "2026-01", count: 2 });
+});
+
 test("byCategory groups and sorts by monthly total", () => {
   const items = [
     { id: "1", name: "Rent", category: "Housing", amount: 900, everyMonths: 1 },
