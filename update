@@ -91,9 +91,12 @@ serves_this_checkout() {
   [[ $(realpath -e "$served" 2>/dev/null) == "$DIR/server.py" ]]
 }
 
-# Restarts the server and waits until it answers, as setup does.
+# Restarts the server and waits until it answers, as setup does. A server
+# that keeps failing (Restart=on-failure) soon makes systemd refuse to start
+# it again; reset-failed lifts that, so the version before can start.
 restart() {
   local _
+  systemctl --user reset-failed "$UNIT" 2>/dev/null || true
   systemctl --user restart "$UNIT" || return 1
   for _ in $(seq 20); do
     curl -fs -o /dev/null "$URL" && return 0

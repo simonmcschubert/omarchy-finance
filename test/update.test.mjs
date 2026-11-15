@@ -31,9 +31,15 @@ if [[ $2 == show ]]; then
   echo "{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 $served --port 47219 ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }"
   exit 0
 fi
-echo "systemctl $*" >> "${log}"`);
-  // A release with a file named "broken" does not answer once started.
-  logged("curl", `[[ ! -e "${app}/broken" ]] || exit 7`);
+echo "systemctl $*" >> "${log}"
+case $2 in
+  reset-failed) rm -f "${root}/start-limit" ;;
+  restart) [[ ! -e "${root}/start-limit" ]] || { echo "Job for $3 failed" >&2; exit 1; } ;;
+esac`);
+  // A release with a file named "broken" does not answer once started. Its
+  // server fails over and over, so systemd stops restarting it
+  // (Restart=on-failure hits the start limit) until reset-failed.
+  logged("curl", `[[ ! -e "${app}/broken" ]] || { touch "${root}/start-limit"; exit 7; }`);
   logged("notify-send");
   stub("sleep", "");
 
@@ -158,6 +164,7 @@ test("install moves to the release, restarts the server, and says so", (t) => {
   assert.equal(existsSync(join(s.app, "unreleased.txt")), false);
   assert.equal(s.git(s.app, "branch", "--show-current"), "main");
   assert.deepEqual(s.calls(), [
+    "systemctl --user reset-failed omarchy-finance.service",
     "systemctl --user restart omarchy-finance.service",
     "curl -fs -o /dev/null http://127.0.0.1:47219/",
     "notify-send Finance updated Version 0.2.0 is installed.",
