@@ -27,11 +27,36 @@ directory, so keep it where it is.
 
 ## Update
 
+Finance looks for a new release 15 seconds after its server starts and every
+four hours. The update button, a circle of arrows at the right end of the top
+bar, checks now when clicked; hover it to see the installed version. When
+there is a release, the button turns into a down arrow with **Update**. Click
+it to download the release, then click **Restart to update** to install it:
+Finance restarts its server with the release and reloads the window. When the
+new server does not answer, Finance goes back to the version it had. A
+notification confirms the update or says why it failed. When it fails before
+the restart (local changes in the checkout, for example), the button says
+**Update failed** and why, when hovered. Like `git pull`, this does not show
+the changes first; the release notes on GitHub list them. Updates never touch
+the data.
+
+![The update button: check, Update, Restart to update, Updating, Up to date](docs/update.png)
+
+Looking for releases asks the repository Finance was cloned from (GitHub) for
+its tags. Nothing about the data is sent.
+
+The same from a terminal:
+
 ```bash
-git -C ~/.local/share/omarchy-finance pull && ~/.local/share/omarchy-finance/setup
+~/.local/share/omarchy-finance/update check
+~/.local/share/omarchy-finance/update install 0.2.0
 ```
 
-`setup` restarts the server with the new code. Updates never touch the data.
+`git -C ~/.local/share/omarchy-finance pull && ~/.local/share/omarchy-finance/setup`
+works too, and is how a copy installed before the update button gets it. It
+takes the newest commit on `main`, released or not. Run `setup` again after
+an update when the release notes say so, for changes to the service or the
+launcher entry.
 
 ## Remove
 
@@ -138,14 +163,16 @@ directory.
 ## Development
 
 ```text
-server.py          # local server: page, /api/data (load/save), /theme.css
+server.py          # local server: page, /api/data (load/save), /api/update, /theme.css
 app/
 ├── index.html
 ├── app.mjs        # the views; saves every change
 ├── finance.mjs    # data format, parsing, metrics, CSV import and export (no DOM)
 ├── chart.mjs      # portfolio chart (SVG)
+├── update.mjs     # the update button
 └── style.css
 setup              # user service and launcher entry; --remove undoes
+update             # finds, downloads and installs releases
 ```
 
 Run it without installing, with its own data file:
@@ -157,6 +184,21 @@ Run it without installing, with its own data file:
 Tests:
 
 ```bash
-node --test                               # finance.mjs
+node --test                               # finance.mjs, update.mjs, update
 python3 -m unittest discover -s test      # server.py
 ```
+
+The tests of `update` run it against real git repositories, with stand-ins
+for `systemctl` and `curl`. A server started this way offers updates too,
+but `update install` refuses a checkout that `omarchy-finance.service` does
+not run, so installing one fails there.
+
+## Releases
+
+Actions › Release › Run workflow, with patch, minor, or major; the first
+release starts from 0.0.0, so minor gives 0.1.0. The workflow tags the `main`
+commit that passed CI as `vX.Y.Z` and creates the GitHub Release with notes
+from the merged pull requests. The tags hold the version (`update version`).
+Installed copies offer the release within four hours. "Release candidate"
+publishes `vX.Y.Z-rc.N`, which they do not offer, and "Dry run" shows the
+version and notes without publishing.

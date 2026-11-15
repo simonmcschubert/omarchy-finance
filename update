@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# Finds, downloads, and installs releases of Finance. The server runs it to
+# offer updates (server.py, Updater); it works from a terminal too. A release
+# is a vX.Y.Z tag on the checkout's origin (README.md, "Releases").
+#
+#   update check            prints "current", "available X.Y.Z", or
+#                           "downloaded X.Y.Z" for the newest release
+#   update download X.Y.Z   fetches the release; changes no files
+#   update install X.Y.Z    moves this checkout to the release and restarts
+#                           the server (omarchy-finance.service) with it; goes
+#                           back when the new server does not answer
+#   update version          prints the installed release: X.Y.Z, X.Y.Z-N-gSHA
+#                           N commits past it, or nothing before the first
+#
+# Run without a terminal (as the server does), install also reports its
+# result as a notification.
+set -euo pipefail
+
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -oBatchMode=yes}"
+
+# As in setup.
+UNIT=omarchy-finance.service
+URL=http://127.0.0.1:47219/
+DIR=$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+NOTIFY=0
+
+notify() {
+  if ((NOTIFY)); then notify-send "$@" 2>/dev/null || true; fi
+}
+
+fail() {
+  local message="$*"
+  echo "update: $message" >&2
+  notify "Finance update failed" "${message^}"
+  exit 1
+}
+
+repo() {
+  git -C "$DIR" "$@"
+}
+
+# "<commit> <version>" of the newest release on origin; nothing without one.
+newest_release() {
+  local refs
+  refs=$(timeout 30 git -C "$DIR" ls-remote --tags origin) || fail "can't reach origin"
+  # An annotated tag is listed twice; its ^{} line names the commit.
+  awk '{
+      tag = $2
+      sub(/^refs\/tags\//, "", tag)
+      peeled = sub(/\^\{\}$/, "", tag)
+      if (tag !~ /^v[0-9]+[.][0-9]+[.][0-9]+$/) next
+      if (peeled || !(tag in commit)) commit[tag] = $1
+    }
+    END { for (tag in commit) print commit[tag], substr(tag, 2) }' <<<"$refs" |
+    sort -k2,2V | tail -n 1
+}
+
+downloaded() {
+  repo rev-parse --quiet --verify "refs/tags/v$1^{commit}"
+}
+
+check() {
+  local release commit version
+  release=$(newest_release)
+  if [[ -z $release ]]; then
+    echo current
+    return
+  fi
+  read -r commit version <<<"$release"
+  if repo merge-base --is-ancestor "$commit" HEAD 2>/dev/null; then
+    echo current
+  elif [[ $(downloaded "$version") == "$commit" ]]; then
+    echo "downloaded $version"
+  else
+    echo "available $version"
+  fi
+}
+
+download() {
+  downloaded "$1" >/dev/null && return
+  timeout 120 git -C "$DIR" fetch --quiet --no-tags origin "refs/tags/v$1:refs/tags/v$1" ||
+    fail "can't download Finance $1"
+}
+
+# Whether the service runs the server of this checkout, as setup sets it up.
+serves_this_checkout() {
+  local served
+  served=$(systemctl --user show --property=ExecStart --value "$UNIT" 2>/dev/null |
+    grep -o '[^ ]*/server\.py' | head -n 1) || return 1
+  [[ $(realpath -e "$served" 2>/dev/null) == "$DIR/server.py" ]]
+}
+
+# Restarts the server and waits until it answers, as setup does. A server
+# that keeps failing (Restart=on-failure) soon makes systemd refuse to start
+# it again; reset-failed lifts that, so the version before can start.
+restart() {
+  local _
+  systemctl --user reset-failed "$UNIT" 2>/dev/null || true
+  systemctl --user restart "$UNIT" || return 1
+  for _ in $(seq 20); do
+    curl -fs -o /dev/null "$URL" && return 0
+    sleep 0.25
+  done
+  return 1
+}
+
+install() {
+  local version=$1 commit moved=0
+  [[ -t 2 ]] || NOTIFY=1
+  serves_this_checkout ||
+    fail "can't update to $version: $UNIT does not run Finance from $DIR. Set it up with $DIR/setup"
+  download "$version"
+  commit=$(downloaded "$version")
+  if ! repo merge-base --is-ancestor "$commit" HEAD; then
+    # Going back after a failed start resets the whole checkout.
+    [[ -z $(repo status --porcelain --untracked-files=no) ]] ||
+      fail "can't update to $version: $DIR has local changes"
+    repo merge --ff-only --quiet "$commit" >/dev/null 2>&1 ||
+      fail "can't update to $version: $DIR has local commits"
+    moved=1
+  fi
+  if ! restart; then
+    ((moved)) || fail "Finance did not start again. See: journalctl --user -u $UNIT"
+    repo reset --hard --quiet ORIG_HEAD
+    restart ||
+      fail "Finance $version did not start, and the version before it did not start again either. See: journalctl --user -u $UNIT"
+    fail "Finance $version did not start, so Finance stays as it was. See: journalctl --user -u $UNIT"
+  fi
+  echo "Finance $version is installed."
+  notify "Finance updated" "Version $version is installed."
+}
+
+version() {
+  repo describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude 'v*-*' 2>/dev/null | sed 's/^v//' || true
+}
+
+usage() {
+  echo "Usage: update check | download VERSION | install VERSION | version"
+}
+
+case ${1:-} in
+  check | version) ;;
+  download | install)
+    [[ ${2:-} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "not a release version: '${2:-}'"
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac
+
+# Only Finance's own checkout: not a repository it happens to sit in, such
+# as one that keeps the home directory.
+[[ $(repo rev-parse --show-toplevel 2>/dev/null) == "$DIR" ]] ||
+  fail "$DIR is not a git checkout, so there is nothing to update from"
+
+"$1" "${@:2}"
