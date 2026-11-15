@@ -222,6 +222,42 @@ test("incomeSplit: expenses with the buffer, the average pay-in, and the rest", 
   assert.equal(F.incomeSplit(F.metrics({ ...s, income: [] })), null);
 });
 
+test("gains: the change in value minus pay-ins, with a Modified Dietz return", () => {
+  const series = [
+    { month: "2026-08", value: 1000, payIn: 1000 },
+    { month: "2026-09", value: 1100, payIn: 0 },
+    { month: "2026-10", value: 1300, payIn: 100 },
+  ];
+  // From August's 1,000: 300 more, 100 of it paid in, in the middle of the
+  // second of two months, so invested for a quarter of the time.
+  assert.deepEqual(F.gains(series), { gain: 200, months: 2, rate: 200 / 1025 });
+  assert.deepEqual(F.gains(series, 1), { gain: 100, months: 1, rate: 100 / 1150 });
+  assert.equal(F.gains(series.slice(0, 1)), null);
+  assert.deepEqual(F.gains([{ value: 0, payIn: 0 }, { value: 0, payIn: 0 }]), { gain: 0, months: 1, rate: null });
+});
+
+test("metrics: gains over the last 12 months, expenses covered", () => {
+  const records = [];
+  // 14 months, 2025-01 .. 2026-02: 1,000 more each month, 500 of it paid in.
+  for (let i = 0; i < 14; i++) records.push({ month: F.addMonths("2025-01", i), account: "a", value: (i + 1) * 1000 * EUR, payIn: 500 * EUR });
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0 },
+    accounts: [{ id: "a", name: "A" }],
+    records,
+    expenses: [{ id: "e", name: "Rent", category: "", amount: 1000 * EUR, everyMonths: 1, active: true }],
+  });
+  const m = F.metrics(s);
+  // From 2025-02 (2,000) to 2026-02 (14,000): 12,000 more, 6,000 paid in.
+  assert.equal(m.gains.months, 12);
+  assert.equal(m.gains.gain, 6000 * EUR);
+  // Each pay-in invested for (12 - i - 0.5) / 12 of the time: 3,000 in all.
+  assert.ok(Math.abs(m.gains.rate - 6000 / (2000 + 3000)) < 1e-12, String(m.gains.rate));
+  assert.equal(m.coveredMonths, 14);
+  assert.equal(F.metrics({ ...s, expenses: [] }).coveredMonths, null);
+  assert.equal(F.metrics({ ...s, records: [] }).coveredMonths, null);
+  assert.equal(F.metrics({ ...s, records: [] }).gains, null);
+});
+
 test("byCategory groups and sorts by monthly total", () => {
   const items = [
     { id: "1", name: "Rent", category: "Housing", amount: 900, everyMonths: 1 },
