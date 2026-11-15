@@ -93,6 +93,8 @@ The data file stays.
 
 `Ctrl+1` to `Ctrl+5` open Dashboard, Expenses, Income, Portfolio and Settings.
 
+![Expenses, two of them inactive](docs/expenses.png)
+
 ![Portfolio](docs/portfolio.png)
 
 ### Dashboard numbers
