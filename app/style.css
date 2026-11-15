@@ -296,6 +296,68 @@ main > div {
   background: var(--accent);
 }
 
+/* ---- where the income goes */
+
+.split {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 4px 0 14px;
+}
+
+.split .part {
+  flex-basis: 0;
+  min-width: 2px;
+}
+
+.split-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.split-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.split-list .num {
+  margin-left: auto;
+}
+
+.split-list .sub {
+  display: block;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.split .expenses,
+.swatch.expenses {
+  background: var(--fg-muted);
+}
+
+.split .invested,
+.swatch.invested {
+  background: var(--accent);
+}
+
+.split .left,
+.swatch.left {
+  background: var(--sunken);
+}
+
 /* ---- chart */
 
 .legend {

@@ -198,6 +198,30 @@ test("with less than 12 months of history the average uses the months there are"
   assert.deepEqual(F.metrics(s).payIn, { average: 300, months: 3 });
 });
 
+test("incomeSplit: expenses with the buffer, the average pay-in, and the rest", () => {
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 10 },
+    income: [{ id: "i", name: "Salary", category: "", amount: 3000 * EUR, everyMonths: 1 }],
+    expenses: [{ id: "e", name: "Rent", category: "", amount: 1800 * EUR, everyMonths: 1, active: true }],
+    accounts: [{ id: "a", name: "A" }],
+    records: [
+      { month: "2026-09", account: "a", value: 1000 * EUR, payIn: 400 * EUR },
+      { month: "2026-10", account: "a", value: 2000 * EUR, payIn: 800 * EUR },
+    ],
+  });
+  // 3,000 income: 1,980 expenses with the buffer, 600 paid in on average.
+  assert.deepEqual(F.incomeSplit(F.metrics(s)), { expenses: 1980 * EUR, invested: 600 * EUR, leftOver: 420 * EUR, over: 0 });
+
+  const more = F.saveMonth(s, "2026-10", [{ account: "a", value: 2000 * EUR, payIn: 2000 * EUR }]);
+  assert.deepEqual(F.incomeSplit(F.metrics(more)), { expenses: 1980 * EUR, invested: 1200 * EUR, leftOver: 0, over: 180 * EUR });
+
+  const out = F.saveMonth(s, "2026-10", [{ account: "a", value: 2000 * EUR, payIn: -1000 * EUR }]);
+  assert.deepEqual(F.incomeSplit(F.metrics(out)), { expenses: 1980 * EUR, invested: 0, leftOver: 1020 * EUR, over: 0 }, "withdrawals invest nothing");
+
+  assert.deepEqual(F.incomeSplit(F.metrics({ ...s, records: [] })), { expenses: 1980 * EUR, invested: 0, leftOver: 1020 * EUR, over: 0 });
+  assert.equal(F.incomeSplit(F.metrics({ ...s, income: [] })), null);
+});
+
 test("byCategory groups and sorts by monthly total", () => {
   const items = [
     { id: "1", name: "Rent", category: "Housing", amount: 900, everyMonths: 1 },

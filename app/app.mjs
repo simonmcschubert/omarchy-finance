@@ -420,9 +420,39 @@ function viewDashboard() {
           h("div", { class: "bar" }, fill));
       })));
   };
-  const columns = [breakdown("expenses", m.baseExpenses), breakdown("income", m.income)].filter(Boolean);
+  const columns = [incomeCard(m), breakdown("expenses", m.baseExpenses)].filter(Boolean);
   if (columns.length) parts.push(h("div", { class: "columns" }, columns));
   return h("div", null, parts);
+}
+
+// A thin bar of the income's parts, and a list with each part's amount and
+// share of the income.
+function incomeCard(m) {
+  const split = F.incomeSplit(m);
+  if (!split) return null;
+  const { bufferPercent } = state.store.settings;
+  const months = m.payIn?.months;
+  const parts = [
+    ["expenses", "Expenses", `incl. ${percentUnit.format(bufferPercent)} buffer`, split.expenses],
+    ["invested", "Invested", m.payIn ? `average pay-in of ${months === 12 ? "the last 12 months" : months === 1 ? "1 month" : `${months} months`}` : null, m.payIn ? split.invested : null],
+    ["left", "Left over", null, split.over > 0 ? null : split.leftOver],
+  ];
+  const bar = h("div", { class: "split", "aria-hidden": "true" });
+  for (const [kind, , , amount] of parts) {
+    if (!(amount > 0)) continue;
+    const part = h("span", { class: `part ${kind}` });
+    part.style.flexGrow = String(amount);
+    bar.append(part);
+  }
+  const rows = parts.map(([kind, name, detail, amount]) => {
+    if (kind === "left" && amount === null) return null;
+    return h("li", null,
+      h("span", { class: `swatch ${kind}` }),
+      h("span", null, name, detail ? h("span", { class: "sub" }, detail) : null),
+      h("span", { class: "num" }, amount === null ? h("a", { href: "#portfolio" }, "Add pay-ins") : `${money(amount)} · ${percent.format(amount / m.income)}`));
+  });
+  return card("Where the income goes", bar, h("ul", { class: "split-list" }, rows),
+    split.over > 0 ? h("p", { class: "muted" }, `Expenses and pay-ins are ${money(split.over)} a month more than the income.`) : null);
 }
 
 // No active expenses, no FI number: the chart then has no goal line.

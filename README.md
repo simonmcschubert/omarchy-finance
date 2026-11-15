@@ -123,6 +123,11 @@ month. **Up to FI number** scales it to the FI number and continues the
 value as a dotted projection until it gets there, the way Time to FI counts;
 **Fit to data** zooms in on the months there are.
 
+**Where the income goes** splits the monthly income into expenses (with
+the buffer), the average monthly pay-in of the last 12 months, and what is
+left over, or says how much more than the income those two take.
+**Expenses by category** shows the expenses without the buffer.
+
 ### Importing past months
 
 Settings → **Import past months from CSV**: choose a file or paste rows
