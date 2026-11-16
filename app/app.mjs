@@ -1036,7 +1036,8 @@ function viewSettings() {
     importCard(store),
     exportCard(store),
     card("Data file", h("p", null, "Everything is saved in one file on this computer:"), h("p", null, h("code", null, state.file)),
-      h("p", { class: "muted" }, "No account and no sync. Copy the file to back it up.")));
+      h("p", { class: "muted" }, "No account and no sync. Copy the file to back it up.")),
+    card("Updates", updates.channelSettings()));
 }
 
 function settingsForm(store) {
@@ -1271,5 +1272,5 @@ function importResult(plan) {
 // ---------------------------------------------------------------- start
 
 state.view = viewFromHash();
+const updates = startUpdates(document.getElementById("update"), { saving: () => inFlight || pending !== null });
 load();
-startUpdates(document.getElementById("update"), { saving: () => inFlight || pending !== null });

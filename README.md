@@ -42,14 +42,28 @@ the data.
 
 ![The update button: check, Update, Restart to update, Updating, Up to date](docs/update.png)
 
-Looking for releases asks the repository Finance was cloned from (GitHub) for
-its tags. Nothing about the data is sent.
+Settings › Updates chooses which updates the button offers. **Stable**, the
+default, offers releases. **Preview** offers every change on `main` as soon
+as CI has passed for it, days or weeks before it is released: new features
+first, and now and then a new bug. A preview is named by its commit, such as
+`preview 1a2b3c4`, and the installed version then reads `0.2.0-3-g1a2b3c4`:
+three commits past 0.2.0. Previews have no release notes; the commits on
+GitHub list the changes. Back on Stable, Finance keeps the version it has
+until a release is newer. It never goes back to an older version, which
+could not read data saved by a newer one.
+
+![Settings › Updates: Stable or Preview](docs/update-channel.png)
+
+Looking for updates asks the repository Finance was cloned from (GitHub) for
+its tags, and on Preview for its `preview` branch. Nothing about the data is
+sent.
 
 The same from a terminal:
 
 ```bash
 ~/.local/share/omarchy-finance/update check
 ~/.local/share/omarchy-finance/update install 0.2.0
+~/.local/share/omarchy-finance/update channel preview   # or stable
 ```
 
 `git -C ~/.local/share/omarchy-finance pull && ~/.local/share/omarchy-finance/setup`
@@ -261,10 +275,10 @@ app/
 ├── app.mjs        # the views; saves every change
 ├── finance.mjs    # data format, parsing, metrics, forecast, CSV import and export (no DOM)
 ├── chart.mjs      # portfolio and forecast charts (SVG)
-├── update.mjs     # the update button
+├── update.mjs     # the update button, and the channel in Settings
 └── style.css
 setup              # user service and launcher entry; --remove undoes
-update             # finds, downloads and installs releases
+update             # finds, downloads and installs releases or previews
 ```
 
 Run it without installing, with its own data file:
@@ -294,3 +308,7 @@ from the merged pull requests. The tags hold the version (`update version`).
 Installed copies offer the release within four hours. "Release candidate"
 publishes `vX.Y.Z-rc.N`, which they do not offer, and "Dry run" shows the
 version and notes without publishing.
+
+Previews need no step: once CI passes for a commit pushed to `main`, the
+Preview workflow fast-forwards the `preview` branch to it, and copies on
+Preview offer it within four hours.
