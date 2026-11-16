@@ -879,7 +879,9 @@ function viewForecast() {
           h("input", { id: "forecast-coast", name: "coastContribution", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.coastContribution) })),
         h("button", { type: "submit" }, "Show")),
       h("p", { class: "muted" },
-        m.payIn ? `Paid in per month starts as your average of ${months}, ${money(average)}. ` : "There are no pay-ins yet to start from. ",
+        !m.payIn ? "There are no pay-ins yet to start from. "
+          : m.payIn.average < 0 ? `Your average of ${months} is a withdrawal of ${money(-m.payIn.average)} a month, so paid in per month starts at 0. `
+          : `Paid in per month starts as your average of ${months}, ${money(average)}. `,
         "Coast FI is when the smaller amount is enough to reach the FI number by retirement; with 0, the portfolio gets there on its own.")),
     h("div", { id: "forecast-results", class: "stack" }, forecastResults()));
 }
