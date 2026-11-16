@@ -445,7 +445,8 @@ function viewDashboard() {
       m.gains === null ? "–" : signedMoney(m.gains.gain),
       m.gains === null ? "needs values for two months" : m.gains.rate === null ? "change in value minus pay-ins" : `a return of ${percent.format(m.gains.rate)}, not counting pay-ins`),
     tile("Expenses covered", m.coveredMonths === null ? "–" : duration(m.coveredMonths),
-      m.coveredMonths === null ? "needs expenses and a portfolio value" : `by the portfolio, at ${money(m.expenses)} a month`),
+      [m.coveredMonths === null ? "needs expenses and a portfolio value" : `by the portfolio, at ${money(m.expenses)} a month`,
+        emergencyLine(m.emergency)]),
     tile("FI number", expenses.length ? money(m.fiNumber) : "–",
       [`${plain.format(m.multiple)} × yearly expenses (${percentUnit.format(withdrawalRate)} withdrawal rate)`,
         m.fiParts.extra >= 100
@@ -538,6 +539,18 @@ function incomeCard(m) {
   });
   return card("Where the income goes", bar, h("ul", { class: "split-list" }, rows),
     split.over > 0 ? h("p", { class: "muted" }, `Expenses and pay-ins are ${money(split.over)} a month more than the income.`) : null);
+}
+
+// The emergency fund in words, under Expenses covered: how long the cash
+// accounts pay the expenses, against the target in Settings.
+function emergencyLine(e) {
+  if (e === null) return h("div", null, "Emergency fund: add a cash account in ", h("a", { href: "#settings" }, "Settings"));
+  if (e.months === null) return h("div", null, `Emergency fund: ${money(e.cash)} in cash`);
+  const months = e.months >= 1 ? duration(Math.floor(e.months)) : "less than a month";
+  if (e.target === 0) return h("div", null, `Emergency fund: ${months} in cash`);
+  return h("div", { class: e.short > 0 ? "short" : null },
+    `Emergency fund: ${months} in cash, `,
+    e.short > 0 ? `${money(e.short)} short of ${e.target} months` : `the ${e.target} months you aim for`);
 }
 
 // Whether an account has its first value in `month`.
@@ -1451,7 +1464,7 @@ function viewSettings() {
 }
 
 function settingsForm(store) {
-  const { withdrawalRate, bufferPercent, currency: code, numberFormat, expectedReturn, inflation, birthYear, retirementAge } = store.settings;
+  const { withdrawalRate, bufferPercent, currency: code, numberFormat, expectedReturn, inflation, birthYear, retirementAge, emergencyMonths } = store.settings;
   const codes = Intl.supportedValuesOf("currency");
   if (!codes.includes(code)) codes.push(code);
   return h("form", { class: "settings-form", onsubmit: (event) => {
@@ -1463,6 +1476,8 @@ function settingsForm(store) {
     const buffer = F.parsePercent(data.get("bufferPercent"));
     const growth = F.parsePercent(data.get("expectedReturn"));
     const prices = F.parsePercent(data.get("inflation"));
+    const emergencyText = String(data.get("emergencyMonths")).trim();
+    const emergency = Number(emergencyText);
     const birthText = String(data.get("birthYear")).trim();
     const ageText = String(data.get("retirementAge")).trim();
     const born = birthText === "" ? null : Number(birthText);
@@ -1479,6 +1494,7 @@ function settingsForm(store) {
     else if (!prices.ok || !(prices.value >= 0 && prices.value <= 100)) error = "Inflation: enter a percentage from 0 to 100.";
     else if (born !== null && !(/^[0-9]{4}$/.test(birthText) && born >= firstYear && born <= thisYear)) error = `Year of birth: enter a year from ${firstYear} to ${thisYear}, or leave it empty.`;
     else if (!/^[0-9]+$/.test(ageText) || age < ages.min || age > ages.max) error = `Retirement age: enter whole years from ${ages.min} to ${ages.max}.`;
+    else if (!/^[0-9]+$/.test(emergencyText) || emergency < F.EMERGENCY_MONTHS.min || emergency > F.EMERGENCY_MONTHS.max) error = `Emergency fund: enter whole months from ${F.EMERGENCY_MONTHS.min} to ${F.EMERGENCY_MONTHS.max}.`;
     if (error) return showError(event.currentTarget, error);
     commit(F.saveSettings(store, {
       currency: chosen,
@@ -1489,6 +1505,7 @@ function settingsForm(store) {
       inflation: prices.value,
       birthYear: born,
       retirementAge: age,
+      emergencyMonths: emergency,
     }), "Settings saved.");
   } },
     h("label", null, "Currency",
@@ -1509,6 +1526,8 @@ function settingsForm(store) {
     h("label", null, "Retirement age", h("input", { name: "retirementAge", inputmode: "numeric", autocomplete: "off", value: String(retirementAge), required: true })),
     h("p", { class: "muted" }, "For the ", h("a", { href: "#forecast" }, "forecast"), ": the official retirement age, 67 in Germany for everyone born in 1964 or later. ",
       "Retirement starts in January of the year you reach it."),
+    h("label", null, "Emergency fund (months of expenses)", h("input", { name: "emergencyMonths", inputmode: "numeric", value: String(emergencyMonths), required: true })),
+    h("p", { class: "muted" }, "How many months of expenses you want to keep in cash accounts, apart from the portfolio: 3 to 6 are common. The dashboard says how far your cash goes, under Expenses covered. 0 sets no target."),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, "Save")));
 }
 

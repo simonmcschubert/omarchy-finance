@@ -153,6 +153,8 @@ The data file stays.
     return, so 5 % after inflation becomes 8 % before it.
   - Year of birth and retirement age (default 67), for the forecast. The
     forecast needs the year of birth; it is empty until entered.
+  - Emergency fund (default 6): how many months of expenses to keep in
+    cash accounts; 0 sets no target.
   - Categories, one list for expenses and one for income. A new data file
     starts with a few common ones. Renaming a category renames it on every
     expense or income that has it; deleting one leaves them without a
@@ -183,7 +185,7 @@ Settings.
 | Investment rate | Average monthly pay-in over the last 12 months ÷ monthly income |
 | Portfolio | Sum of all accounts in the latest month, and its change since the month before |
 | Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins and one-offs. The return is that gain ÷ (the value 12 months ago + each pay-in and one-off for the part of the 12 months it was invested, from the middle of its month) |
-| Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them |
+| Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them. Under it, the emergency fund: the latest values of the cash accounts ÷ monthly expenses, and how much is missing to the months set in Settings |
 | FI number | What the portfolio would need when retiring now. What it pays a month: the expenses that count then, plus the buffer, less the income that does. Once nothing starts or ends any more, that amount × 12 ÷ withdrawal rate (× 25 at 4 %); until then, what it pays on top of that, month by month, such as bridging the years until a pension starts. Never more than the highest monthly amount × 12 ÷ withdrawal rate. Without starts and ends: monthly expenses × 12 ÷ withdrawal rate |
 | FI reached | Portfolio ÷ FI number |
 | Time to FI | Months until the portfolio reaches the FI number of that month (for retiring then): from the latest month it grows by the expected return (compounded monthly) and gets the average monthly pay-in each month, while the FI number rises by the inflation. Years from two years on; nothing beyond 100 years |

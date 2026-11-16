@@ -1285,3 +1285,8 @@ table.entry th {
 .bar-fill.debt {
   background: var(--bad, var(--red));
 }
+
+/* The emergency fund is short of its target. */
+.tile-detail .short {
+  color: var(--yellow);
+}
