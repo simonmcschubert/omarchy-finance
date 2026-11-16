@@ -123,9 +123,12 @@ The data file stays.
     care insurance" from retirement until the age the pension starts.
 
   Both numbers can be changed; income tax is left out.
-- **Portfolio**: per month, each broker account's value at month end and what
-  was paid in that month (negative for withdrawals). An account without a
-  value in a month counts with its last value.
+- **Portfolio**: per month, each broker account's value at month end, what
+  was paid in that month (negative for withdrawals), and a one-off: a lump
+  sum in or out, such as an inheritance or a house deposit. A one-off counts
+  as paid in (so it is no gain), but not for the average pay-in that the
+  investment rate, Time to FI and the forecast go on with. An account
+  without a value in a month counts with its last value.
 - **Forecast**: how the portfolio could grow until retirement, and whether
   it lasts after, in three plans and at three growth rates (6, 8 and 10 % a
   year before inflation, by default). See [Forecast](#forecast).
@@ -170,7 +173,7 @@ Settings.
 | Monthly expenses | Sum of the active expenses that count this month the same way, plus the buffer |
 | Investment rate | Average monthly pay-in over the last 12 months ÷ monthly income |
 | Portfolio | Sum of all accounts in the latest month, and its change since the month before |
-| Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins. The return is that gain ÷ (the value 12 months ago + each pay-in for the part of the 12 months it was invested, from the middle of its month) |
+| Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins and one-offs. The return is that gain ÷ (the value 12 months ago + each pay-in and one-off for the part of the 12 months it was invested, from the middle of its month) |
 | Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them |
 | FI number | What the portfolio would need when retiring now. What it pays a month: the expenses that count then, plus the buffer, less the income that does. Once nothing starts or ends any more, that amount × 12 ÷ withdrawal rate (× 25 at 4 %); until then, what it pays on top of that, month by month, such as bridging the years until a pension starts. Never more than the highest monthly amount × 12 ÷ withdrawal rate. Without starts and ends: monthly expenses × 12 ÷ withdrawal rate |
 | FI reached | Portfolio ÷ FI number |
@@ -253,6 +256,14 @@ course.
   when it is entered under Income, from its age, and the FI number covers
   the years until it starts. Taxes are left out.
 
+**Planned one-offs**, at the bottom of the page, are money that comes in
+or goes out once in a month to come: an inheritance, a house deposit, a
+car, a sabbatical (what you live on then, and the pay-ins you skip). Every
+plan gets them in their month, as do Time to FI and the Path to FI chart;
+Coast FI counts on those still to come before retirement. Amounts are in
+today's money and rise with inflation, like expenses. They are saved; a
+one-off that has happened goes under Portfolio.
+
 The amounts typed on the page are not saved; the year of birth and the
 retirement age are in Settings.
 
@@ -262,9 +273,9 @@ Settings → **Import past months from CSV**: choose a file or paste rows
 copied from a spreadsheet. One row per account and month:
 
 ```csv
-date;account;value;pay_in
-31.01.2025;Trade Republic;12.345,67;500
-31.01.2025;ING;8.000;0
+date;account;value;pay_in;one_off
+31.01.2025;Trade Republic;12.345,67;500;0
+31.01.2025;ING;58.000;0;50.000
 ```
 
 - Semicolons, commas or tabs between columns.
@@ -272,7 +283,7 @@ date;account;value;pay_in
   month of its date, so an account can have only one row per month.
 - Amounts like `1.234,56` or `1,234.56`. A separator followed by exactly three
   digits is a thousands separator: `1.234` is 1234.
-- `pay_in` is optional; empty means 0.
+- `pay_in` and `one_off` are optional; empty means 0.
 - New account names become new accounts. A row for a month and account that
   already exist replaces the old values.
 

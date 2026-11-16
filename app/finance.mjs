@@ -4,7 +4,7 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 9;
+export const VERSION = 10;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
@@ -43,17 +43,19 @@ export function emptyStore() {
     income: [],
     accounts: [],
     records: [],
+    events: [],
   };
 }
 
 // ---------------------------------------------------------------- file format
 
-const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records"];
+const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events"];
 const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths", "from", "until"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active", "essential"];
 const ACCOUNT_KEYS = ["id", "name"];
-const RECORD_KEYS = ["month", "account", "value", "payIn"];
+const RECORD_KEYS = ["month", "account", "value", "payIn", "oneOff"];
+const EVENT_KEYS = ["id", "name", "month", "amount"];
 const MAX_CENTS = 1e13; // 100 billion; anything bigger is a typo
 
 function isObject(value) {
@@ -190,6 +192,14 @@ function upgradeFromVersion8(value) {
   return next;
 }
 
+// Version 9 had no one-off amounts: every pay-in was regular, and no
+// one-off was planned.
+function upgradeFromVersion9(value) {
+  const next = { ...value, version: 10, events: [] };
+  if (Array.isArray(value.records)) next.records = value.records.map((record) => (isObject(record) ? { ...record, oneOff: 0 } : record));
+  return next;
+}
+
 // A start or end of an expense or income: null (always), { at: "retirement" },
 // { age: whole years } (January of the year of that age) or { month:
 // "YYYY-MM" } (a start's first month, an end's last month).
@@ -217,6 +227,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 6) value = upgradeFromVersion6(value);
     if (isObject(value) && value.version === 7) value = upgradeFromVersion7(value);
     if (isObject(value) && value.version === 8) value = upgradeFromVersion8(value);
+    if (isObject(value) && value.version === 9) value = upgradeFromVersion9(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -310,6 +321,19 @@ export function parseStore(value) {
       seen.add(key);
       if (!isCents(record.value, { min: 0 })) throw new Error(`${where} value must be zero or more cents`);
       if (!isCents(record.payIn)) throw new Error(`${where} payIn must be a number of cents`);
+      if (!isCents(record.oneOff)) throw new Error(`${where} oneOff must be a number of cents`);
+    });
+
+    if (!Array.isArray(value.events)) throw new Error("events is not a list");
+    const eventIds = new Set();
+    value.events.forEach((event, i) => {
+      const where = `events[${i}]`;
+      checkKeys(event, EVENT_KEYS, where);
+      if (!isText(event.id) || event.id === "" || eventIds.has(event.id)) throw new Error(`${where} has a missing or repeated id`);
+      eventIds.add(event.id);
+      if (!isText(event.name) || event.name === "") throw new Error(`${where} has no name`);
+      if (!isMonth(event.month)) throw new Error(`${where} has an invalid month`);
+      if (!isCents(event.amount) || event.amount === 0) throw new Error(`${where} amount must be a number of cents other than 0`);
     });
   } catch (error) {
     return { ok: false, error: error.message };
@@ -532,9 +556,11 @@ function sum(values) {
 
 // One entry per month from the first to the last recorded month, gaps
 // included. An account without a value in a month keeps its last value.
-// payIn counts only that month's pay-ins. invested is the running total of
-// what went into the accounts: each account's value in its first month (what
-// it held when tracking began), then its pay-ins. value - invested is the
+// payIn counts only that month's regular pay-ins, oneOff its one-off ones
+// (an inheritance in, a house deposit out): those count as paid in, but not
+// for the average pay-in. invested is the running total of what went into
+// the accounts: each account's value in its first month (what it held when
+// tracking began), then its pay-ins and one-offs. value - invested is the
 // gain since tracking began.
 export function portfolioSeries(store) {
   if (store.records.length === 0) return [];
@@ -552,13 +578,15 @@ export function portfolioSeries(store) {
   let invested = 0;
   for (let index = first; index <= last; index++) {
     let payIn = 0;
+    let oneOff = 0;
     for (const record of byMonth.get(index) ?? []) {
       // The first value already holds that month's pay-in.
-      invested += latest.has(record.account) ? record.payIn : record.value;
+      invested += latest.has(record.account) ? record.payIn + (record.oneOff ?? 0) : record.value;
       latest.set(record.account, record.value);
       payIn += record.payIn;
+      oneOff += record.oneOff ?? 0;
     }
-    series.push({ month: monthFromIndex(index), value: sum([...latest.values()]), payIn, invested });
+    series.push({ month: monthFromIndex(index), value: sum([...latest.values()]), payIn, oneOff, invested });
   }
   return series;
 }
@@ -596,16 +624,19 @@ const goalFunction = (goal) => (typeof goal === "function" ? goal : () => goal);
 // `payIn` each month. Ends with the first month at or above `goal`, which
 // rises by `inflation` percent a year; empty when `start` is there already.
 // `goal` is an amount, or a function of the months from now (0 for now)
-// giving the goal of that month in today's money. null when it takes more
-// than 100 years, or never comes.
-export function projectToGoal(start, payIn, returnPercent, goal, inflation = 0) {
+// giving the goal of that month in today's money. `oneOffs`, when given, is
+// a function of the months from now giving what is paid in once that month
+// (planned one-offs), in today's money, rising by the inflation. null when
+// it takes more than 100 years, or never comes.
+export function projectToGoal(start, payIn, returnPercent, goal, inflation = 0, oneOffs = null) {
   const goalIn = goalFunction(goal);
   if (start >= goalIn(0)) return [];
   const rate = monthlyRate(returnPercent);
   const values = [];
   let value = start;
   while (values.length < MAX_PROJECTION_MONTHS) {
-    value = value * (1 + rate) + payIn;
+    const n = values.length + 1;
+    value = Math.max(0, value * (1 + rate) + payIn + (oneOffs ? inflated(oneOffs(n), inflation, n) : 0));
     values.push(value);
     if (value >= inflated(goalIn(values.length), inflation, values.length)) return values;
   }
@@ -624,8 +655,9 @@ export function gains(series, window = 12) {
   const months = Math.min(window, series.length - 1);
   const start = series.at(-1 - months);
   const recent = series.slice(-months);
-  const gain = series.at(-1).value - start.value - sum(recent.map((m) => m.payIn));
-  const invested = start.value + sum(recent.map((m, i) => (m.payIn * (months - i - 0.5)) / months));
+  const paid = (m) => m.payIn + (m.oneOff ?? 0);
+  const gain = series.at(-1).value - start.value - sum(recent.map(paid));
+  const invested = start.value + sum(recent.map((m, i) => (paid(m) * (months - i - 0.5)) / months));
   return { gain, months, rate: invested > 0 ? gain / invested : null };
 }
 
@@ -659,7 +691,7 @@ export const RETURN_SPREAD = 2;
 //   times as long as the mid one takes, or else the high one), and a
 //   little after; at least a year, at most MAX_PROJECTION_MONTHS. None when
 //   start is at the goal already.
-export function fiProjection({ month, start, payIn, goal, rate, inflation = 0 }) {
+export function fiProjection({ month, start, payIn, goal, rate, inflation = 0, oneOffs = null }) {
   const goalIn = goalFunction(goal);
   if (!(goalIn(0) > 0)) return null;
   const rates = { low: rate - RETURN_SPREAD, mid: rate, high: rate + RETURN_SPREAD };
@@ -672,8 +704,9 @@ export function fiProjection({ month, start, payIn, goal, rate, inflation = 0 })
   for (let n = 1; n <= MAX_PROJECTION_MONTHS; n++) {
     const point = { month: addMonths(month, n) };
     const goalNow = inflated(goalIn(n), inflation, n);
+    const once = oneOffs ? inflated(oneOffs(n), inflation, n) : 0;
     for (const k of keys) {
-      values[k] = Math.max(0, values[k] * (1 + monthly[k]) + payIn);
+      values[k] = Math.max(0, values[k] * (1 + monthly[k]) + payIn + once);
       point[k] = values[k];
       if (reach[k] === null && values[k] >= goalNow) reach[k] = n;
     }
@@ -702,6 +735,12 @@ function changesAfter(store, retirement) {
     for (const at of [from, until]) if (Number.isFinite(at) && at > retirement) changes.add(at);
   }
   return [...changes].sort((a, b) => a - b);
+}
+
+// The planned one-offs of the month of `index`, added up: what is paid in
+// (or out, below 0) once, in today's money.
+export function oneOffsIn(store, index) {
+  return sum(store.events.filter((event) => monthIndex(event.month) === index).map((event) => event.amount));
 }
 
 // The FI number if retirement starts in the month of `index`, in today's
@@ -807,15 +846,17 @@ export function metrics(store, now = currentMonth()) {
   const from = last ? monthIndex(last.month) : nowIndex;
   const goal = (options) => (n) => fiNumberIn(store, Math.max(from + n, nowIndex), options);
   const fiNumber = fiNumberIn(store, nowIndex);
+  // The planned one-offs n months after the latest month.
+  const oneOffs = (n) => oneOffsIn(store, from + n);
   // From the latest month on, with the average pay-in of the last 12 months.
-  const ahead = last && fiNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, goal(), inflation) : null;
+  const ahead = last && fiNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, goal(), inflation, oneOffs) : null;
   // Lean FI: the same for the essential expenses only.
   const essential = store.expenses.some((item) => item.active !== false && item.essential);
   let lean = null;
   if (essential) {
     const leanExpenses = needIn(store, nowIndex, nowIndex, { essential: true });
     const leanNumber = fiNumberIn(store, nowIndex, { essential: true });
-    const leanAhead = last && leanNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, goal({ essential: true }), inflation) : null;
+    const leanAhead = last && leanNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, goal({ essential: true }), inflation, oneOffs) : null;
     lean = {
       expenses: leanExpenses,
       fiNumber: leanNumber,
@@ -835,8 +876,10 @@ export function metrics(store, now = currentMonth()) {
     retiredNeed: needIn(store, nowIndex, nowIndex),
     fiParts: fiNumberParts(store, nowIndex),
     // The FI number of each month from the latest one on (n months later),
-    // in today's money, for the Path to FI chart.
+    // and the planned one-offs then, in today's money, for the Path to FI
+    // chart.
     goal: goal(),
+    oneOffs,
     series,
     latestMonth: last ? last.month : null,
     portfolio: last ? last.value : null,
@@ -935,6 +978,9 @@ export function ageIn(month, birthYear) {
 // month of `retirement` (needIn), goal the FI number for retiring in the
 // month of `index` (fiNumberIn), both in today's money. A plan's retirement
 // starts with the retirement age, or for Retire early the month after FI.
+// oneOffs(index), when given, is what is paid in once in the month of
+// `index` (oneOffsIn), in today's money: every plan gets it, and Coast FI
+// counts on those still to come before retirement.
 //
 // Returns { months: shown months from start on, retirement: its first
 // month, goal: the FI number of each shown month, fiAtRetirement: the FI
@@ -947,25 +993,35 @@ export function forecast(params) {
   const { start, value, expenses, fiNumber, birthYear, retirementAge, growth, inflation = 0, contribution, coastContribution } = params;
   const need = params.need ?? (() => expenses);
   const goal = params.goal ?? (() => fiNumber);
+  const oneOffs = params.oneOffs ?? (() => 0);
   const rate = monthlyRate(growth);
   const first = monthIndex(start);
   const retirement = (birthYear + retirementAge) * 12;
   const lastShown = Math.max((birthYear + SHOWN_AGE) * 12 + 11, first + 120);
   const lastChecked = Math.max((birthYear + LASTS_AGE) * 12 + 11, lastShown);
   // What the portfolio pays in the month of `index`, retired from the month
-  // of `from`, and the FI number of that month, in the money of then.
+  // of `from`, the FI number of that month, and its one-offs, in the money
+  // of then.
   const expensesAt = (index, from) => inflated(need(index, from), inflation, index - first);
   const goalAt = (index) => inflated(goal(index), inflation, index - first);
+  const onceAt = (index) => inflated(oneOffs(index), inflation, index - first);
   // The value at the end of the month before retirement is what has to
   // reach the FI number of retiring then.
   const fiAtRetirement = inflated(goal(retirement), inflation, retirement - 1 - first);
 
+  // The one-offs after `index` until retirement, each grown to when
+  // retirement starts.
+  const onceAhead = [];
+  for (let index = retirement - 1, total = 0; index >= first; index--) {
+    onceAhead[index - first] = total;
+    total += onceAt(index) * (1 + rate) ** (retirement - 1 - index);
+  }
   // What a month-end value grows to when retirement starts, with `monthly`
-  // paid in every month until then.
+  // paid in every month until then, and the one-offs.
   const grown = (v, index, monthly) => {
     const n = retirement - 1 - index;
     const factor = (1 + rate) ** n;
-    return v * factor + monthly * (rate === 0 ? n : (factor - 1) / rate);
+    return v * factor + monthly * (rate === 0 ? n : (factor - 1) / rate) + (onceAhead[index - first] ?? 0);
   };
 
   const months = [];
@@ -1005,10 +1061,10 @@ export function forecast(params) {
     check(first);
     for (let index = first + 1; index <= lastChecked; index++) {
       const out = phase === "out" || index >= retirement;
-      v = v * (1 + rate) + (out ? -expensesAt(index, retiredFrom) : phase === "coast" ? coastContribution : contribution);
-      if (out && v <= 0) {
+      v = v * (1 + rate) + (out ? -expensesAt(index, retiredFrom) : phase === "coast" ? coastContribution : contribution) + onceAt(index);
+      if (v <= 0) {
         v = 0;
-        runsOut ??= monthFromIndex(index);
+        if (out) runsOut ??= monthFromIndex(index);
       }
       if (index === retirement - 1) atRetirement = v;
       if (index <= lastShown) values.push(v);
@@ -1078,17 +1134,39 @@ export function deleteAccount(store, id) {
   return next;
 }
 
-// entries: [{ account, value, payIn }] where value null removes that
-// account's record for the month.
+// entries: [{ account, value, payIn, oneOff }] where value null removes
+// that account's record for the month; oneOff is 0 when left out.
 export function saveMonth(store, month, entries) {
   const next = structuredClone(store);
   const changed = new Set(entries.map((e) => e.account));
   const records = next.records.filter((r) => !(r.month === month && changed.has(r.account)));
   for (const entry of entries) {
     if (entry.value === null) continue;
-    records.push({ month, account: entry.account, value: entry.value, payIn: entry.payIn });
+    records.push({ month, account: entry.account, value: entry.value, payIn: entry.payIn, oneOff: entry.oneOff ?? 0 });
   }
   next.records = sortRecords(next, records);
+  return next;
+}
+
+// Adds a planned one-off (id null) or changes one. Returns { ok, store } or
+// { ok: false, error }.
+export function saveEvent(store, event) {
+  const name = String(event.name ?? "").trim();
+  if (name === "") return { ok: false, error: "Enter a name" };
+  if (!isMonth(event.month)) return { ok: false, error: "Choose a month" };
+  if (!isCents(event.amount) || event.amount === 0) return { ok: false, error: "Enter an amount other than 0" };
+  const next = structuredClone(store);
+  const saved = { id: event.id ?? newId(), name, month: event.month, amount: event.amount };
+  const at = next.events.findIndex((e) => e.id === saved.id);
+  if (at === -1) next.events.push(saved);
+  else next.events[at] = saved;
+  next.events.sort((a, b) => a.month.localeCompare(b.month) || a.name.localeCompare(b.name));
+  return { ok: true, store: next };
+}
+
+export function deleteEvent(store, id) {
+  const next = structuredClone(store);
+  next.events = next.events.filter((e) => e.id !== id);
   return next;
 }
 
@@ -1140,6 +1218,7 @@ const COLUMN_NAMES = {
   account: ["account", "broker"],
   value: ["value"],
   payIn: ["payin", "payins", "deposit", "deposits"],
+  oneOff: ["oneoff", "oneoffs"],
 };
 
 // Splits CSV text into rows of fields. Handles quotes ("a ""b""") and
@@ -1195,8 +1274,9 @@ export function parseCsv(text) {
 }
 
 // Checks CSV text with the columns date, account, value and (optional)
-// pay_in. A row counts for the month of its date. Returns { errors, entries, newAccounts, added, replaced }; import
-// only when errors is empty.
+// pay_in and one_off. A row counts for the month of its date. Returns {
+// errors, entries, newAccounts, added, replaced }; import only when errors
+// is empty.
 export function planImport(store, text) {
   const errors = [];
   const { rows, delimiter } = parseCsv(text);
@@ -1231,12 +1311,15 @@ export function planImport(store, text) {
     const value = parseMoney(fields[column.value]);
     const payInText = column.payIn === undefined ? "" : fields[column.payIn].trim();
     const payIn = payInText === "" ? { ok: true, cents: 0 } : parseMoney(payInText);
+    const oneOffText = column.oneOff === undefined ? "" : fields[column.oneOff].trim();
+    const oneOff = oneOffText === "" ? { ok: true, cents: 0 } : parseMoney(oneOffText);
     if (!month) errors.push({ line, message: `"${fields[column.date].trim()}" is not a date (use 2026-10-31, 2026.10.31 or 31.10.2026)` });
     if (accountName === "") errors.push({ line, message: "The account is empty" });
     if (!value.ok) errors.push({ line, message: `Value: ${value.error}` });
     else if (value.cents < 0) errors.push({ line, message: "Value: must not be negative" });
     if (!payIn.ok) errors.push({ line, message: `Pay-in: ${payIn.error}` });
-    if (!month || accountName === "" || !value.ok || value.cents < 0 || !payIn.ok) continue;
+    if (!oneOff.ok) errors.push({ line, message: `One-off: ${oneOff.error}` });
+    if (!month || accountName === "" || !value.ok || value.cents < 0 || !payIn.ok || !oneOff.ok) continue;
 
     const key = `${month} ${accountName.toLowerCase()}`;
     if (seen.has(key)) {
@@ -1244,7 +1327,7 @@ export function planImport(store, text) {
       continue;
     }
     seen.set(key, line);
-    entries.push({ line, month, accountName, value: value.cents, payIn: payIn.cents });
+    entries.push({ line, month, accountName, value: value.cents, payIn: payIn.cents, oneOff: oneOff.cents });
   }
 
   const newAccounts = [];
@@ -1268,7 +1351,7 @@ export function applyImport(store, plan) {
   for (const entry of plan.entries) {
     const account = findAccount(next, entry.accountName);
     if (!byMonth.has(entry.month)) byMonth.set(entry.month, []);
-    byMonth.get(entry.month).push({ account: account.id, value: entry.value, payIn: entry.payIn });
+    byMonth.get(entry.month).push({ account: account.id, value: entry.value, payIn: entry.payIn, oneOff: entry.oneOff });
   }
   for (const [month, entries] of byMonth) next = saveMonth(next, month, entries);
   return next;
@@ -1288,9 +1371,9 @@ export function exportCsv(store, { decimal = "." } = {}) {
     return `${cents < 0 ? "-" : ""}${Math.floor(abs / 100)}${decimal}${String(abs % 100).padStart(2, "0")}`;
   };
   const field = (text) => (/[";,\t\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text);
-  const lines = [["date", "account", "value", "pay_in"].join(delimiter)];
+  const lines = [["date", "account", "value", "pay_in", "one_off"].join(delimiter)];
   for (const r of sortRecords(store, [...store.records])) {
-    lines.push([`${r.month}-${daysInMonth(r.month)}`, field(names.get(r.account)), amount(r.value), amount(r.payIn)].join(delimiter));
+    lines.push([`${r.month}-${daysInMonth(r.month)}`, field(names.get(r.account)), amount(r.value), amount(r.payIn), amount(r.oneOff)].join(delimiter));
   }
   return lines.join("\n") + "\n";
 }
