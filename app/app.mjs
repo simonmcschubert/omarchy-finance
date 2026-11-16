@@ -631,15 +631,17 @@ function drawResizing(box, draw) {
 
 // When an expense or income starts or ends: a choice, and a field for the
 // age or month when that is chosen. choices: [[value, label]], with "none"
-// (always), "retirement", "age" and "month".
+// (always), "retirement", "age" and "month". A field not chosen is also
+// disabled, so a value left in it cannot stop the form.
 function boundField(name, label, bound, choices) {
   const kind = bound === null ? "none" : bound.at === "retirement" ? "retirement" : "age" in bound ? "age" : "month";
   const age = h("input", { name: `${name}-age`, type: "number", min: F.AGES.min, max: F.AGES.max, step: 1, inputmode: "numeric", placeholder: "67",
-    "aria-label": `${label}: age`, value: kind === "age" ? String(bound.age) : "", hidden: kind !== "age" });
-  const month = h("input", { name: `${name}-month`, type: "month", "aria-label": `${label}: month`, value: kind === "month" ? bound.month : "", hidden: kind !== "month" });
+    "aria-label": `${label}: age`, value: kind === "age" ? String(bound.age) : "", hidden: kind !== "age", disabled: kind !== "age" });
+  const month = h("input", { name: `${name}-month`, type: "month", "aria-label": `${label}: month`, value: kind === "month" ? bound.month : "",
+    hidden: kind !== "month", disabled: kind !== "month" });
   const select = h("select", { name, value: kind, "aria-label": label, onchange: (event) => {
-    age.hidden = event.target.value !== "age";
-    month.hidden = event.target.value !== "month";
+    age.hidden = age.disabled = event.target.value !== "age";
+    month.hidden = month.disabled = event.target.value !== "month";
   } }, choices.map(([value, text]) => h("option", { value }, text)));
   return h("div", { class: `field bound ${name}` }, h("span", null, label), h("div", { class: "bound-row" }, select, age, month));
 }
