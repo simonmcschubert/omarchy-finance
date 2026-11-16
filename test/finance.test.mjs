@@ -6,14 +6,20 @@ const EUR = 100; // cents
 const monthly = (growth) => (1 + growth / 100) ** (1 / 12) - 1;
 const close = (actual, expected, what) => assert.ok(Math.abs(actual - expected) < 1e-6 * Math.max(1, Math.abs(expected)), `${what}: ${actual} is not ${expected}`);
 
+// A store with the given parts. Expenses and income without a start or end
+// get none, except that income ends at retirement, as in the app.
 function store(parts = {}) {
-  return { ...F.emptyStore(), ...parts };
+  const s = { ...F.emptyStore(), ...parts };
+  s.expenses = s.expenses.map((item) => ({ from: null, until: null, ...item }));
+  s.income = s.income.map((item) => ({ from: null, until: { at: "retirement" }, ...item }));
+  return s;
 }
 
 // An upgraded store without what versions after 7 added, to compare with
 // the file it came from.
 function withoutLater(s) {
-  return { ...s, expenses: s.expenses.map(({ essential, ...item }) => item) };
+  const plain = ({ from, until, ...item }) => item;
+  return { ...s, expenses: s.expenses.map(({ essential, ...item }) => plain(item)), income: s.income.map(plain) };
 }
 
 test("parseMoney reads German and English amounts", () => {
@@ -131,8 +137,8 @@ test("metrics: income, expenses with buffer, FI number", () => {
 });
 
 test("inactive expenses count nowhere until they are active again", () => {
-  const rent = { id: "e1", name: "Rent", category: "Housing", amount: 1000 * EUR, everyMonths: 1, active: true, essential: false };
-  const gym = { id: "e2", name: "Gym", category: "Leisure", amount: 600 * EUR, everyMonths: 12, active: false, essential: false };
+  const rent = { id: "e1", name: "Rent", category: "Housing", amount: 1000 * EUR, everyMonths: 1, from: null, until: null, active: true, essential: false };
+  const gym = { id: "e2", name: "Gym", category: "Leisure", amount: 600 * EUR, everyMonths: 12, from: null, until: null, active: false, essential: false };
   const s = store({
     settings: { ...F.DEFAULT_SETTINGS },
     expenses: [rent, gym],
@@ -372,8 +378,8 @@ test("byCategory groups and sorts by monthly total", () => {
 
 test("parseStore accepts what the app writes and refuses unknown fields", () => {
   let s = F.emptyStore();
-  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, active: true, essential: true });
-  s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1 });
+  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, from: null, until: null, active: true, essential: true });
+  s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1, from: null, until: { at: "retirement" } });
   s = F.saveAccount(s, null, "Broker").store;
   s = F.saveMonth(s, "2026-10", [{ account: s.accounts[0].id, value: 5, payIn: -2 }]);
   const roundTrip = JSON.parse(JSON.stringify(s));
@@ -406,7 +412,15 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], amount: 1.5 }] }, /amount/],
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], note: "x" }] }, /unknown field "note"/],
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], active: "yes" }] }, /active must be true or false/],
-    [{ ...roundTrip, expenses: [{ id: "e", name: "Rent", category: "", amount: 100, everyMonths: 1, essential: true }] }, /missing "active"/],
+    [{ ...roundTrip, expenses: [{ id: "e", name: "Rent", category: "", amount: 100, everyMonths: 1, from: null, until: null, essential: true }] }, /missing "active"/],
+    [{ ...roundTrip, expenses: [(({ until, ...rest }) => rest)(roundTrip.expenses[0])] }, /missing "until"/],
+    [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], from: "retirement" }] }, /from must be null, a month, an age or retirement/],
+    [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], from: { at: "pension" } }] }, /from must be/],
+    [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], from: { age: 67.5 } }] }, /from must be/],
+    [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], from: { age: 121 } }] }, /from must be/],
+    [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], until: { month: "2031-13" } }] }, /until must be/],
+    [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], until: { month: "2031-12", age: 60 } }] }, /until must be/],
+    [{ ...roundTrip, income: [{ ...roundTrip.income[0], until: {} }] }, /until must be/],
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], essential: "yes" }] }, /essential must be true or false/],
     [{ ...roundTrip, expenses: [(({ essential, ...rest }) => rest)(roundTrip.expenses[0])] }, /missing "essential"/],
     [{ ...roundTrip, income: [{ ...roundTrip.income[0], essential: true }] }, /unknown field "essential"/],
@@ -554,8 +568,8 @@ test("a version 2 file is upgraded: every expense is active", () => {
   const s = result.store;
   assert.equal(s.version, F.VERSION);
   assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67 });
-  assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true, essential: false })));
-  assert.deepEqual(s.income, v2.income);
+  assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true, essential: false, from: null, until: null })));
+  assert.deepEqual(s.income, v2.income.map((i) => ({ ...i, from: null, until: { at: "retirement" } })));
   assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records"]);
   assert.equal("active" in v2.expenses[0], false, "the parsed value is left alone");
   assert.equal(F.metrics(s).baseExpenses, 100 + 30 / 12);
@@ -741,9 +755,107 @@ test("a version 7 file is upgraded: no expense is essential", () => {
   };
   const result = F.parseStore(v7);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v7, version: F.VERSION, expenses: v7.expenses.map((e) => ({ ...e, essential: false })) });
+  assert.deepEqual(withoutLater(result.store), { ...v7, version: F.VERSION });
+  assert.deepEqual(result.store.expenses.map((e) => e.essential), [false, false]);
   assert.equal("essential" in v7.expenses[0], false, "the parsed value is left alone");
   assert.equal(F.metrics(result.store).lean, null);
+});
+
+test("a version 8 file is upgraded: expenses always count, income until retirement", () => {
+  const v8 = {
+    version: 8,
+    settings: { ...F.DEFAULT_SETTINGS, birthYear: 1990 },
+    categories: { expenses: [], income: [] },
+    expenses: [{ id: "e1", name: "Rent", category: "", amount: 100, everyMonths: 1, active: true, essential: true }],
+    income: [{ id: "i1", name: "Salary", category: "", amount: 300, everyMonths: 1 }],
+    accounts: [],
+    records: [],
+  };
+  const result = F.parseStore(v8);
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.store, {
+    ...v8,
+    version: F.VERSION,
+    expenses: [{ ...v8.expenses[0], from: null, until: null }],
+    income: [{ ...v8.income[0], from: null, until: { at: "retirement" } }],
+  });
+  assert.equal("from" in v8.expenses[0], false, "the parsed value is left alone");
+  // As before: the salary does not lower the FI number.
+  const m = F.metrics(result.store, "2026-11");
+  assert.equal(m.income, 300);
+  assert.equal(m.fiNumber, 110 * 12 * 25);
+});
+
+test("countsIn: from its first month until before its end", () => {
+  const birthYear = 1990;
+  const retirement = (1990 + 67) * 12; // January 2057
+  const at = (month) => F.monthIndex(month);
+  const item = (from, until, active) => ({ from, until, ...(active === undefined ? {} : { active }) });
+  const counts = (i, month, retire = retirement, born = birthYear) => F.countsIn(i, at(month), born, retire);
+
+  assert.equal(counts(item(null, null), "1900-01"), true);
+  assert.equal(counts(item(null, null, false), "2026-11"), false, "inactive never counts");
+  // A month start is its first month; a month end its last.
+  const kita = item({ month: "2027-08" }, { month: "2031-07" });
+  assert.deepEqual(["2027-07", "2027-08", "2031-07", "2031-08"].map((m) => counts(kita, m)), [false, true, true, false]);
+  // Retirement and ages are January of their year.
+  const salary = item(null, { at: "retirement" });
+  assert.deepEqual(["2056-12", "2057-01"].map((m) => counts(salary, m)), [true, false]);
+  assert.equal(counts(salary, "2056-12", at("2040-05")), false, "retiring early ends it early");
+  const pension = item({ age: 67 }, null);
+  assert.deepEqual(["2056-12", "2057-01"].map((m) => counts(pension, m)), [false, true]);
+  const bridge = item({ at: "retirement" }, { age: 67 });
+  assert.deepEqual(["2049-12", "2050-01", "2056-12", "2057-01"].map((m) => counts(bridge, m, at("2050-01"))), [false, true, true, false]);
+  // Without a year of birth, ages and retirement are never reached.
+  assert.equal(counts(pension, "2090-01", Infinity, null), false);
+  assert.equal(counts(item(null, { age: 30 }), "2090-01", Infinity, null), true);
+  assert.equal(F.retirementIndex({ birthYear: null, retirementAge: 67 }), Infinity);
+  assert.equal(F.retirementIndex({ birthYear: 1990, retirementAge: 67 }), retirement);
+});
+
+test("metrics: what counts now, and the FI number for retiring now", () => {
+  const item = (name, amount, from, until, extra = {}) => ({ id: name, name, category: "", amount: amount * EUR, everyMonths: 1, from, until, ...extra });
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, birthYear: 1990, bufferPercent: 0, expectedReturn: 0, inflation: 0 },
+    expenses: [
+      item("Rent", 1000, null, null, { active: true, essential: true }),
+      item("Commute", 100, null, { at: "retirement" }, { active: true, essential: false }),
+      item("Health insurance", 300, { at: "retirement" }, { age: 67 }, { active: true, essential: true }),
+      item("Kita", 400, null, { month: "2026-10" }, { active: true, essential: false }),
+    ],
+    income: [
+      item("Salary", 3000, null, { at: "retirement" }),
+      item("Rent from a flat", 200, null, null),
+      item("State pension", 1000, { age: 67 }, null),
+    ],
+    accounts: [{ id: "a", name: "A" }],
+    records: [{ month: "2026-10", account: "a", value: 100000 * EUR, payIn: 1000 * EUR }],
+  });
+  const m = F.metrics(s, "2026-11");
+  // Now: rent and commute (Kita has ended), salary and the flat.
+  assert.equal(m.baseExpenses, 1100 * EUR);
+  assert.equal(m.income, 3200 * EUR);
+  // Retiring now: rent and health insurance, less the flat's rent.
+  assert.equal(m.retiredNeed, 1100 * EUR);
+  assert.equal(m.fiNumber, 1100 * 12 * 25 * EUR);
+  assert.equal(m.lean.fiNumber, 1100 * 12 * 25 * EUR, "both essential expenses, less the income");
+  // From 2057 the pension pays the health insurance's part and more.
+  assert.equal(F.fiNumberIn(s, F.monthIndex("2057-01")), 0);
+  assert.equal(F.needIn(s, F.monthIndex("2056-12"), F.monthIndex("2056-12")), 1100 * EUR);
+  // The goal of each month is the FI number for retiring then.
+  assert.equal(m.goal(0), m.fiNumber);
+  assert.equal(m.goal(F.monthIndex("2057-01") - F.monthIndex("2026-10")), 0);
+});
+
+test("projectToGoal and fiProjection take a goal that changes", () => {
+  // 1,000 a month without growth; the goal drops from 50,000 to 20,000
+  // after 12 months.
+  const goal = (n) => (n < 12 ? 50000 : 20000);
+  assert.equal(F.projectToGoal(0, 1000, 0, goal).length, 20);
+  const p = F.fiProjection({ month: "2026-10", start: 0, payIn: 1000, goal, rate: 2 });
+  assert.equal(p.points[0].goal, 50000);
+  assert.equal(p.points[12].goal, 20000);
+  assert.equal(F.fiProjection({ month: "2026-10", start: 0, payIn: 1000, goal: () => 0, rate: 2 }), null);
 });
 
 test("Lean FI: the FI number and time to FI for the essential expenses only", () => {
@@ -782,8 +894,8 @@ test("a new store starts with a few categories", () => {
 
 test("categories: add, rename with their items, delete", () => {
   let s = { ...F.emptyStore(), categories: { expenses: ["Housing"], income: ["Work"] } };
-  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, active: true, essential: true });
-  s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1 });
+  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, from: null, until: null, active: true, essential: true });
+  s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1, from: null, until: { at: "retirement" } });
 
   const added = F.saveCategory(s, "expenses", null, "  Car ");
   assert.equal(added.ok, true);
@@ -853,6 +965,66 @@ function plan(changes = {}) {
     ...changes,
   };
 }
+
+test("forecast: what the portfolio pays follows the expenses and income of each month", () => {
+  // Retirement in January 2057. A bridge expense from retirement until
+  // 67 and a salary until retirement: for Retire early, both follow its
+  // own retirement, the month after FI.
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, birthYear: 1990, bufferPercent: 0 },
+    expenses: [
+      { id: "r", name: "Rent", category: "", amount: 1000 * EUR, everyMonths: 1, from: null, until: null, active: true, essential: false },
+      { id: "h", name: "Health", category: "", amount: 500 * EUR, everyMonths: 1, from: { at: "retirement" }, until: { age: 67 }, active: true, essential: false },
+    ],
+    income: [{ id: "p", name: "Pension", category: "", amount: 800 * EUR, everyMonths: 1, from: { age: 67 }, until: null }],
+  });
+  const params = plan({
+    value: 600000 * EUR,
+    growth: 0,
+    contribution: 0,
+    need: (index, retirement) => F.needIn(s, index, retirement),
+    goal: (index) => F.fiNumberIn(s, index),
+  });
+  const f = F.forecast(params);
+  const at = (month) => F.monthIndex(month) - F.monthIndex("2026-10");
+  // Retiring now needs 1,500 a month: the FI number is 450,000.
+  assert.equal(f.goal[0], 1500 * 12 * 25 * EUR);
+  assert.equal(f.goal[at("2057-01")], 200 * 12 * 25 * EUR, "from 67 the pension pays most of the rent");
+  const fi = f.plans.fi;
+  assert.equal(fi.fiMonth, "2026-10");
+  // 1,500 a month from November 2026 until December 2056, then 200.
+  assert.equal(fi.values[1], 600000 * EUR - 1500 * EUR);
+  assert.equal(fi.values[at("2056-12")] - fi.values[at("2057-01")], 200 * EUR);
+  // Keep investing retires in 2057: it never pays the health insurance.
+  const keep = f.plans.keep;
+  assert.equal(keep.values[at("2056-12")], 600000 * EUR);
+  assert.equal(keep.values[at("2056-12")] - keep.values[at("2057-01")], 200 * EUR);
+  // Without need and goal, the expenses and FI number of today, every month.
+  const plain = F.forecast(plan({ growth: 0, contribution: 0 }));
+  assert.equal(plain.goal.at(-1), 600000 * EUR);
+});
+
+test("forecast: Retire early needs the FI number of the month it retires in", () => {
+  // 300,000 in November covers 1,000 a month; from December another 1,000
+  // starts, so retiring then needs 600,000.
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, birthYear: 1990, bufferPercent: 0, inflation: 0 },
+    expenses: [
+      { id: "r", name: "Rent", category: "", amount: 1000 * EUR, everyMonths: 1, from: null, until: null, active: true, essential: false },
+      { id: "c", name: "Care", category: "", amount: 1000 * EUR, everyMonths: 1, from: { month: "2026-12" }, until: null, active: true, essential: false },
+    ],
+  });
+  const f = F.forecast(plan({
+    start: "2026-11",
+    value: 300000 * EUR,
+    growth: 0,
+    contribution: 1000 * EUR,
+    need: (index, retirement) => F.needIn(s, index, retirement),
+    goal: (index) => F.fiNumberIn(s, index),
+  }));
+  // 300 months of 1,000 more: November 2051.
+  assert.equal(f.plans.fi.fiMonth, "2051-11");
+});
 
 test("forecast: the growth rates are the expected return and 2 points less and more", () => {
   assert.deepEqual(F.growthRates(5), { low: 3, mid: 5, high: 7 });

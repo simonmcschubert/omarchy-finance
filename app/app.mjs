@@ -83,6 +83,26 @@ const INTERVALS = [
 ];
 const intervalLabel = (n) => INTERVALS.find(([v]) => v === n)?.[1] ?? `Every ${n} months`;
 
+// The month index of this month, for what counts now.
+const thisMonth = () => F.monthIndex(F.currentMonth());
+
+// Expenses or income that count this month.
+const countingNow = (kind) => F.countingIn(state.store[kind], thisMonth(), state.store.settings);
+
+// When an expense or income starts and ends, in words: "From age 67",
+// "Until retirement", "From Jan. 2027 until Dec. 2031". null when always.
+function windowText(item) {
+  const part = (bound, end) => {
+    if (bound === null) return null;
+    const word = end ? "until" : "from";
+    if (bound.at === "retirement") return `${word} retirement`;
+    if ("age" in bound) return `${word} age ${bound.age}`;
+    return `${word} ${monthLabel(bound.month)}`;
+  };
+  const text = [part(item.from, false), part(item.until, true)].filter(Boolean).join(" ");
+  return text ? text[0].toUpperCase() + text.slice(1) : null;
+}
+
 const KINDS = {
   expenses: { title: "Expenses", one: "expense", noun: "Regular expenses" },
   income: { title: "Income", one: "income", noun: "Net income" },
@@ -416,6 +436,9 @@ function viewDashboard() {
       m.coveredMonths === null ? "needs expenses and a portfolio value" : `by the portfolio, at ${money(m.expenses)} a month`),
     tile("FI number", expenses.length ? money(m.fiNumber) : "–",
       [`${plain.format(m.multiple)} × yearly expenses (${percentUnit.format(withdrawalRate)} withdrawal rate)`,
+        Math.abs(m.retiredNeed - m.expenses) >= 100
+          ? h("div", null, `Retiring now, the portfolio would pay ${money(m.retiredNeed)} a month: the expenses and income that count after retirement`)
+          : null,
         m.lean ? h("div", null, `Lean FI: ${money(m.lean.fiNumber)}, for the essential expenses only`) : null]),
     tile("FI reached", m.fiProgress === null ? "–" : percent.format(m.fiProgress),
       [m.fiProgress === null ? "needs expenses and a portfolio value" : m.fiProgress >= 1 ? "Financially independent" : `${money(m.fiNumber - m.portfolio)} to go`,
@@ -455,7 +478,7 @@ function viewDashboard() {
   if (m.series.length > 0) parts.push(portfolioCard(m));
 
   const breakdown = (kind, total) => {
-    const groups = F.byCategory(F.counted(store[kind]));
+    const groups = F.byCategory(countingNow(kind));
     if (groups.length === 0) return null;
     const max = groups[0].monthly;
     return card(`${KINDS[kind].title} by category`,
@@ -512,7 +535,7 @@ function chartView(m) {
 
 function projection(m) {
   const { expectedReturn, inflation } = state.store.settings;
-  return F.fiProjection({ month: m.latestMonth, start: m.portfolio, payIn: m.payIn.average, goal: chartGoal(m), rate: expectedReturn, inflation });
+  return F.fiProjection({ month: m.latestMonth, start: m.portfolio, payIn: m.payIn.average, goal: chartGoal(m) > 0 ? m.goal : 0, rate: expectedReturn, inflation });
 }
 
 function portfolioCard(m) {
@@ -606,11 +629,51 @@ function drawResizing(box, draw) {
 
 // ---------------------------------------------------------------- expenses and income
 
+// When an expense or income starts or ends: a choice, and a field for the
+// age or month when that is chosen. choices: [[value, label]], with "none"
+// (always), "retirement", "age" and "month".
+function boundField(name, label, bound, choices) {
+  const kind = bound === null ? "none" : bound.at === "retirement" ? "retirement" : "age" in bound ? "age" : "month";
+  const age = h("input", { name: `${name}-age`, type: "number", min: F.AGES.min, max: F.AGES.max, step: 1, inputmode: "numeric", placeholder: "67",
+    "aria-label": `${label}: age`, value: kind === "age" ? String(bound.age) : "", hidden: kind !== "age" });
+  const month = h("input", { name: `${name}-month`, type: "month", "aria-label": `${label}: month`, value: kind === "month" ? bound.month : "", hidden: kind !== "month" });
+  const select = h("select", { name, value: kind, "aria-label": label, onchange: (event) => {
+    age.hidden = event.target.value !== "age";
+    month.hidden = event.target.value !== "month";
+  } }, choices.map(([value, text]) => h("option", { value }, text)));
+  return h("div", { class: `field bound ${name}` }, h("span", null, label), h("div", { class: "bound-row" }, select, age, month));
+}
+
+// Reads a boundField. Returns { bound } or { error }.
+function readBound(data, name, label) {
+  const kind = data.get(name);
+  if (kind === "retirement") return { bound: { at: "retirement" } };
+  if (kind === "age") {
+    const text = String(data.get(`${name}-age`) ?? "").trim();
+    const age = Number(text);
+    if (!/^[0-9]+$/.test(text) || age < F.AGES.min || age > F.AGES.max) return { error: `${label}: enter an age in whole years, up to ${F.AGES.max}.` };
+    if (state.store.settings.birthYear === null) return { error: `${label}: an age needs your year of birth, in Settings.` };
+    return { bound: { age } };
+  }
+  if (kind === "month") {
+    const month = String(data.get(`${name}-month`) ?? "");
+    return F.isMonth(month) ? { bound: { month } } : { error: `${label}: choose a month.` };
+  }
+  return { bound: null };
+}
+
 function viewItems(kind) {
   const store = state.store;
   const info = KINDS[kind];
   const items = store[kind];
-  const active = F.counted(items);
+  const { birthYear } = store.settings;
+  const retirement = F.retirementIndex(store.settings);
+  const now = thisMonth();
+  // Active items that count this month; the others start later or have
+  // ended.
+  const active = F.countingIn(items, now, store.settings);
+  const later = F.counted(items).filter((item) => !active.includes(item) && F.itemWindow(item, birthYear, retirement).from > now);
+  const ended = F.counted(items).filter((item) => !active.includes(item) && !later.includes(item));
   const inactive = items.filter((item) => item.active === false);
   const essential = active.filter((item) => item.essential);
   const editing = items.find((item) => item.id === state.editing[kind]) ?? null;
@@ -651,8 +714,19 @@ function viewItems(kind) {
       else if (!amount.ok) error = `Amount: ${amount.error}.`;
       else if (amount.cents <= 0) error = "Amount: must be more than zero.";
       else if (!Number.isInteger(everyMonths) || everyMonths < 1 || everyMonths > 120) error = "Paid every: enter whole months from 1 to 120.";
+      const from = readBound(data, "from", "Starts");
+      const until = readBound(data, "until", "Ends");
+      if (!error) error = from.error ?? until.error ?? null;
+      if (!error) {
+        // Retirement moves (Retire early starts it at FI), so only fixed
+        // starts and ends can be compared.
+        const atRetirement = (bound) => bound?.at === "retirement";
+        const window = F.itemWindow({ from: from.bound, until: until.bound }, birthYear, retirement);
+        if (atRetirement(from.bound) && atRetirement(until.bound)) error = "It cannot start and end at retirement.";
+        else if (!atRetirement(from.bound) && !atRetirement(until.bound) && window.from >= window.until) error = "It ends before it starts: change when it starts or ends.";
+      }
       if (error) return showError(event.currentTarget, error);
-      const item = { id: editing?.id ?? F.newId(), name, category, amount: amount.cents, everyMonths };
+      const item = { id: editing?.id ?? F.newId(), name, category, amount: amount.cents, everyMonths, from: from.bound, until: until.bound };
       if (kind === "expenses") {
         item.active = editing?.active ?? true;
         item.essential = data.get("essential") === "on";
@@ -671,6 +745,10 @@ function viewItems(kind) {
     h("label", null, "Paid every … months",
       h("input", { name: "everyMonths", type: "number", min: 1, max: 120, step: 1, required: true, list: "intervals", value: String(editing?.everyMonths ?? 1) })),
     h("datalist", { id: "intervals" }, INTERVALS.map(([v, label]) => h("option", { value: String(v), label }))),
+    boundField("from", "Starts", editing ? editing.from : null,
+      [["none", "Now"], ["retirement", "At retirement"], ["age", "At age"], ["month", "In month"]]),
+    boundField("until", "Ends", editing ? editing.until : kind === "income" ? { at: "retirement" } : null,
+      [["none", "Never"], ["retirement", "At retirement"], ["age", "At age"], ["month", "After month"]]),
     kind === "expenses"
       ? h("label", { class: "check" }, h("input", { type: "checkbox", name: "essential", checked: editing?.essential ?? false }),
           "Essential: needed even on the leanest budget, so it counts for Lean FI")
@@ -681,9 +759,10 @@ function viewItems(kind) {
   );
 
   const row = (item) => h("tr", { class: [item.id === state.editing[kind] && "editing", item.active === false && "inactive"].filter(Boolean).join(" ") || null },
-    // Inactive expenses are listed apart, so they show their category here.
     h("td", null, item.name, item.essential ? h("span", { class: "badge", title: "Counts for Lean FI" }, "Essential") : null,
-      item.active === false && item.category ? h("div", { class: "sub" }, item.category) : null),
+      windowText(item) ? h("div", { class: "sub" }, windowText(item)) : null,
+      // Listed apart from their category, so they show it here.
+      !active.includes(item) && item.category ? h("div", { class: "sub" }, item.category) : null),
     h("td", { class: "num" }, moneyExact(item.amount)),
     h("td", null, intervalLabel(item.everyMonths)),
     h("td", { class: "num" }, money(F.monthlyAmount(item))),
@@ -707,17 +786,25 @@ function viewItems(kind) {
     rows.push(h("tr", { class: "group" }, h("th", { colspan: 3, scope: "rowgroup" }, group.category || "No category"), h("td", { class: "num" }, money(group.monthly)), h("td")));
     rows.push(group.items.map(row));
   }
-  if (inactive.length) {
-    rows.push(h("tr", { class: "group" }, h("th", { colspan: 3, scope: "rowgroup" }, "Inactive"), h("td", { class: "num" }, h("span", { class: "muted" }, "not counted")), h("td")));
-    rows.push([...inactive].sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name)).map(row));
-  }
+  const apart = (title, list, note) => {
+    if (list.length === 0) return;
+    rows.push(h("tr", { class: "group" }, h("th", { colspan: 3, scope: "rowgroup" }, title), h("td", { class: "num" }, h("span", { class: "muted" }, note)), h("td")));
+    rows.push([...list].sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name)).map(row));
+  };
+  apart("Later", later, "not counted yet");
+  apart("Ended", ended, "no longer counted");
+  apart("Inactive", inactive, "not counted");
 
   return h("div", null,
     card(info.title, summary,
       h("p", { class: "muted" },
         kind === "income" ? "Enter amounts after tax. A yearly bonus counts as one twelfth per month. " : "Regular payments only. Pay-ins to broker accounts go under Portfolio, not here. ",
         categories.length ? "Categories are set in " : "There are no categories yet: add them in ",
-        h("a", { href: "#settings" }, "Settings"), "."),
+        h("a", { href: "#settings" }, "Settings"), ". ",
+        kind === "income"
+          ? "Income that goes on after retirement, such as a pension or rent, lowers what the portfolio has to pay: let it end never, or at an age. "
+          : "Expenses that start at retirement, such as health insurance, raise it; ones that end, such as a loan, lower it. ",
+        "Ages and retirement start in January of their year."),
       h("h3", null, editing ? `Edit ${editing.name}` : `Add ${info.one === "income" ? "income" : "an expense"}`),
       form),
     items.length
@@ -860,6 +947,9 @@ function forecastBase(store) {
       value: m.portfolio ?? 0,
       expenses: m.expenses,
       fiNumber: m.fiNumber,
+      // Month by month, with the expenses and income that count then.
+      need: (index, retirement) => F.needIn(store, index, retirement),
+      goal: (index) => F.fiNumberIn(store, Math.max(index, thisMonth())),
       birthYear,
       retirementAge,
       inflation,
@@ -890,10 +980,12 @@ function viewForecast() {
   const inflation = percentUnit.format(params.inflation);
   const retirementYear = birthYear + retirementAge;
   const retired = retiredAt(params);
-  // Expenses at the end of the month before retirement, as the forecast
-  // counts them.
-  const untilRetirement = retirementYear * 12 - 1 - F.monthIndex(params.start);
-  const then = (amount) => money(F.inflated(amount, params.inflation, untilRetirement));
+  // What the portfolio pays when retirement starts, in today's money and
+  // with inflation by then.
+  const retirementIndex = retirementYear * 12;
+  const paysThen = F.needIn(store, retirementIndex, retirementIndex);
+  const paysNow = F.needIn(store, thisMonth(), Math.min(retirementIndex, thisMonth()));
+  const then = (amount) => money(F.inflated(amount, params.inflation, retirementIndex - 1 - F.monthIndex(params.start)));
   const read = (event) => {
     event.preventDefault();
     readForecastForm(event.currentTarget, average);
@@ -914,10 +1006,10 @@ function viewForecast() {
   return h("div", null,
     card("Forecast",
       retired
-        ? h("p", null, `You have reached your retirement age, ${retirementAge}, so the portfolio pays your expenses from now on: `,
-            `${money(params.expenses)} a month with buffer, rising by ${inflation} a year.`)
+        ? h("p", null, `You have reached your retirement age, ${retirementAge}, so the portfolio pays your expenses from now on, less the income that goes on: `,
+            `${money(paysNow)} a month with buffer, rising by ${inflation} a year.`)
         : h("p", null, `How your portfolio could grow until you retire in ${retirementYear}, the year you turn ${retirementAge}, and whether it lasts after. `,
-            `From then on it pays your expenses: ${money(params.expenses)} a month with buffer today, ${then(params.expenses)} by then with ${inflation} inflation a year.`),
+            `From then on it pays your expenses, less the income that goes on: ${money(paysThen)} a month with buffer in today's money, ${then(paysThen)} by then with ${inflation} inflation a year.`),
       retired
         ? h("div", { class: "forecast-controls" }, growthField)
         : h("form", { class: "forecast-controls", onsubmit: read, onchange: read },
@@ -997,7 +1089,7 @@ function forecastResults() {
   let tiles;
   if (retired) {
     tiles = [planTile("keep", "Living off the portfolio", money(params.value),
-      `now, taking out ${money(params.expenses)} a month, rising by ${percentUnit.format(inflation)} a year.`)];
+      `now, taking out ${money(F.needIn(store, F.monthIndex(params.start) + 1, F.retirementIndex(store.settings)))} a month, rising by ${percentUnit.format(inflation)} a year.`)];
   } else {
     const { coastMonth } = result.plans.coast;
     const { fiMonth } = result.plans.fi;
@@ -1036,7 +1128,9 @@ function forecastResults() {
       h("li", null, store.records.length
         ? `It starts from the portfolio in ${monthLabel(params.start)}, ${money(params.value)}.`
         : "It starts from 0, as there are no broker values yet."),
-      h("li", null, `Money lasts when some is still left at age ${F.LASTS_AGE}. Taxes and the state pension are left out.`)));
+      h("li", null, "Expenses and income with a start or an end count only in their months; for Retire early, retirement starts the month after FI. ",
+        "Income that goes on after retirement, such as a pension, lowers what the portfolio pays."),
+      h("li", null, `Money lasts when some is still left at age ${F.LASTS_AGE}. Taxes are left out.`)));
 
   return [h("div", { class: "tiles plan-tiles" }, tiles), chartCard, notes];
 }
