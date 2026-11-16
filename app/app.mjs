@@ -2,7 +2,7 @@
 // time, and saves every change straight away.
 
 import * as F from "./finance.mjs";
-import { goalVisible, renderChart } from "./chart.mjs";
+import { goalVisible, renderChart, renderForecastChart } from "./chart.mjs";
 import { startUpdates } from "./update.mjs";
 
 // ---------------------------------------------------------------- formatting
@@ -88,12 +88,13 @@ const KINDS = {
   income: { title: "Income", one: "income", noun: "Net income" },
 };
 
-// In this order on Ctrl+1 to Ctrl+5.
+// In this order on Ctrl+1 to Ctrl+6.
 const VIEWS = [
   ["dashboard", "Dashboard"],
   ["expenses", "Expenses"],
   ["income", "Income"],
   ["portfolio", "Portfolio"],
+  ["forecast", "Forecast"],
   ["settings", "Settings"],
 ];
 
@@ -151,6 +152,9 @@ const state = {
   importText: "",
   importPlan: null,
   chartView: savedChartView(), // "history" | "path"
+  // On the forecast page. contribution null: the average pay-in. growth:
+  // "low", "mid" or "high", the expected return and RETURN_SPREAD around it.
+  forecast: { contribution: null, coastContribution: 0, growth: "mid" },
   focus: null, // selector to focus after the next render
 };
 
@@ -289,7 +293,7 @@ addEventListener("hashchange", () => {
   scrollTo(0, 0);
 });
 
-// Ctrl+1 to Ctrl+5 open the views. Matched by key position, not by the
+// Ctrl+1 to Ctrl+6 open the views. Matched by key position, not by the
 // character, so it works the same on every keyboard layout.
 addEventListener("keydown", (event) => {
   const digit = /^(?:Digit|Numpad)([1-9])$/.exec(event.code);
@@ -333,12 +337,20 @@ function render() {
   if (state.blocked) {
     content.push(h("div", { class: "notice error", role: "alert" }, h("span", null, state.blocked), h("button", { type: "button", onclick: load }, "Reload")));
   } else if (state.store) {
-    const views = { dashboard: viewDashboard, expenses: () => viewItems("expenses"), income: () => viewItems("income"), portfolio: viewPortfolio, settings: viewSettings };
+    const views = {
+      dashboard: viewDashboard,
+      expenses: () => viewItems("expenses"),
+      income: () => viewItems("income"),
+      portfolio: viewPortfolio,
+      forecast: viewForecast,
+      settings: viewSettings,
+    };
     content.push(views[state.view]());
   }
   main.replaceChildren(...content);
 
   if (state.view === "dashboard" && state.store) drawChart();
+  if (state.view === "forecast" && state.store) drawForecast();
   if (state.focus) {
     main.querySelector(state.focus)?.focus();
     state.focus = null;
@@ -537,7 +549,6 @@ function pathSummary(m, p) {
     h("a", { href: "#settings" }, "Settings"), "."];
 }
 
-let resizeObserver = null;
 function drawChart() {
   const box = document.getElementById("chart");
   if (!box) return;
@@ -557,7 +568,12 @@ function drawChart() {
     formatMonth: monthLabel,
     monthNumber: F.monthIndex,
   };
-  const draw = () => renderChart(box, options);
+  drawResizing(box, () => renderChart(box, options));
+}
+
+// Draws a chart, and again whenever its box changes width.
+let resizeObserver = null;
+function drawResizing(box, draw) {
   draw();
   resizeObserver?.disconnect();
   let width = box.clientWidth;
@@ -793,6 +809,210 @@ function viewPortfolio() {
     history);
 }
 
+// ---------------------------------------------------------------- forecast
+
+const PLAN_INFO = {
+  keep: { label: "Keep going", detail: "Pays in until retirement" },
+  coast: { label: "Coast", detail: "Pays in until Coast FI, then the smaller amount" },
+  fi: { label: "Retire at FI", detail: "Pays in until the FI number, then lives off the portfolio" },
+};
+
+const listOf = (words) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`);
+
+// What the forecast starts from, and what is paid in.
+function forecastBase(store) {
+  const m = F.metrics(store);
+  const { birthYear, retirementAge } = store.settings;
+  // The average pay-in, as the dashboard's time to FI uses it, in whole
+  // cents and never a withdrawal.
+  const average = m.payIn ? Math.max(0, Math.round(m.payIn.average)) : 0;
+  return {
+    m,
+    average,
+    params: {
+      start: m.latestMonth ?? F.currentMonth(),
+      value: m.portfolio ?? 0,
+      expenses: m.expenses,
+      fiNumber: m.fiNumber,
+      birthYear,
+      retirementAge,
+      contribution: state.forecast.contribution ?? average,
+      coastContribution: state.forecast.coastContribution,
+    },
+  };
+}
+
+function viewForecast() {
+  const store = state.store;
+  const { birthYear, retirementAge } = store.settings;
+  const missing = [];
+  if (birthYear === null) missing.push(h("li", null, "your year of birth, in ", h("a", { href: "#settings" }, "Settings")));
+  if (F.counted(store.expenses).length === 0) missing.push(h("li", null, "your ", h("a", { href: "#expenses" }, "expenses"), ", for the FI number"));
+  if (missing.length) {
+    return h("div", null, card("Forecast",
+      h("p", null, "How your portfolio could grow until you retire, and whether it lasts after. The forecast needs:"),
+      h("ul", null, missing)));
+  }
+
+  const { m, average, params } = forecastBase(store);
+  const rates = F.growthRates(store.settings.expectedReturn);
+  const retirementYear = birthYear + retirementAge;
+  const retired = F.monthIndex(params.start) >= retirementYear * 12;
+  const read = (event) => {
+    event.preventDefault();
+    readForecastForm(event.currentTarget, average);
+  };
+  const months = m.payIn?.months === 12 ? "the last 12 months" : m.payIn?.months === 1 ? "1 month" : `${m.payIn?.months} months`;
+
+  return h("div", null,
+    card("Forecast",
+      retired
+        ? h("p", null, `You have reached your retirement age, ${retirementAge}, so each plan lives off the portfolio from now on: `,
+            `it takes out your monthly expenses, ${money(params.expenses)} with buffer.`)
+        : h("p", null, `Three plans for paying in until you retire, at ${listOf(F.GROWTHS.map((g) => percentUnit.format(rates[g])))} growth a year. `,
+            `From January ${retirementYear}, the year you turn ${retirementAge}, each plan lives off the portfolio: `,
+            `it takes out your monthly expenses, ${money(params.expenses)} with buffer.`),
+      h("form", { class: "forecast-form", onsubmit: read, onchange: read },
+        h("label", null, "Paid in per month",
+          h("input", { id: "forecast-contribution", name: "contribution", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.contribution) })),
+        h("label", null, "After Coast FI, per month",
+          h("input", { id: "forecast-coast", name: "coastContribution", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.coastContribution) })),
+        h("button", { type: "submit" }, "Show")),
+      h("p", { class: "muted" },
+        !m.payIn ? "There are no pay-ins yet to start from. "
+          : m.payIn.average < 0 ? `Your average of ${months} is a withdrawal of ${money(-m.payIn.average)} a month, so paid in per month starts at 0. `
+          : `Paid in per month starts as your average of ${months}, ${money(average)}. `,
+        "Coast FI is when the smaller amount is enough to reach the FI number by retirement; with 0, the portfolio gets there on its own.")),
+    forecastChartCard(),
+    h("div", { id: "forecast-results", class: "stack" }, forecastResults()));
+}
+
+function readForecastForm(form, average) {
+  const data = new FormData(form);
+  const contribution = F.parseMoney(data.get("contribution"));
+  const coast = F.parseMoney(data.get("coastContribution"));
+  let error = null;
+  if (!contribution.ok) error = `Paid in per month: ${contribution.error}.`;
+  else if (contribution.cents < 0) error = "Paid in per month: must not be negative.";
+  else if (!coast.ok) error = `After Coast FI: ${coast.error}.`;
+  else if (coast.cents < 0) error = "After Coast FI: must not be negative.";
+  if (error) return showError(form, error);
+  if (form.nextElementSibling?.classList.contains("form-error")) form.nextElementSibling.remove();
+  // The average stays the average when new months come in.
+  state.forecast.contribution = contribution.cents === average ? null : contribution.cents;
+  state.forecast.coastContribution = coast.cents;
+  updateForecast();
+}
+
+// Redraws the results only, so the form keeps what is typed and its focus.
+// The chart card stays, and its growth buttons change in place: a click on
+// one that starts while a field's change redraws the results still lands.
+function updateForecast() {
+  const box = document.getElementById("forecast-results");
+  if (!box) return render();
+  box.replaceChildren(...forecastResults());
+  const rates = F.growthRates(state.store.settings.expectedReturn);
+  const growth = state.forecast.growth;
+  document.getElementById("forecast-title").textContent = `At ${percentUnit.format(rates[growth])} growth a year`;
+  for (const button of document.querySelectorAll("[data-growth]")) {
+    button.classList.toggle("active", button.dataset.growth === growth);
+    button.setAttribute("aria-pressed", String(button.dataset.growth === growth));
+  }
+  drawForecast();
+}
+
+function forecastChartCard() {
+  const { birthYear, retirementAge, expectedReturn } = state.store.settings;
+  const rates = F.growthRates(expectedReturn);
+  const growth = state.forecast.growth;
+  const retired = F.monthIndex(forecastBase(state.store).params.start) >= (birthYear + retirementAge) * 12;
+  const growthButton = (g) =>
+    h("button", { type: "button", class: g === growth ? "seg active" : "seg", "aria-pressed": String(g === growth), "data-growth": g,
+      onclick: () => { state.forecast.growth = g; updateForecast(); } }, percentUnit.format(rates[g]));
+  const key = (kind, label) => h("span", null, h("span", { class: `key ${kind}` }), label);
+  return h("section", { class: "card" },
+    h("div", { class: "card-head" },
+      h("h2", { id: "forecast-title" }, `At ${percentUnit.format(rates[growth])} growth a year`),
+      h("div", { class: "legend" },
+        F.PLANS.map((plan) => key(`plan-${plan}`, PLAN_INFO[plan].label)),
+        key("goal", "FI number"),
+        retired ? null : key("target", "Coast FI target")),
+      h("div", { class: "segmented", role: "group", "aria-label": "Growth a year" }, F.GROWTHS.map(growthButton))),
+    h("div", { id: "forecast-chart", class: "chart-box" }));
+}
+
+// The table and notes, for the chosen amounts.
+function forecastResults() {
+  const store = state.store;
+  const { birthYear, retirementAge } = store.settings;
+  const { params } = forecastBase(store);
+  const rates = F.growthRates(store.settings.expectedReturn);
+  const results = new Map(F.GROWTHS.map((g) => [g, F.forecast({ ...params, growth: rates[g] })]));
+  const growth = state.forecast.growth;
+  const retired = F.monthIndex(params.start) >= (birthYear + retirementAge) * 12;
+  const at = (month) => `${F.ageIn(month, birthYear)} (${month.slice(0, 4)})`;
+
+  const cell = (plan, g) => {
+    const p = results.get(g).plans[plan];
+    let milestone = null;
+    if (!retired) {
+      const month = plan === "coast" ? p.coastMonth : p.fiMonth;
+      const name = { keep: "FI", coast: "Coast FI", fi: "Retire" }[plan];
+      if (month === null) milestone = plan === "coast" ? `No Coast FI before ${retirementAge}` : `No FI before ${retirementAge}`;
+      else if (month === params.start) milestone = `${name} now`;
+      else milestone = `${name} at ${at(month)}`;
+    }
+    return h("td", { class: g === growth ? "chosen" : null },
+      milestone ? h("div", { class: "strong" }, milestone) : null,
+      retired ? null : h("div", { class: "sub" }, `${money(p.atRetirement)} at ${retirementAge}`),
+      p.runsOut === null ? h("div", { class: "good" }, "Lasts") : h("div", { class: "bad" }, `Runs out at ${F.ageIn(p.runsOut, birthYear)}`));
+  };
+  const tableCard = card("All plans",
+    h("div", { class: "table-wrap" }, h("table", { class: "plans" },
+      h("thead", null, h("tr", null, h("th", null, "Plan"),
+        F.GROWTHS.map((g) => h("th", { class: g === growth ? "chosen" : null }, `${percentUnit.format(rates[g])} growth`)))),
+      h("tbody", null, F.PLANS.map((plan) => h("tr", null,
+        h("th", { scope: "row" }, h("span", { class: `key plan-${plan}` }), " ", PLAN_INFO[plan].label, h("div", { class: "sub" }, PLAN_INFO[plan].detail)),
+        F.GROWTHS.map((g) => cell(plan, g))))))),
+    h("p", { class: "muted" }, "Lasts: money is still left at age ", String(F.LASTS_AGE), "."));
+
+  const notes = card(null,
+    h("ul", { class: "notes muted" },
+      h("li", null, "The growth rates are the expected return set in ", h("a", { href: "#settings" }, "Settings"), `, and ${F.RETURN_SPREAD} points less and more.`),
+      h("li", null, "Growth is after inflation, so every amount is in today's money: expenses and pay-ins stay as they are today."),
+      h("li", null, store.records.length
+        ? `It starts from the portfolio in ${monthLabel(params.start)}, ${money(params.value)}.`
+        : "It starts from 0, as there are no broker values yet."),
+      h("li", null, "Real markets do not grow the same every year, and bad years right after you start living off the portfolio hurt most."),
+      h("li", null, "Taxes and the state pension are left out.")));
+
+  return [tableCard, notes];
+}
+
+function drawForecast() {
+  const box = document.getElementById("forecast-chart");
+  if (!box) return;
+  const { birthYear } = state.store.settings;
+  const { params } = forecastBase(state.store);
+  const result = F.forecast({ ...params, growth: F.growthRates(state.store.settings.expectedReturn)[state.forecast.growth] });
+  const first = F.monthIndex(result.months[0]);
+  const index = (month) => (month === null ? -1 : F.monthIndex(month) - first);
+  const mark = { keep: null, coast: result.plans.coast.coastMonth, fi: result.plans.fi.fiMonth };
+  drawResizing(box, () =>
+    renderForecastChart(box, {
+      months: result.months,
+      // Keep going last, on top: until the others turn off, they share its line.
+      lines: ["fi", "coast", "keep"].map((plan) => ({ key: plan, label: PLAN_INFO[plan].label, values: result.plans[plan].values, mark: index(mark[plan]) })),
+      fiNumber: params.fiNumber,
+      target: result.target,
+      retirementIndex: index(result.retirement),
+      format: money,
+      formatAxis: (cents) => axis.format(cents / 100),
+      formatMonth: monthLabel,
+      ageOf: (month) => F.ageIn(month, birthYear),
+    }));
+}
+
 // ---------------------------------------------------------------- settings
 
 function viewSettings() {
@@ -810,7 +1030,7 @@ function viewSettings() {
 }
 
 function settingsForm(store) {
-  const { withdrawalRate, bufferPercent, currency: code, numberFormat, expectedReturn } = store.settings;
+  const { withdrawalRate, bufferPercent, currency: code, numberFormat, expectedReturn, birthYear, retirementAge } = store.settings;
   const codes = Intl.supportedValuesOf("currency");
   if (!codes.includes(code)) codes.push(code);
   return h("form", { class: "settings-form", onsubmit: (event) => {
@@ -821,14 +1041,31 @@ function settingsForm(store) {
     const rate = F.parsePercent(data.get("withdrawalRate"), { decimals: RATE_DECIMALS });
     const buffer = F.parsePercent(data.get("bufferPercent"));
     const growth = F.parsePercent(data.get("expectedReturn"));
+    const birthText = String(data.get("birthYear")).trim();
+    const ageText = String(data.get("retirementAge")).trim();
+    const born = birthText === "" ? null : Number(birthText);
+    const age = Number(ageText);
+    const thisYear = new Date().getFullYear();
+    const { min: firstYear } = F.BIRTH_YEARS;
+    const ages = F.RETIREMENT_AGES;
     let error = null;
     if (!F.isCurrency(chosen)) error = "Currency: choose one from the list.";
     else if (!F.NUMBER_FORMATS.includes(format)) error = "Number format: choose one from the list.";
     else if (!rate.ok || !(rate.value > 0 && rate.value <= 100)) error = `Withdrawal rate: enter a percentage above 0 and at most 100, with up to ${RATE_DECIMALS} decimals.`;
     else if (!buffer.ok || !(buffer.value >= 0 && buffer.value <= 100)) error = "Buffer: enter a percentage from 0 to 100.";
     else if (!growth.ok || !(growth.value >= 0 && growth.value <= 100)) error = "Expected return: enter a percentage from 0 to 100.";
+    else if (born !== null && !(/^[0-9]{4}$/.test(birthText) && born >= firstYear && born <= thisYear)) error = `Year of birth: enter a year from ${firstYear} to ${thisYear}, or leave it empty.`;
+    else if (!/^[0-9]+$/.test(ageText) || age < ages.min || age > ages.max) error = `Retirement age: enter whole years from ${ages.min} to ${ages.max}.`;
     if (error) return showError(event.currentTarget, error);
-    commit(F.saveSettings(store, { currency: chosen, numberFormat: format, withdrawalRate: rate.value, bufferPercent: buffer.value, expectedReturn: growth.value }), "Settings saved.");
+    commit(F.saveSettings(store, {
+      currency: chosen,
+      numberFormat: format,
+      withdrawalRate: rate.value,
+      bufferPercent: buffer.value,
+      expectedReturn: growth.value,
+      birthYear: born,
+      retirementAge: age,
+    }), "Settings saved.");
   } },
     h("label", null, "Currency",
       h("select", { name: "currency", value: code }, codes.sort().map((c) => h("option", { value: c }, `${c} – ${currencyName(c)}`)))),
@@ -841,7 +1078,11 @@ function settingsForm(store) {
     h("label", null, "Buffer on expenses (%)", h("input", { name: "bufferPercent", inputmode: "decimal", value: plain.format(bufferPercent), required: true })),
     h("p", { class: "muted" }, "Added on top of regular expenses for irregular costs such as holidays and repairs."),
     h("label", null, "Expected return (%)", h("input", { name: "expectedReturn", inputmode: "decimal", value: plain.format(expectedReturn), required: true })),
-    h("p", { class: "muted" }, `The portfolio's yearly return after inflation, for Time to FI and the Path to FI chart on the dashboard; the chart also shows ${F.RETURN_SPREAD} points less and more. After inflation, because the FI number is in today's money. World stocks have returned about 5 % a year after inflation over the long run, with many years far above or below that.`),
+    h("p", { class: "muted" }, `The portfolio's yearly return after inflation, for Time to FI and the Path to FI chart on the dashboard, and the forecast; both also show ${F.RETURN_SPREAD} points less and more. After inflation, because the FI number is in today's money. World stocks have returned about 5 % a year after inflation over the long run, with many years far above or below that.`),
+    h("label", null, "Year of birth", h("input", { name: "birthYear", inputmode: "numeric", autocomplete: "off", value: birthYear === null ? "" : String(birthYear), placeholder: "1990" })),
+    h("label", null, "Retirement age", h("input", { name: "retirementAge", inputmode: "numeric", autocomplete: "off", value: String(retirementAge), required: true })),
+    h("p", { class: "muted" }, "For the ", h("a", { href: "#forecast" }, "forecast"), ": the official retirement age, 67 in Germany for everyone born in 1964 or later. ",
+      "Retirement starts in January of the year you reach it."),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, "Save")));
 }
 

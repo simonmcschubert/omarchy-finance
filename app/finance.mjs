@@ -4,14 +4,26 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 5;
+export const VERSION = 6;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
 // How numbers are shown, named by how they write a million.
 export const NUMBER_FORMATS = Object.freeze(["1.000.000,00", "1,000,000.00"]);
 
-export const DEFAULT_SETTINGS = Object.freeze({ withdrawalRate: 4, bufferPercent: 10, currency: "EUR", numberFormat: NUMBER_FORMATS[0], expectedReturn: 5 });
+export const DEFAULT_SETTINGS = Object.freeze({
+  withdrawalRate: 4,
+  bufferPercent: 10,
+  currency: "EUR",
+  numberFormat: NUMBER_FORMATS[0],
+  expectedReturn: 5,
+  birthYear: null, // not set until entered; the forecast needs it
+  retirementAge: 67,
+});
+
+// What the birth year and the retirement age may be.
+export const BIRTH_YEARS = Object.freeze({ min: 1900, max: 2100 });
+export const RETIREMENT_AGES = Object.freeze({ min: 30, max: 80 });
 
 // What a new data file starts with; categories can be changed in Settings.
 export const STARTER_CATEGORIES = Object.freeze({
@@ -34,7 +46,7 @@ export function emptyStore() {
 // ---------------------------------------------------------------- file format
 
 const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records"];
-const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn"];
+const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "birthYear", "retirementAge"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active"];
 const ACCOUNT_KEYS = ["id", "name"];
@@ -59,6 +71,10 @@ function checkKeys(value, allowed, where) {
 
 function isCents(value, { min = -MAX_CENTS } = {}) {
   return Number.isSafeInteger(value) && value >= min && value < MAX_CENTS;
+}
+
+function isWholeIn(value, { min, max }) {
+  return Number.isInteger(value) && value >= min && value <= max;
 }
 
 function isText(value) {
@@ -125,6 +141,13 @@ function upgradeFromVersion4(value) {
   return { ...value, version: 5, settings: { ...value.settings, expectedReturn: DEFAULT_SETTINGS.expectedReturn } };
 }
 
+// Version 5 had no birth year and no retirement age, which the forecast
+// uses. Upgraded files get no birth year and the default age.
+function upgradeFromVersion5(value) {
+  checkKeys(value.settings, ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn"], "settings");
+  return { ...value, version: 6, settings: { ...value.settings, birthYear: null, retirementAge: DEFAULT_SETTINGS.retirementAge } };
+}
+
 // Checks a parsed data file. Returns { ok: true, store } or { ok: false, error }.
 // `null` (no file yet) is an empty store. Older versions are upgraded.
 export function parseStore(value) {
@@ -134,6 +157,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 2) value = upgradeFromVersion2(value);
     if (isObject(value) && value.version === 3) value = upgradeFromVersion3(value);
     if (isObject(value) && value.version === 4) value = upgradeFromVersion4(value);
+    if (isObject(value) && value.version === 5) value = upgradeFromVersion5(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -141,7 +165,7 @@ export function parseStore(value) {
     if (value.version !== VERSION) throw new Error(`unsupported version ${JSON.stringify(value.version)}`);
 
     checkKeys(value.settings, SETTINGS_KEYS, "settings");
-    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn } = value.settings;
+    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, birthYear, retirementAge } = value.settings;
     if (typeof withdrawalRate !== "number" || !(withdrawalRate > 0 && withdrawalRate <= 100)) {
       throw new Error("settings.withdrawalRate must be above 0 and at most 100");
     }
@@ -154,6 +178,12 @@ export function parseStore(value) {
     if (!isCurrency(currency)) throw new Error("settings.currency must be a three-letter code such as EUR");
     if (!NUMBER_FORMATS.includes(numberFormat)) {
       throw new Error(`settings.numberFormat must be ${NUMBER_FORMATS.map((f) => JSON.stringify(f)).join(" or ")}`);
+    }
+    if (birthYear !== null && !isWholeIn(birthYear, BIRTH_YEARS)) {
+      throw new Error(`settings.birthYear must be null or a year from ${BIRTH_YEARS.min} to ${BIRTH_YEARS.max}`);
+    }
+    if (!isWholeIn(retirementAge, RETIREMENT_AGES)) {
+      throw new Error(`settings.retirementAge must be a whole number from ${RETIREMENT_AGES.min} to ${RETIREMENT_AGES.max}`);
     }
 
     checkKeys(value.categories, KINDS, "categories");
@@ -586,6 +616,125 @@ export function byCategory(items) {
 
 export function categoryUse(store, kind, name) {
   return store[kind].filter((item) => item.category === name).length;
+}
+
+// ---------------------------------------------------------------- forecast
+// Every amount in the forecast is in today's money: growth is after
+// inflation, and contributions and expenses stay as they are today.
+
+// The yearly growth rates the forecast compares, in percent: the expected
+// return, and RETURN_SPREAD points less and more, as on the dashboard.
+export function growthRates(expectedReturn) {
+  return { low: expectedReturn - RETURN_SPREAD, mid: expectedReturn, high: expectedReturn + RETURN_SPREAD };
+}
+export const GROWTHS = Object.freeze(["low", "mid", "high"]);
+// The forecast is shown up to the end of the year of this age…
+export const SHOWN_AGE = 95;
+// …and a plan lasts when money is still left at the end of the year of this
+// age.
+export const LASTS_AGE = 150;
+
+// keep: pay in until retirement.
+// coast: pay in until Coast FI, then the smaller amount until retirement.
+// fi: pay in until FI, then live off the portfolio.
+// From retirement on, every plan lives off the portfolio: it withdraws the
+// monthly expenses.
+export const PLANS = Object.freeze(["keep", "coast", "fi"]);
+
+// The age someone born in birthYear has in a month's year.
+export function ageIn(month, birthYear) {
+  return Number(month.slice(0, 4)) - birthYear;
+}
+
+// Month by month, from the value at the end of month `start` on, for the
+// three plans. Retirement starts in January of the year of the retirement
+// age. Coast FI is reached in the first month from which paying in only
+// `coastContribution` a month makes the portfolio reach the FI number when
+// retirement starts. A milestone counts only before retirement.
+//
+// params: { start (month), value, expenses (a month), fiNumber, birthYear,
+// retirementAge, growth (percent a year), contribution (a month),
+// coastContribution (a month) }. Amounts in cents.
+//
+// Returns { months: shown months from start on, retirement: its first
+// month, target: the Coast FI target for each shown month before retirement
+// (null after), plans: { keep, coast, fi } } where each plan is { values:
+// one per shown month, coastMonth, fiMonth (when reached, or null),
+// atRetirement (value when retirement starts, or null if it has already),
+// runsOut (the first month with nothing left, or null if it lasts) }.
+export function forecast(params) {
+  const { start, value, expenses, fiNumber, birthYear, retirementAge, growth, contribution, coastContribution } = params;
+  const rate = (1 + growth / 100) ** (1 / 12) - 1;
+  const first = monthIndex(start);
+  const retirement = (birthYear + retirementAge) * 12;
+  const lastShown = Math.max((birthYear + SHOWN_AGE) * 12 + 11, first + 120);
+  const lastChecked = Math.max((birthYear + LASTS_AGE) * 12 + 11, lastShown);
+
+  // What a month-end value grows to when retirement starts, with `monthly`
+  // paid in every month until then.
+  const grown = (v, index, monthly) => {
+    const n = retirement - 1 - index;
+    const factor = (1 + rate) ** n;
+    return v * factor + monthly * (rate === 0 ? n : (factor - 1) / rate);
+  };
+  // The value from which paying in only coastContribution is enough.
+  const coastTarget = (index) => {
+    const n = retirement - 1 - index;
+    const factor = (1 + rate) ** n;
+    const paidIn = coastContribution * (rate === 0 ? n : (factor - 1) / rate);
+    return Math.max(0, (fiNumber - paidIn) / factor);
+  };
+
+  const months = [];
+  const target = [];
+  for (let index = first; index <= lastShown; index++) {
+    months.push(monthFromIndex(index));
+    target.push(index < retirement ? coastTarget(index) : null);
+  }
+
+  const run = (plan) => {
+    let v = value;
+    let phase = "full"; // "full", "coast" (the smaller amount), or "out" (withdrawing)
+    let coastMonth = null;
+    let fiMonth = null;
+    let runsOut = null;
+    let atRetirement = first === retirement - 1 ? v : null;
+    const values = [v];
+    // Milestones are checked on month-end values, and change what is paid
+    // from the next month on.
+    const check = (index) => {
+      if (index >= retirement) return;
+      if (coastMonth === null && grown(v, index, coastContribution) >= fiNumber) {
+        coastMonth = monthFromIndex(index);
+        if (plan === "coast" && phase === "full") phase = "coast";
+      }
+      if (fiMonth === null && v >= fiNumber) {
+        fiMonth = monthFromIndex(index);
+        if (plan === "fi") phase = "out";
+      }
+    };
+    check(first);
+    for (let index = first + 1; index <= lastChecked; index++) {
+      const out = phase === "out" || index >= retirement;
+      v = v * (1 + rate) + (out ? -expenses : phase === "coast" ? coastContribution : contribution);
+      if (out && v <= 0) {
+        v = 0;
+        runsOut ??= monthFromIndex(index);
+      }
+      if (index === retirement - 1) atRetirement = v;
+      if (index <= lastShown) values.push(v);
+      else if (runsOut !== null) break;
+      check(index);
+    }
+    return { values, coastMonth, fiMonth, atRetirement, runsOut };
+  };
+
+  return {
+    months,
+    retirement: monthFromIndex(retirement),
+    target,
+    plans: Object.fromEntries(PLANS.map((plan) => [plan, run(plan)])),
+  };
 }
 
 // ---------------------------------------------------------------- changes

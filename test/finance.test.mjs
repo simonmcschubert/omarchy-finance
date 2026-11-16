@@ -126,7 +126,7 @@ test("inactive expenses count nowhere until they are active again", () => {
   const rent = { id: "e1", name: "Rent", category: "Housing", amount: 1000 * EUR, everyMonths: 1, active: true };
   const gym = { id: "e2", name: "Gym", category: "Leisure", amount: 600 * EUR, everyMonths: 12, active: false };
   const s = store({
-    settings: { withdrawalRate: 4, bufferPercent: 10, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 5 },
+    settings: { ...F.DEFAULT_SETTINGS },
     expenses: [rent, gym],
     accounts: [{ id: "a", name: "A" }],
     records: [{ month: "2026-10", account: "a", value: 33000 * EUR, payIn: 0 }],
@@ -368,6 +368,11 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
     [{ ...roundTrip, settings: { withdrawalRate: 4, bufferPercent: 10, currency: "EUR", numberFormat: "1.000.000,00" } }, /missing "expectedReturn"/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, expectedReturn: -1 } }, /expectedReturn must be between 0 and 100/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, expectedReturn: "5" } }, /expectedReturn must be between 0 and 100/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, birthYear: "1990" } }, /birthYear must be null or a year/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, birthYear: 1899 } }, /birthYear must be null or a year from 1900 to 2100/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, retirementAge: 66.5 } }, /retirementAge must be a whole number from 30 to 80/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, retirementAge: null } }, /retirementAge/],
+    [{ ...roundTrip, settings: { ...F.DEFAULT_SETTINGS, retirementAge: undefined } }, /retirementAge/],
     [{ ...roundTrip, categories: { ...roundTrip.categories, expenses: ["Food", "food"] } }, /repeats the name/],
     [{ ...roundTrip, categories: { ...roundTrip.categories, income: [""] } }, /not a name/],
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], category: "Nope" }] }, /not in categories.expenses/],
@@ -488,7 +493,7 @@ test("a version 1 file is upgraded: euros, and the categories its items use", ()
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 5 });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 5, birthYear: null, retirementAge: 67 });
   assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: ["Work"] });
   assert.deepEqual(s.expenses.map((e) => e.category), ["Housing", "Housing", "", "Car"]);
   assert.deepEqual(s.expenses.map((e) => e.active), [true, true, true, true], "every expense was active");
@@ -518,7 +523,7 @@ test("a version 2 file is upgraded: every expense is active", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 5 });
+  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 5, birthYear: null, retirementAge: 67 });
   assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true })));
   assert.deepEqual(s.income, v2.income);
   assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records"]);
@@ -543,7 +548,7 @@ test("a version 3 file is upgraded: the default number format", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 5 });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 5, birthYear: null, retirementAge: 67 });
   assert.deepEqual({ ...s, version: 3, settings: v3.settings }, v3, "nothing else changes");
   assert.equal("numberFormat" in v3.settings, false, "the parsed value is left alone");
 
@@ -565,7 +570,7 @@ test("a version 4 file is upgraded: the default expected return", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 5 });
+  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 5, birthYear: null, retirementAge: 67 });
   assert.deepEqual({ ...s, version: 4, settings: v4.settings }, v4, "nothing else changes");
   assert.equal("expectedReturn" in v4.settings, false, "the parsed value is left alone");
 
@@ -621,6 +626,28 @@ test("metrics: time to FI from the latest month with the average pay-in", () => 
   const none = F.metrics(store());
   assert.equal(none.fiMonths, null);
   assert.equal(none.projection, null);
+});
+
+test("a version 5 file is upgraded: no birth year, retirement at 67", () => {
+  const v5 = {
+    version: 5,
+    settings: { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1,000,000.00", expectedReturn: 6 },
+    categories: { expenses: ["Housing"], income: [] },
+    expenses: [{ id: "e1", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, active: true }],
+    income: [],
+    accounts: [{ id: "a", name: "Broker" }],
+    records: [{ month: "2026-10", account: "a", value: 5, payIn: 1 }],
+  };
+  const result = F.parseStore(v5);
+  assert.equal(result.ok, true, result.error);
+  const s = result.store;
+  assert.equal(s.version, F.VERSION);
+  assert.deepEqual(s.settings, { ...v5.settings, birthYear: null, retirementAge: 67 });
+  assert.deepEqual({ ...s, version: 5, settings: v5.settings }, v5, "nothing else changes");
+  assert.equal("birthYear" in v5.settings, false, "the parsed value is left alone");
+
+  assert.match(F.parseStore({ ...v5, settings: { ...v5.settings, retirementAge: 65 } }).error, /unknown field "retirementAge"/);
+  assert.equal(F.parseStore({ ...s, settings: { ...s.settings, birthYear: 1990, retirementAge: 65 } }).ok, true);
 });
 
 test("a new store starts with a few categories", () => {
@@ -686,4 +713,144 @@ test("exportCsv writes what planImport reads", () => {
     const fresh = F.applyImport(F.emptyStore(), F.planImport(F.emptyStore(), F.exportCsv(s, { decimal })));
     assert.deepEqual(F.portfolioSeries(fresh), F.portfolioSeries(s));
   }
+});
+
+// ---------------------------------------------------------------- forecast
+
+// Born 1990, retires in January 2057. FI number: 2.000 € a month × 12 × 25.
+function plan(changes = {}) {
+  return {
+    start: "2026-10",
+    value: 50000 * EUR,
+    expenses: 2000 * EUR,
+    fiNumber: 600000 * EUR,
+    birthYear: 1990,
+    retirementAge: 67,
+    growth: 5,
+    contribution: 1000 * EUR,
+    coastContribution: 0,
+    ...changes,
+  };
+}
+const monthly = (growth) => (1 + growth / 100) ** (1 / 12) - 1;
+const close = (actual, expected, what) => assert.ok(Math.abs(actual - expected) < 1e-6 * Math.max(1, Math.abs(expected)), `${what}: ${actual} is not ${expected}`);
+
+test("forecast: the growth rates are the expected return and 2 points less and more", () => {
+  assert.deepEqual(F.growthRates(5), { low: 3, mid: 5, high: 7 });
+  assert.deepEqual(F.growthRates(1.5), { low: -0.5, mid: 1.5, high: 3.5 });
+  // Below 0 too: the portfolio then shrinks, and the target is above the FI number.
+  const f = F.forecast(plan({ growth: -0.5, contribution: 0 }));
+  assert.ok(f.plans.keep.values[12] < 50000 * EUR);
+  assert.ok(f.target[0] > 600000 * EUR);
+});
+
+test("forecast: months from the start to age 95, retirement in January of the year of the age", () => {
+  const f = F.forecast(plan());
+  assert.equal(f.months[0], "2026-10");
+  assert.equal(f.months.at(-1), "2085-12");
+  assert.equal(f.retirement, "2057-01");
+  for (const p of F.PLANS) assert.equal(f.plans[p].values.length, f.months.length);
+  assert.equal(F.ageIn("2057-01", 1990), 67);
+});
+
+test("forecast: keep going pays in every month until retirement, then takes out expenses", () => {
+  const r = monthly(5);
+  const keep = F.forecast(plan()).plans.keep;
+  assert.equal(keep.values[0], 50000 * EUR);
+  close(keep.values[1], 50000 * EUR * (1 + r) + 1000 * EUR, "after a month");
+  close(keep.values[12], 50000 * EUR * 1.05 + 1000 * EUR * (0.05 / r), "after a year");
+  // 2026-10 to 2056-12: 362 months of paying in.
+  const n = 362;
+  close(keep.atRetirement, 50000 * EUR * (1 + r) ** n + 1000 * EUR * (((1 + r) ** n - 1) / r), "at retirement");
+  const at = F.monthIndex("2057-01") - F.monthIndex("2026-10");
+  close(keep.values[at], keep.atRetirement * (1 + r) - 2000 * EUR, "first month of retirement");
+  assert.equal(keep.runsOut, null);
+  assert.ok(keep.fiMonth > "2026-10" && keep.fiMonth < "2057-01");
+});
+
+test("forecast: Coast FI is the first month from which the portfolio reaches the FI number on its own", () => {
+  const r = monthly(5);
+  const f = F.forecast(plan());
+  const coast = f.plans.coast;
+  const i = F.monthIndex(coast.coastMonth) - F.monthIndex("2026-10");
+  const left = (index) => F.monthIndex("2056-12") - (F.monthIndex("2026-10") + index);
+  assert.ok(coast.values[i] * (1 + r) ** left(i) >= 600000 * EUR);
+  assert.ok(coast.values[i - 1] * (1 + r) ** left(i - 1) < 600000 * EUR);
+  close(f.target[i], (600000 * EUR) / (1 + r) ** left(i), "target");
+  assert.equal(f.target[F.monthIndex("2057-01") - F.monthIndex("2026-10")], null, "no target from retirement on");
+  // Then nothing is paid in, and the portfolio grows to the FI number.
+  close(coast.values[i + 1], coast.values[i] * (1 + r), "after Coast FI");
+  assert.ok(coast.atRetirement >= 600000 * EUR && coast.atRetirement < 600000 * EUR * 1.01);
+  assert.equal(coast.fiMonth, "2056-12", "in the last month before retirement");
+  // Until then the plans are the same.
+  assert.deepEqual(coast.values.slice(0, i + 1), f.plans.keep.values.slice(0, i + 1));
+  assert.equal(f.plans.keep.coastMonth, coast.coastMonth);
+
+  // With 200 € a month after Coast FI, it comes sooner, and the money still
+  // reaches the FI number.
+  const smaller = F.forecast(plan({ coastContribution: 200 * EUR })).plans.coast;
+  assert.ok(smaller.coastMonth < coast.coastMonth);
+  assert.ok(smaller.atRetirement >= 600000 * EUR);
+  const j = F.monthIndex(smaller.coastMonth) - F.monthIndex("2026-10");
+  close(smaller.values[j + 1], smaller.values[j] * (1 + r) + 200 * EUR, "after Coast FI, the smaller amount");
+});
+
+test("forecast: retire at FI takes out expenses from the month after FI", () => {
+  const r = monthly(5);
+  const f = F.forecast(plan());
+  const fi = f.plans.fi;
+  assert.equal(fi.fiMonth, f.plans.keep.fiMonth);
+  const i = F.monthIndex(fi.fiMonth) - F.monthIndex("2026-10");
+  assert.ok(fi.values[i] >= 600000 * EUR && fi.values[i - 1] < 600000 * EUR);
+  close(fi.values[i + 1], fi.values[i] * (1 + r) - 2000 * EUR, "after FI");
+  // 4 % taken out with 5 % growth: it lasts.
+  assert.equal(fi.runsOut, null);
+  assert.ok(fi.atRetirement < f.plans.keep.atRetirement);
+
+  // With 3 % growth it runs out about 47 years after FI, and stays empty.
+  const slow = F.forecast(plan({ growth: 3, value: 600000 * EUR })).plans.fi;
+  assert.equal(slow.fiMonth, "2026-10");
+  const years = F.ageIn(slow.runsOut, 1990) - 2026 + 1990;
+  assert.ok(years >= 45 && years <= 49, `runs out ${years} years after FI`);
+  const k = F.monthIndex(slow.runsOut) - F.monthIndex("2026-10");
+  assert.ok(slow.values[k - 1] > 0);
+  assert.ok(slow.values.slice(k).every((v) => v === 0));
+});
+
+test("forecast: a plan lasts only when money is left at age 150", () => {
+  // Already at 30 × yearly expenses at 36, living off it at 3 % growth:
+  // that lasts about 78 years, past what is shown but not to 150.
+  const f = F.forecast(plan({ value: 2000 * EUR * 12 * 30, growth: 3 }));
+  const fi = f.plans.fi;
+  assert.equal(fi.fiMonth, "2026-10");
+  const age = F.ageIn(fi.runsOut, 1990);
+  assert.ok(age > F.SHOWN_AGE && age < F.LASTS_AGE, `runs out at ${age}`);
+  assert.ok(fi.values.at(-1) > 0, "still money at 95");
+});
+
+test("forecast: past Coast FI and FI at the start", () => {
+  const r = monthly(5);
+  const f = F.forecast(plan({ value: 700000 * EUR }));
+  for (const p of F.PLANS) {
+    assert.equal(f.plans[p].coastMonth, "2026-10");
+    assert.equal(f.plans[p].fiMonth, "2026-10");
+  }
+  close(f.plans.fi.values[1], 700000 * EUR * (1 + r) - 2000 * EUR, "fi");
+  close(f.plans.coast.values[1], 700000 * EUR * (1 + r), "coast");
+  close(f.plans.keep.values[1], 700000 * EUR * (1 + r) + 1000 * EUR, "keep");
+});
+
+test("forecast: past the retirement age every plan lives off the portfolio", () => {
+  const r = monthly(5);
+  const f = F.forecast(plan({ birthYear: 1950 }));
+  assert.equal(f.retirement, "2017-01");
+  assert.equal(f.months.at(-1), "2045-12", "until 95");
+  assert.ok(f.target.every((v) => v === null));
+  for (const p of F.PLANS) {
+    const { values, coastMonth, fiMonth, atRetirement } = f.plans[p];
+    assert.deepEqual([coastMonth, fiMonth, atRetirement], [null, null, null]);
+    close(values[1], 50000 * EUR * (1 + r) - 2000 * EUR, p);
+  }
+  // At least ten years are shown, also past 95.
+  assert.equal(F.forecast(plan({ birthYear: 1925 })).months.at(-1), "2036-10");
 });

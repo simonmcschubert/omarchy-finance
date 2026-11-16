@@ -79,6 +79,9 @@ The data file stays.
 - **Portfolio**: per month, each broker account's value at month end and what
   was paid in that month (negative for withdrawals). An account without a
   value in a month counts with its last value.
+- **Forecast**: how the portfolio could grow until retirement, and whether
+  it lasts after, in three plans and at three growth rates (3, 5 and 7 % a
+  year by default). See [Forecast](#forecast).
 - **Settings**:
   - Currency (default euro). It only changes how amounts are shown; nothing
     is converted.
@@ -89,8 +92,10 @@ The data file stays.
   - Safe withdrawal rate (default 4 %) and a buffer on expenses for irregular
     costs (default 10 %).
   - Expected return (default 5 %): the portfolio's yearly return after
-    inflation, for Time to FI and the Path to FI chart. After inflation,
-    because the FI number is in today's money.
+    inflation, for Time to FI, the Path to FI chart and the forecast. After
+    inflation, because the FI number is in today's money.
+  - Year of birth and retirement age (default 67), for the forecast. The
+    forecast needs the year of birth; it is empty until entered.
   - Categories, one list for expenses and one for income. A new data file
     starts with a few common ones. Renaming a category renames it on every
     expense or income that has it; deleting one leaves them without a
@@ -98,7 +103,8 @@ The data file stays.
   - Broker accounts. Deleting one deletes its monthly values too.
   - Import past months from CSV, and export all monthly values as CSV.
 
-`Ctrl+1` to `Ctrl+5` open Dashboard, Expenses, Income, Portfolio and Settings.
+`Ctrl+1` to `Ctrl+6` open Dashboard, Expenses, Income, Portfolio, Forecast and
+Settings.
 
 ![Expenses, two of them inactive](docs/expenses.png)
 
@@ -145,6 +151,45 @@ The **Portfolio** chart has two views; the one picked last stays picked.
 the buffer), the average monthly pay-in of the last 12 months, and what is
 left over, or says how much more than the income those two take.
 **Expenses by category** shows the expenses without the buffer.
+
+### Forecast
+
+![Forecast](docs/forecast.png)
+
+Three plans, each paying in the same amount a month (it starts as the
+average pay-in of the last 12 months, and can be changed, to 0 too):
+
+| Plan | Pays in | Then |
+| --- | --- | --- |
+| Keep going | until retirement | |
+| Coast | until Coast FI | only the smaller amount set on the page (default 0), until retirement |
+| Retire at FI | until the portfolio reaches the FI number | lives off the portfolio |
+
+Retirement starts in January of the year you reach the retirement age. From
+then on every plan lives off the portfolio: each month it takes out the
+monthly expenses from the dashboard (with the buffer). Coast FI is the first
+month from which paying in only the smaller amount makes the portfolio reach
+the FI number when retirement starts; with 0, it gets there on its own.
+
+The growth rates are the expected return from Settings and 2 points less
+and more, as on the Path to FI chart. The chart shows one at a time, up to
+age 95, with the FI number
+and the Coast FI target (the value Coast FI needs in each month). The table
+shows every plan at every growth rate: when it reaches Coast FI or FI, the
+value at the retirement age, and whether it lasts. A plan lasts when money
+is still left at age 150; otherwise the table says at which age it runs out.
+
+- It starts from the portfolio in the latest month, and grows it by the
+  growth rate every month (5 % a year is about 0.41 % a month), as Time to
+  FI on the dashboard does.
+- Growth is after inflation, so every amount is in today's money: expenses
+  and pay-ins stay as they are today, and so does the FI number.
+- The growth is the same every year. Real markets are not, and bad years
+  right after you start living off the portfolio hurt most.
+- Taxes and the state pension are left out.
+
+The amounts typed on the page are not saved; the year of birth and the
+retirement age are in Settings.
 
 ### Importing past months
 
@@ -205,8 +250,8 @@ server.py          # local server: page, /api/data (load/save), /api/update, /th
 app/
 ├── index.html
 ├── app.mjs        # the views; saves every change
-├── finance.mjs    # data format, parsing, metrics, CSV import and export (no DOM)
-├── chart.mjs      # portfolio chart (SVG)
+├── finance.mjs    # data format, parsing, metrics, forecast, CSV import and export (no DOM)
+├── chart.mjs      # portfolio and forecast charts (SVG)
 ├── update.mjs     # the update button
 └── style.css
 setup              # user service and launcher entry; --remove undoes
