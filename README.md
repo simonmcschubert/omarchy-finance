@@ -211,7 +211,8 @@ The **Portfolio** chart has two views; the one picked last stays picked.
   reaches the FI number, with a band from 2 points below to 2 points above
   the expected return (6 % to 10 % at 8 %), also up to the FI number. From the latest month on, the
   FI number rises by the inflation. The line under the chart says when each
-  reaches the FI number, and what the FI number is by then.
+  reaches the FI number, and what the FI number is by then. Its switch
+  shows the projection in today's money instead, as on the Forecast page.
 
 ![Path to FI](docs/path-to-fi.png)
 
@@ -259,6 +260,14 @@ tiles and the chart between them. The chart shows the three plans up to age
 95, in the colors of their tiles, with the FI number and retirement. Coast
 and Retire early follow Keep investing's line until a dot where they change
 course.
+
+**Amounts in** switches the tiles and the chart between the money of each
+year (the default: what the amounts will be then) and today's money: what
+they would buy now, with the inflation since the latest month taken out.
+In today's money the FI number stays about level and growth is the
+expected return less the inflation. The Path to FI chart on the dashboard
+has the same switch; the choice is remembered in this window's browser,
+not in the data file.
 
 - It starts from the portfolio in the latest month, and grows it by the
   growth rate every month (8 % a year is about 0.64 % a month), as Time to

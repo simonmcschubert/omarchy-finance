@@ -170,6 +170,35 @@ function setChartView(view) {
   render();
 }
 
+// Whether projections show the money of each year or today's money: also
+// remembered in this browser only.
+const MONEY_KEY = "finance.money";
+function savedMoney() {
+  try {
+    return localStorage.getItem(MONEY_KEY) === "today" ? "today" : "nominal";
+  } catch {
+    return "nominal";
+  }
+}
+function setMoney(money) {
+  state.money = money;
+  try {
+    localStorage.setItem(MONEY_KEY, money);
+  } catch {
+    // remembered until the window closes
+  }
+}
+const inTodaysMoney = () => state.money === "today";
+
+// Buttons to switch between the money of each year and today's money;
+// onswitch redraws what shows amounts.
+function moneySwitch(onswitch) {
+  const button = (money, label) => h("button", { type: "button", class: state.money === money ? "seg active" : "seg", "aria-pressed": String(state.money === money), "data-money": money,
+    title: money === "today" ? "What the amounts would buy today, with the inflation taken out" : "Amounts as they will be then, with the inflation",
+    onclick: () => { setMoney(money); onswitch(); } }, label);
+  return h("div", { class: "segmented", role: "group", "aria-label": "Amounts" }, button("nominal", "Money of each year"), button("today", "Today's money"));
+}
+
 const state = {
   store: null,
   revision: null,
@@ -185,6 +214,7 @@ const state = {
   importText: "",
   importPlan: null,
   chartView: savedChartView(), // "history" | "path"
+  money: savedMoney(), // "nominal" (the money of each year) | "today"
   // On the forecast page. contribution null: the average pay-in. growth:
   // "low", "mid" or "high", the expected return and RETURN_SPREAD around it.
   forecast: { contribution: null, coastContribution: 0, growth: "mid" },
@@ -591,6 +621,12 @@ function chartView(m) {
 }
 
 function projection(m) {
+  const { inflation } = state.store.settings;
+  const p = projectionNominal(m);
+  return inTodaysMoney() ? F.projectionInTodaysMoney(p, inflation) : p;
+}
+
+function projectionNominal(m) {
   const { expectedReturn, inflation } = state.store.settings;
   return F.fiProjection({ month: m.latestMonth, start: m.portfolio, payIn: m.payIn.average, goal: chartGoal(m) > 0 ? m.goal : 0, rate: expectedReturn, inflation, oneOffs: m.oneOffs });
 }
@@ -620,6 +656,7 @@ function portfolioCard(m) {
     h("div", { class: "card-head" },
       h("h2", null, "Portfolio"),
       h("div", { class: "legend" }, legend),
+      view === "path" ? moneySwitch(render) : null,
       chartGoal(m) > 0
         ? h("div", { class: "segmented", role: "group", "aria-label": "Chart" }, viewButton("history", "History"), viewButton("path", "Path to FI"))
         : null),
@@ -638,7 +675,9 @@ function pathSummary(m, p) {
     const months = F.monthIndex(p.reach.mid) - F.monthIndex(m.latestMonth);
     const low = p.reach.low ? `${year("low")} at ${rate("low")}` : `not ${limit} at ${rate("low")}`;
     outcome = `the portfolio reaches the FI number around ${year("mid")}, in ${duration(months)}: ${year("high")} at ${rate("high")}, ${low}. ` +
-      `By then the FI number is ${money(p.points[months - 1].goal)}, as it rises with ${percentUnit.format(state.store.settings.inflation)} inflation a year.`;
+      (inTodaysMoney()
+        ? `The chart shows today's money: by then the FI number is ${money(p.points[months - 1].goal)} of today's euros, ${percentUnit.format(state.store.settings.inflation)} inflation a year taken out.`
+        : `By then the FI number is ${money(p.points[months - 1].goal)}, as it rises with ${percentUnit.format(state.store.settings.inflation)} inflation a year.`);
   } else if (p.reach.high) {
     outcome = `the portfolio does not reach the FI number ${limit}; at ${rate("high")} it would around ${year("high")}.`;
   } else {
@@ -1220,9 +1259,11 @@ function viewForecast() {
   const growthButton = (g) =>
     h("button", { type: "button", class: g === growth ? "seg active" : "seg", "aria-pressed": String(g === growth), "data-growth": g,
       onclick: () => { state.forecast.growth = g; updateForecast(); } }, percentUnit.format(rates[g]));
-  const growthField = h("div", { class: "field" },
-    h("span", { id: "forecast-growth" }, "Growth a year"),
-    h("div", { class: "segmented", role: "group", "aria-labelledby": "forecast-growth" }, F.GROWTHS.map(growthButton)));
+  const growthField = h("div", { class: "forecast-switches" },
+    h("div", { class: "field" },
+      h("span", { id: "forecast-growth" }, "Growth a year"),
+      h("div", { class: "segmented", role: "group", "aria-labelledby": "forecast-growth" }, F.GROWTHS.map(growthButton))),
+    h("div", { class: "field" }, h("span", null, "Amounts in"), moneySwitch(updateForecast)));
 
   return h("div", null,
     card("Forecast",
@@ -1322,6 +1363,10 @@ function updateForecast() {
     button.classList.toggle("active", button.dataset.growth === growth);
     button.setAttribute("aria-pressed", String(button.dataset.growth === growth));
   }
+  for (const button of document.querySelectorAll("[data-money]")) {
+    button.classList.toggle("active", button.dataset.money === state.money);
+    button.setAttribute("aria-pressed", String(button.dataset.money === state.money));
+  }
   drawForecast();
 }
 
@@ -1333,9 +1378,10 @@ function forecastResults() {
   const { params } = forecastBase(store);
   const rates = F.growthRates(expectedReturn);
   const growth = state.forecast.growth;
-  const result = F.forecast({ ...params, growth: rates[growth] });
+  const nominal = F.forecast({ ...params, growth: rates[growth] });
+  const result = inTodaysMoney() ? F.forecastInTodaysMoney(nominal, inflation) : nominal;
   // A plan that lasts here may run out at the lowest growth: the tile says so.
-  const low = growth === "low" ? result : F.forecast({ ...params, growth: rates.low });
+  const low = growth === "low" ? nominal : F.forecast({ ...params, growth: rates.low });
   const retired = retiredAt(params);
   const age = (month) => F.ageIn(month, birthYear);
   const when = (month) => (month === params.start ? "Now" : `At ${age(month)}, in ${month.slice(0, 4)}`);
@@ -1382,7 +1428,7 @@ function forecastResults() {
   const key = (kind, label) => h("span", null, h("span", { class: `key ${kind}` }), label);
   const chartCard = h("section", { class: "card" },
     h("div", { class: "card-head" },
-      h("h2", null, `At ${percentUnit.format(rates[growth])} growth a year`),
+      h("h2", null, `At ${percentUnit.format(rates[growth])} growth a year${inTodaysMoney() ? ", in today's money" : ""}`),
       h("div", { class: "legend" },
         retired ? key("plan-keep", "Portfolio") : F.PLANS.map((plan) => key(`plan-${plan}`, PLAN_LABELS[plan])),
         key("goal", "FI number"))),
@@ -1392,7 +1438,9 @@ function forecastResults() {
     h("ul", { class: "notes muted" },
       h("li", null, "Growth is before inflation: the expected return set in ", h("a", { href: "#settings" }, "Settings"),
         `, or ${F.RETURN_SPREAD} points less or more. Real markets do not grow the same every year, and bad years right after you start living off the portfolio hurt most.`),
-      h("li", null, `Amounts are in the money of each year: expenses and the FI number rise by ${percentUnit.format(inflation)} a year. What is invested stays the same.`),
+      h("li", null, inTodaysMoney()
+        ? `Amounts are in today's money: what they would buy now, with ${percentUnit.format(inflation)} inflation a year taken out. So the FI number stays about the same, and what is invested shrinks a little each year.`
+        : `Amounts are in the money of each year: expenses and the FI number rise by ${percentUnit.format(inflation)} a year. What is invested stays the same.`),
       h("li", null, store.records.length
         ? `It starts from the portfolio in ${monthLabel(params.start)}, ${money(params.value)}.`
         : "It starts from 0, as there are no broker values yet."),
@@ -1410,7 +1458,8 @@ function drawForecast() {
   if (!box) return;
   const { birthYear } = state.store.settings;
   const { params } = forecastBase(state.store);
-  const result = F.forecast({ ...params, growth: F.growthRates(state.store.settings.expectedReturn)[state.forecast.growth] });
+  const nominal = F.forecast({ ...params, growth: F.growthRates(state.store.settings.expectedReturn)[state.forecast.growth] });
+  const result = inTodaysMoney() ? F.forecastInTodaysMoney(nominal, state.store.settings.inflation) : nominal;
   const first = F.monthIndex(result.months[0]);
   const index = (month) => (month === null ? -1 : F.monthIndex(month) - first);
   const age = (month) => F.ageIn(month, birthYear);

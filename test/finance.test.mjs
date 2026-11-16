@@ -1280,6 +1280,29 @@ test("forecast: planned one-offs go into every plan, and Coast FI counts on them
   assert.equal(broke.plans.keep.runsOut, "2057-01", "it runs out when it pays expenses from nothing");
 });
 
+test("today's money: every amount with the inflation since the start taken out", () => {
+  close(F.deflated(F.inflated(1000, 3, 120), 3, 120), 1000, "inflated and back");
+  close(F.deflated(1030, 3, 12), 1000, "a year at 3 %");
+  // With growth equal to the inflation, the portfolio stays the same in
+  // today's money, and so does the FI number.
+  const nominal = F.forecast(plan({ growth: 3, inflation: 3, contribution: 0 }));
+  const real = F.forecastInTodaysMoney(nominal, 3);
+  for (const index of [0, 12, 360]) {
+    close(real.plans.keep.values[index], 50000 * EUR, `value after ${index} months`);
+    close(real.goal[index], 600000 * EUR, `FI number after ${index} months`);
+  }
+  close(real.fiAtRetirement, 600000 * EUR, "the FI number when retirement starts");
+  close(real.plans.keep.atRetirement, 50000 * EUR, "the value when retirement starts");
+  assert.equal(real.plans.keep.runsOut, nominal.plans.keep.runsOut, "milestones stay");
+  assert.equal(nominal.plans.keep.values[12] > 50000 * EUR, true, "the original is untouched");
+
+  const p = F.fiProjection({ month: "2026-10", start: 1000, payIn: 0, goal: 2000, rate: 3, inflation: 3 });
+  const today = F.projectionInTodaysMoney(p, 3);
+  close(today.points[11].mid, 1000, "the mid line, a year on");
+  close(today.points[11].goal, 2000, "the goal, a year on");
+  assert.equal(F.projectionInTodaysMoney(null, 3), null);
+});
+
 test("forecast: the growth rates are the expected return and 2 points less and more", () => {
   assert.deepEqual(F.growthRates(5), { low: 3, mid: 5, high: 7 });
   assert.deepEqual(F.growthRates(1.5), { low: -0.5, mid: 1.5, high: 3.5 });
