@@ -3,8 +3,8 @@
 
 Listens on 127.0.0.1 only. The data lives in one JSON file,
 ~/.local/state/omarchy-finance/finance.json, in a directory only the owner
-can open. The page's colors come from the current Omarchy theme. New
-releases come from the update script next to this file.
+can open. The page's colors come from the current Omarchy theme. Updates
+come from the update script next to this file.
 
 Python standard library only (3.11 or newer).
 """
@@ -37,6 +37,8 @@ FIRST_CHECK = 15
 CHECK_EVERY = 4 * 60 * 60
 # The install restarts omarchy-finance.service, so it runs as a unit of its own.
 INSTALL_UNIT = "omarchy-finance-update"
+# Which updates Finance offers: releases, or previews of main (update script).
+CHANNELS = ("stable", "preview")
 
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -180,11 +182,12 @@ def reason(output):
 
 
 class Updater:
-    """Offers new releases of Finance the way a desktop app offers its
-    updates: it checks shortly after the server starts, every four hours, and
-    when the update button asks; it downloads a release when asked, and
-    installs it with a restart of the server. The update script does the
-    work; the page shows the state (app/update.mjs)."""
+    """Offers updates of Finance the way a desktop app offers them: it checks
+    shortly after the server starts, every four hours, and when the update
+    button asks; it downloads an update when asked, and installs it with a
+    restart of the server. An update is a release, or on the preview channel
+    the newest preview. The update script does the work; the page shows the
+    state (app/update.mjs)."""
 
     def __init__(self, script, log):
         self.script = Path(script)
@@ -197,12 +200,16 @@ class Updater:
         # git checkout). Otherwise available, downloading, downloaded,
         # installing, or failed (download or install; error says why).
         self.status = ""
+        # What status is about: a release X.Y.Z, or a preview's commit id.
         self.version = ""
         self.error = ""
         self.checking = False
         ok, out, _ = self.run("version")
         # The installed release: "" before the first or without a checkout.
         self.installed = out.strip() if ok else ""
+        ok, out, _ = self.run("channel")
+        # stable or preview; "" without a checkout.
+        self.channel = out.strip() if ok else ""
 
     def run(self, *args, timeout=60):
         """(ok, stdout, reason) of a run of the update script."""
@@ -225,6 +232,7 @@ class Updater:
                 "version": self.version,
                 "error": self.error,
                 "installed": self.installed,
+                "channel": self.channel,
                 "checking": self.checking,
                 "boot": self.boot,
             }
@@ -263,6 +271,27 @@ class Updater:
                 else:
                     self.status, self.version = "", ""
                 self.error = ""
+        return ""
+
+    def set_channel(self, channel):
+        """Offers releases (stable) or previews from now on. Returns why it
+        can't, or "". Check next: what was found before is forgotten."""
+        busy = "can't change the channel while Finance updates; try again when it is done"
+        with self.lock:
+            if self.status in ("downloading", "installing"):
+                return busy  # without waiting for the install to end
+        with self.work:
+            with self.lock:
+                if self.status in ("downloading", "installing"):
+                    return busy
+            ok, _, why = self.run("channel", channel)
+            if not ok:
+                return why
+            with self.lock:
+                self.channel = channel
+                # A download clicked meanwhile finishes for the channel before.
+                if self.status not in ("downloading", "installing"):
+                    self.status, self.version, self.error = "", "", ""
         return ""
 
     def download(self):
@@ -456,8 +485,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif action == "install":
             updater.install()
             self.send_json(200, updater.snapshot())
+        elif action == "channel" and body.get("channel") in CHANNELS:
+            why = updater.set_channel(body["channel"])
+            if why:
+                self.send_json(409, {"error": why})
+                return
+            why = updater.check(asked=True)
+            self.send_json(200, {**updater.snapshot(), "checkError": why})
         else:
-            self.send_json(400, {"error": "Expected {action: check, download or install}"})
+            channels = " or ".join(CHANNELS)
+            self.send_json(400, {"error": f"Expected {{action: check, download, install, or channel with channel: {channels}}}"})
 
     def do_PUT(self):
         if not self.allowed():

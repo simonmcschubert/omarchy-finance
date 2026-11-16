@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
-# Finds, downloads, and installs releases of Finance. The server runs it to
-# offer updates (server.py, Updater); it works from a terminal too. A release
-# is a vX.Y.Z tag on the checkout's origin (README.md, "Releases").
+# Finds, downloads, and installs updates of Finance. The server runs it to
+# offer them (server.py, Updater); it works from a terminal too. On the
+# stable channel an update is a release, a vX.Y.Z tag on the checkout's
+# origin (README.md, "Releases"). On the preview channel it is the newest
+# commit of origin's preview branch, which follows main once CI passed
+# (.github/workflows/preview.yml).
 #
-#   update check            prints "current", "available X.Y.Z", or
-#                           "downloaded X.Y.Z" for the newest release
-#   update download X.Y.Z   fetches the release; changes no files
-#   update install X.Y.Z    moves this checkout to the release and restarts
+#   update check            prints "current", "available U", or
+#                           "downloaded U" for the newest update U on the
+#                           channel: a release X.Y.Z, or the full commit id
+#                           of a preview
+#   update download U       fetches the update; changes no files
+#   update install U        moves this checkout to the update and restarts
 #                           the server (omarchy-finance.service) with it; goes
 #                           back when the new server does not answer
 #   update version          prints the installed release: X.Y.Z, X.Y.Z-N-gSHA
 #                           N commits past it, or nothing before the first
+#   update channel [stable|preview]
+#                           prints the channel, or switches to it. Switching
+#                           installs nothing, and never goes back to an
+#                           older version: from a preview to stable, the
+#                           checkout stays as it is until a release is newer.
 #
 # Run without a terminal (as the server does), install also reports its
 # result as a notification.
@@ -22,6 +32,8 @@ export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -oBatchMode=yes}"
 # As in setup.
 UNIT=omarchy-finance.service
 URL=http://127.0.0.1:47219/
+# Moved by .github/workflows/preview.yml; only ever fast-forwarded.
+PREVIEW=refs/heads/preview
 DIR=$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 NOTIFY=0
 
@@ -56,18 +68,70 @@ newest_release() {
     sort -k2,2V | tail -n 1
 }
 
+# The commit of the newest preview on origin; nothing before the first.
+newest_preview() {
+  local refs
+  refs=$(timeout 30 git -C "$DIR" ls-remote origin "$PREVIEW") || fail "can't reach origin"
+  awk -v ref="$PREVIEW" '$2 == ref { print $1 }' <<<"$refs"
+}
+
+is_release() {
+  [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+is_preview() {
+  [[ $1 =~ ^[0-9a-f]{40}$ ]]
+}
+
+# How messages name update U: "0.2.0", or "preview 1a2b3c4".
+name() {
+  if is_release "$1"; then echo "$1"; else echo "preview ${1:0:7}"; fi
+}
+
+# The commit of update U once it is downloaded.
 downloaded() {
-  repo rev-parse --quiet --verify "refs/tags/v$1^{commit}"
+  if is_release "$1"; then
+    repo rev-parse --quiet --verify "refs/tags/v$1^{commit}"
+  else
+    repo merge-base --is-ancestor "$1" refs/remotes/origin/preview 2>/dev/null && echo "$1"
+  fi
+}
+
+# The channel: stable or preview. It lives in the checkout's git config,
+# which updates leave alone.
+chosen_channel() {
+  local channel
+  channel=$(repo config --get finance.channel) || true
+  case ${channel:=stable} in
+    stable | preview) echo "$channel" ;;
+    *) fail "finance.channel is '$channel' in the git config of $DIR, not stable or preview" ;;
+  esac
+}
+
+channel() {
+  if (($#)); then
+    repo config --local finance.channel "$1"
+  else
+    chosen_channel
+  fi
 }
 
 check() {
-  local release commit version
-  release=$(newest_release)
-  if [[ -z $release ]]; then
-    echo current
-    return
+  local channel release commit="" version
+  channel=$(chosen_channel)
+  if [[ $channel == preview ]]; then
+    commit=$(newest_preview)
+    version=$commit
   fi
-  read -r commit version <<<"$release"
+  # Stable, or no preview yet: releases.
+  if [[ -z $commit ]]; then
+    release=$(newest_release)
+    if [[ -z $release ]]; then
+      echo current
+      return
+    fi
+    read -r commit version <<<"$release"
+  fi
   if repo merge-base --is-ancestor "$commit" HEAD 2>/dev/null; then
     echo current
   elif [[ $(downloaded "$version") == "$commit" ]]; then
@@ -79,8 +143,16 @@ check() {
 
 download() {
   downloaded "$1" >/dev/null && return
-  timeout 120 git -C "$DIR" fetch --quiet --no-tags origin "refs/tags/v$1:refs/tags/v$1" ||
-    fail "can't download Finance $1"
+  if is_release "$1"; then
+    timeout 120 git -C "$DIR" fetch --quiet --no-tags origin "refs/tags/v$1:refs/tags/v$1" ||
+      fail "can't download Finance $1"
+  else
+    # Brings the releases' tags along, for update version.
+    timeout 120 git -C "$DIR" fetch --quiet origin "+$PREVIEW:refs/remotes/origin/preview" ||
+      fail "can't download Finance $(name "$1")"
+    downloaded "$1" >/dev/null ||
+      fail "can't download Finance $(name "$1"): it is not on the preview branch of origin"
+  fi
 }
 
 # Whether the service runs the server of this checkout, as setup sets it up.
@@ -106,12 +178,13 @@ restart() {
 }
 
 install() {
-  local version=$1 commit moved=0
+  local update=$1 version commit moved=0
+  version=$(name "$update")
   [[ -t 2 ]] || NOTIFY=1
   serves_this_checkout ||
     fail "can't update to $version: $UNIT does not run Finance from $DIR. Set it up with $DIR/setup"
-  download "$version"
-  commit=$(downloaded "$version")
+  download "$update"
+  commit=$(downloaded "$update")
   if ! repo merge-base --is-ancestor "$commit" HEAD; then
     # Going back after a failed start resets the whole checkout.
     [[ -z $(repo status --porcelain --untracked-files=no) ]] ||
@@ -128,7 +201,11 @@ install() {
     fail "Finance $version did not start, so Finance stays as it was. See: journalctl --user -u $UNIT"
   fi
   echo "Finance $version is installed."
-  notify "Finance updated" "Version $version is installed."
+  if is_release "$update"; then
+    notify "Finance updated" "Version $version is installed."
+  else
+    notify "Finance updated" "${version^} is installed."
+  fi
 }
 
 version() {
@@ -136,13 +213,18 @@ version() {
 }
 
 usage() {
-  echo "Usage: update check | download VERSION | install VERSION | version"
+  echo "Usage: update check | download UPDATE | install UPDATE | version | channel [stable|preview]"
 }
 
 case ${1:-} in
   check | version) ;;
   download | install)
-    [[ ${2:-} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "not a release version: '${2:-}'"
+    is_release "${2:-}" || is_preview "${2:-}" ||
+      fail "not a release version or preview commit: '${2:-}'"
+    ;;
+  channel)
+    (($# == 1)) || [[ $# == 2 && $2 =~ ^(stable|preview)$ ]] ||
+      fail "not a channel: '${*:2}'; choose stable or preview"
     ;;
   -h | --help)
     usage

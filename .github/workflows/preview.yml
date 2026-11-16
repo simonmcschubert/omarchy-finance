@@ -1,0 +1,52 @@
+# Moves the preview branch to each main commit that CI passed. Installed
+# copies on the Preview channel (Settings › Updates) offer it within four
+# hours (README.md, "Update"; update, "channel").
+#
+# Only fast-forwards: the CI run of an older commit that ends after a newer
+# one leaves preview where it is, and preview is never rewritten. Runs no
+# code of the repository, only git.
+# Only GitHub-owned actions pinned by commit SHA, as in ci.yml.
+
+name: Preview
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview
+
+jobs:
+  preview:
+    name: Move preview to the commit
+    # Pushes to main only; CI also runs for pull requests.
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # push the preview branch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0 # main and preview, to compare them
+
+      - name: Fast-forward preview
+        env:
+          COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # The fetch fails before the first preview, and the push creates it.
+          if git fetch --quiet origin refs/heads/preview; then
+            if git merge-base --is-ancestor "$COMMIT" FETCH_HEAD; then
+              echo "preview is at $(git rev-parse FETCH_HEAD), which has $COMMIT already."
+              exit 0
+            fi
+          fi
+          # Without --force, so git refuses anything but a fast-forward.
+          git push origin "$COMMIT:refs/heads/preview"
+          echo "preview is at $COMMIT now." | tee -a "$GITHUB_STEP_SUMMARY"
