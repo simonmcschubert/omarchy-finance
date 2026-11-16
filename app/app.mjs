@@ -509,7 +509,7 @@ function portfolioCard(m) {
   if (view === "path") {
     const p = projection(m);
     legend = [key("value", "Portfolio value"),
-      p.points.length ? [key("projection", `At ${percentUnit.format(p.rates.mid)} a year`), key("band", `${percentUnit.format(p.rates.low)} to ${percentUnit.format(p.rates.high)}`)] : null,
+      p.points.length ? key("projection", `At ${percentUnit.format(p.rates.mid)} a year (${percentUnit.format(p.rates.low)} to ${percentUnit.format(p.rates.high)})`) : null,
       key("goal", "FI number")];
     note = pathSummary(m, p);
   } else {
@@ -540,8 +540,8 @@ function pathSummary(m, p) {
   if (p.reach.mid) {
     const months = F.monthIndex(p.reach.mid) - F.monthIndex(m.latestMonth);
     const low = p.reach.low ? `${year("low")} at ${rate("low")}` : `not ${limit} at ${rate("low")}`;
-    outcome = `the portfolio reaches the FI number around ${year("mid")}, in ${duration(months)} (${year("high")} at ${rate("high")}, ${low}). ` +
-      `With ${percentUnit.format(state.store.settings.inflation)} inflation a year, the FI number is ${money(p.points[months - 1].goal)} by then.`;
+    outcome = `the portfolio reaches the FI number around ${year("mid")}, in ${duration(months)}: ${year("high")} at ${rate("high")}, ${low}. ` +
+      `By then the FI number is ${money(p.points[months - 1].goal)}, as it rises with ${percentUnit.format(state.store.settings.inflation)} inflation a year.`;
   } else if (p.reach.high) {
     outcome = `the portfolio does not reach the FI number ${limit}; at ${rate("high")} it would around ${year("high")}.`;
   } else {
@@ -813,13 +813,8 @@ function viewPortfolio() {
 
 // ---------------------------------------------------------------- forecast
 
-const PLAN_INFO = {
-  keep: { label: "Keep going", detail: "Pays in until retirement" },
-  coast: { label: "Coast", detail: "Pays in until Coast FI, then the smaller amount" },
-  fi: { label: "Retire at FI", detail: "Pays in until the FI number, then lives off the portfolio" },
-};
-
-const listOf = (words) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`);
+// The plans' names, on the chart and on their tiles.
+const PLAN_LABELS = { keep: "Keep investing", coast: "Coast", fi: "Retire early" };
 
 // What the forecast starts from, and what is paid in.
 function forecastBase(store) {
@@ -845,6 +840,10 @@ function forecastBase(store) {
   };
 }
 
+// Retired already: every plan lives off the portfolio from the start, so
+// they are one.
+const retiredAt = (params) => F.monthIndex(params.start) >= (params.birthYear + params.retirementAge) * 12;
+
 function viewForecast() {
   const store = state.store;
   const { birthYear, retirementAge } = store.settings;
@@ -861,9 +860,9 @@ function viewForecast() {
   const rates = F.growthRates(store.settings.expectedReturn);
   const inflation = percentUnit.format(params.inflation);
   const retirementYear = birthYear + retirementAge;
-  const retired = F.monthIndex(params.start) >= retirementYear * 12;
-  // Expenses and the FI number at the end of the month before retirement,
-  // as the forecast counts them.
+  const retired = retiredAt(params);
+  // Expenses at the end of the month before retirement, as the forecast
+  // counts them.
   const untilRetirement = retirementYear * 12 - 1 - F.monthIndex(params.start);
   const then = (amount) => money(F.inflated(amount, params.inflation, untilRetirement));
   const read = (event) => {
@@ -872,27 +871,38 @@ function viewForecast() {
   };
   const months = m.payIn?.months === 12 ? "the last 12 months" : m.payIn?.months === 1 ? "1 month" : `${m.payIn?.months} months`;
 
+  // The growth buttons stay when the results redraw, and change in place: a
+  // click on one that starts while a field's change redraws the results
+  // still lands.
+  const growth = state.forecast.growth;
+  const growthButton = (g) =>
+    h("button", { type: "button", class: g === growth ? "seg active" : "seg", "aria-pressed": String(g === growth), "data-growth": g,
+      onclick: () => { state.forecast.growth = g; updateForecast(); } }, percentUnit.format(rates[g]));
+  const growthField = h("div", { class: "field" },
+    h("span", { id: "forecast-growth" }, "Growth a year"),
+    h("div", { class: "segmented", role: "group", "aria-labelledby": "forecast-growth" }, F.GROWTHS.map(growthButton)));
+
   return h("div", null,
     card("Forecast",
       retired
-        ? h("p", null, `You have reached your retirement age, ${retirementAge}, so each plan lives off the portfolio from now on: `,
-            `it takes out your monthly expenses, ${money(params.expenses)} with buffer, rising by ${inflation} a year.`)
-        : h("p", null, `Three plans for paying in until you retire, at ${listOf(F.GROWTHS.map((g) => percentUnit.format(rates[g])))} growth a year. `,
-            `From January ${retirementYear}, the year you turn ${retirementAge}, each plan lives off the portfolio: `,
-            `it takes out your monthly expenses, ${money(params.expenses)} with buffer today. `,
-            `With ${inflation} inflation a year, they are ${then(params.expenses)} by then, and the FI number is ${then(params.fiNumber)} (${money(params.fiNumber)} today).`),
-      h("form", { class: "forecast-form", onsubmit: read, onchange: read },
-        h("label", null, "Paid in per month",
-          h("input", { id: "forecast-contribution", name: "contribution", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.contribution) })),
-        h("label", null, "After Coast FI, per month",
-          h("input", { id: "forecast-coast", name: "coastContribution", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.coastContribution) })),
-        h("button", { type: "submit" }, "Show")),
-      h("p", { class: "muted" },
-        !m.payIn ? "There are no pay-ins yet to start from. "
-          : m.payIn.average < 0 ? `Your average of ${months} is a withdrawal of ${money(-m.payIn.average)} a month, so paid in per month starts at 0. `
-          : `Paid in per month starts as your average of ${months}, ${money(average)}. `,
-        "Coast FI is when the smaller amount is enough to reach the FI number by retirement; with 0, the portfolio gets there on its own.")),
-    forecastChartCard(),
+        ? h("p", null, `You have reached your retirement age, ${retirementAge}, so the portfolio pays your expenses from now on: `,
+            `${money(params.expenses)} a month with buffer, rising by ${inflation} a year.`)
+        : h("p", null, `How your portfolio could grow until you retire in ${retirementYear}, the year you turn ${retirementAge}, and whether it lasts after. `,
+            `From then on it pays your expenses: ${money(params.expenses)} a month with buffer today, ${then(params.expenses)} by then with ${inflation} inflation a year.`),
+      retired
+        ? h("div", { class: "forecast-controls" }, growthField)
+        : h("form", { class: "forecast-controls", onsubmit: read, onchange: read },
+            h("div", { class: "forecast-form" },
+              h("label", null, "Invested per month",
+                h("input", { id: "forecast-contribution", name: "contribution", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.contribution) })),
+              h("label", null, "After Coast FI, per month",
+                h("input", { id: "forecast-coast", name: "coastContribution", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.coastContribution) })),
+              h("button", { type: "submit" }, "Show")),
+            growthField),
+      retired ? null : h("p", { class: "muted" },
+        !m.payIn ? "There are no pay-ins yet to start from."
+          : m.payIn.average < 0 ? `Your average of ${months} is a withdrawal of ${money(-m.payIn.average)} a month, so invested per month starts at 0.`
+          : `Invested per month starts as your average pay-in of ${months}, ${money(average)}.`)),
     h("div", { id: "forecast-results", class: "stack" }, forecastResults()));
 }
 
@@ -901,8 +911,8 @@ function readForecastForm(form, average) {
   const contribution = F.parseMoney(data.get("contribution"));
   const coast = F.parseMoney(data.get("coastContribution"));
   let error = null;
-  if (!contribution.ok) error = `Paid in per month: ${contribution.error}.`;
-  else if (contribution.cents < 0) error = "Paid in per month: must not be negative.";
+  if (!contribution.ok) error = `Invested per month: ${contribution.error}.`;
+  else if (contribution.cents < 0) error = "Invested per month: must not be negative.";
   else if (!coast.ok) error = `After Coast FI: ${coast.error}.`;
   else if (coast.cents < 0) error = "After Coast FI: must not be negative.";
   if (error) return showError(form, error);
@@ -914,15 +924,11 @@ function readForecastForm(form, average) {
 }
 
 // Redraws the results only, so the form keeps what is typed and its focus.
-// The chart card stays, and its growth buttons change in place: a click on
-// one that starts while a field's change redraws the results still lands.
 function updateForecast() {
   const box = document.getElementById("forecast-results");
   if (!box) return render();
   box.replaceChildren(...forecastResults());
-  const rates = F.growthRates(state.store.settings.expectedReturn);
   const growth = state.forecast.growth;
-  document.getElementById("forecast-title").textContent = `At ${percentUnit.format(rates[growth])} growth a year`;
   for (const button of document.querySelectorAll("[data-growth]")) {
     button.classList.toggle("active", button.dataset.growth === growth);
     button.setAttribute("aria-pressed", String(button.dataset.growth === growth));
@@ -930,73 +936,80 @@ function updateForecast() {
   drawForecast();
 }
 
-function forecastChartCard() {
-  const { birthYear, retirementAge, expectedReturn } = state.store.settings;
-  const rates = F.growthRates(expectedReturn);
-  const growth = state.forecast.growth;
-  const retired = F.monthIndex(forecastBase(state.store).params.start) >= (birthYear + retirementAge) * 12;
-  const growthButton = (g) =>
-    h("button", { type: "button", class: g === growth ? "seg active" : "seg", "aria-pressed": String(g === growth), "data-growth": g,
-      onclick: () => { state.forecast.growth = g; updateForecast(); } }, percentUnit.format(rates[g]));
-  const key = (kind, label) => h("span", null, h("span", { class: `key ${kind}` }), label);
-  return h("section", { class: "card" },
-    h("div", { class: "card-head" },
-      h("h2", { id: "forecast-title" }, `At ${percentUnit.format(rates[growth])} growth a year`),
-      h("div", { class: "legend" },
-        F.PLANS.map((plan) => key(`plan-${plan}`, PLAN_INFO[plan].label)),
-        key("goal", "FI number"),
-        retired ? null : key("target", "Coast FI target")),
-      h("div", { class: "segmented", role: "group", "aria-label": "Growth a year" }, F.GROWTHS.map(growthButton))),
-    h("div", { id: "forecast-chart", class: "chart-box" }));
-}
-
-// The table and notes, for the chosen amounts.
+// At the chosen growth: a tile per plan with its answer, the chart, and
+// notes.
 function forecastResults() {
   const store = state.store;
-  const { birthYear, retirementAge } = store.settings;
+  const { birthYear, retirementAge, expectedReturn, inflation } = store.settings;
   const { params } = forecastBase(store);
-  const rates = F.growthRates(store.settings.expectedReturn);
-  const results = new Map(F.GROWTHS.map((g) => [g, F.forecast({ ...params, growth: rates[g] })]));
+  const rates = F.growthRates(expectedReturn);
   const growth = state.forecast.growth;
-  const retired = F.monthIndex(params.start) >= (birthYear + retirementAge) * 12;
-  const at = (month) => `${F.ageIn(month, birthYear)} (${month.slice(0, 4)})`;
+  const result = F.forecast({ ...params, growth: rates[growth] });
+  // A plan that lasts here may run out at the lowest growth: the tile says so.
+  const low = growth === "low" ? result : F.forecast({ ...params, growth: rates.low });
+  const retired = retiredAt(params);
+  const age = (month) => F.ageIn(month, birthYear);
+  const when = (month) => (month === params.start ? "Now" : `At ${age(month)}, in ${month.slice(0, 4)}`);
+  const goalIn = (month) => result.goal[F.monthIndex(month) - F.monthIndex(params.start)];
 
-  const cell = (plan, g) => {
-    const p = results.get(g).plans[plan];
-    let milestone = null;
-    if (!retired) {
-      const month = plan === "coast" ? p.coastMonth : p.fiMonth;
-      const name = { keep: "FI", coast: "Coast FI", fi: "Retire" }[plan];
-      if (month === null) milestone = plan === "coast" ? `No Coast FI before ${retirementAge}` : `No FI before ${retirementAge}`;
-      else if (month === params.start) milestone = `${name} now`;
-      else milestone = `${name} at ${at(month)}`;
-    }
-    return h("td", { class: g === growth ? "chosen" : null },
-      milestone ? h("div", { class: "strong" }, milestone) : null,
-      retired ? null : h("div", { class: "sub" }, `${money(p.atRetirement)} at ${retirementAge}`),
-      p.runsOut === null ? h("div", { class: "good" }, "Lasts") : h("div", { class: "bad" }, `Runs out at ${F.ageIn(p.runsOut, birthYear)}`));
+  const planTile = (plan, label, value, detail) => {
+    const { runsOut } = result.plans[plan];
+    const lowRunsOut = low.plans[plan].runsOut;
+    return h("div", { class: "tile plan" },
+      h("div", { class: "tile-label" }, h("span", { class: `key plan-${plan}` }), label),
+      h("div", { class: "tile-value" }, value),
+      h("div", { class: "tile-detail" }, detail),
+      runsOut === null ? h("div", { class: "status" }, "Money lasts") : h("div", { class: "status bad" }, `Money runs out at ${age(runsOut)}`),
+      runsOut === null && lowRunsOut !== null
+        ? h("div", { class: "status-note" }, `At ${percentUnit.format(rates.low)} growth, it runs out at ${age(lowRunsOut)}.`)
+        : null);
   };
-  const tableCard = card("All plans",
-    h("div", { class: "table-wrap" }, h("table", { class: "plans" },
-      h("thead", null, h("tr", null, h("th", null, "Plan"),
-        F.GROWTHS.map((g) => h("th", { class: g === growth ? "chosen" : null }, `${percentUnit.format(rates[g])} growth`)))),
-      h("tbody", null, F.PLANS.map((plan) => h("tr", null,
-        h("th", { scope: "row" }, h("span", { class: `key plan-${plan}` }), " ", PLAN_INFO[plan].label, h("div", { class: "sub" }, PLAN_INFO[plan].detail)),
-        F.GROWTHS.map((g) => cell(plan, g))))))),
-    h("p", { class: "muted" }, "Lasts: money is still left at age ", String(F.LASTS_AGE), "."));
+
+  let tiles;
+  if (retired) {
+    tiles = [planTile("keep", "Living off the portfolio", money(params.value),
+      `now, taking out ${money(params.expenses)} a month, rising by ${percentUnit.format(inflation)} a year.`)];
+  } else {
+    const { coastMonth } = result.plans.coast;
+    const { fiMonth } = result.plans.fi;
+    const fiThen = money(result.fiAtRetirement);
+    const coasting = params.coastContribution > 0 ? `invest only ${money(params.coastContribution)} a month` : "stop investing";
+    tiles = [
+      planTile("keep", PLAN_LABELS.keep, money(result.plans.keep.atRetirement),
+        `at ${retirementAge}, investing ${money(params.contribution)} a month until then.`),
+      planTile("coast", PLAN_LABELS.coast, coastMonth === null ? `Not before ${retirementAge}` : when(coastMonth),
+        coastMonth === null
+          ? `the portfolio does not reach the FI number by ${retirementAge}, even investing until then.`
+          : `you can ${coasting}: the portfolio still grows to the FI number by ${retirementAge}, ${fiThen} by then.`),
+      planTile("fi", PLAN_LABELS.fi, fiMonth === null ? `Not before ${retirementAge}` : when(fiMonth),
+        fiMonth === null
+          ? `the portfolio does not reach the FI number before then.`
+          : fiMonth === params.start
+            ? `you can stop working: the portfolio is above the FI number, ${money(params.fiNumber)}, and pays your expenses from now on.`
+            : `you can stop working: the portfolio reaches the FI number, ${money(goalIn(fiMonth))} by then, and pays your expenses from then on.`),
+    ];
+  }
+
+  const key = (kind, label) => h("span", null, h("span", { class: `key ${kind}` }), label);
+  const chartCard = h("section", { class: "card" },
+    h("div", { class: "card-head" },
+      h("h2", null, `At ${percentUnit.format(rates[growth])} growth a year`),
+      h("div", { class: "legend" },
+        retired ? key("plan-keep", "Portfolio") : F.PLANS.map((plan) => key(`plan-${plan}`, PLAN_LABELS[plan])),
+        key("goal", "FI number"))),
+    h("div", { id: "forecast-chart", class: "chart-box" }));
 
   const notes = card(null,
     h("ul", { class: "notes muted" },
-      h("li", null, "The growth rates are the expected return set in ", h("a", { href: "#settings" }, "Settings"), `, and ${F.RETURN_SPREAD} points less and more, before inflation.`),
-      h("li", null, `Amounts are in the money of each year: expenses and the FI number rise by the inflation, ${percentUnit.format(store.settings.inflation)} a year. `,
-        "What is paid in stays the same; when your pay-ins rise, so does the average it starts from."),
+      h("li", null, "Growth is before inflation: the expected return set in ", h("a", { href: "#settings" }, "Settings"),
+        `, or ${F.RETURN_SPREAD} points less or more. Real markets do not grow the same every year, and bad years right after you start living off the portfolio hurt most.`),
+      h("li", null, `Amounts are in the money of each year: expenses and the FI number rise by ${percentUnit.format(inflation)} a year. What is invested stays the same.`),
       h("li", null, store.records.length
         ? `It starts from the portfolio in ${monthLabel(params.start)}, ${money(params.value)}.`
         : "It starts from 0, as there are no broker values yet."),
-      h("li", null, "Real markets do not grow the same every year, and bad years right after you start living off the portfolio hurt most."),
-      h("li", null, "Taxes and the state pension are left out.")));
+      h("li", null, `Money lasts when some is still left at age ${F.LASTS_AGE}. Taxes and the state pension are left out.`)));
 
-  return [tableCard, notes];
+  return [h("div", { class: "tiles plan-tiles" }, tiles), chartCard, notes];
 }
 
 function drawForecast() {
@@ -1007,19 +1020,30 @@ function drawForecast() {
   const result = F.forecast({ ...params, growth: F.growthRates(state.store.settings.expectedReturn)[state.forecast.growth] });
   const first = F.monthIndex(result.months[0]);
   const index = (month) => (month === null ? -1 : F.monthIndex(month) - first);
-  const mark = { keep: null, coast: result.plans.coast.coastMonth, fi: result.plans.fi.fiMonth };
+  const age = (month) => F.ageIn(month, birthYear);
+  const { coastMonth } = result.plans.coast;
+  const { fiMonth } = result.plans.fi;
+  const line = (plan, label, mark, markLabel) => ({ key: plan, label, values: result.plans[plan].values, mark: index(mark), markLabel });
+  // Keep investing last, on top: until the others change course, they
+  // share its line.
+  const lines = retiredAt(params)
+    ? [line("keep", "Portfolio", null)]
+    : [
+        line("fi", PLAN_LABELS.fi, fiMonth, fiMonth && `Retire at ${age(fiMonth)}`),
+        line("coast", PLAN_LABELS.coast, coastMonth,
+          coastMonth && `${params.coastContribution > 0 ? "Invest less" : "Stop investing"} at ${age(coastMonth)}`),
+        line("keep", PLAN_LABELS.keep, null),
+      ];
   drawResizing(box, () =>
     renderForecastChart(box, {
       months: result.months,
-      // Keep going last, on top: until the others turn off, they share its line.
-      lines: ["fi", "coast", "keep"].map((plan) => ({ key: plan, label: PLAN_INFO[plan].label, values: result.plans[plan].values, mark: index(mark[plan]) })),
+      lines,
       goal: result.goal,
-      target: result.target,
       retirementIndex: index(result.retirement),
       format: money,
       formatAxis: (cents) => axis.format(cents / 100),
       formatMonth: monthLabel,
-      ageOf: (month) => F.ageIn(month, birthYear),
+      ageOf: age,
     }));
 }
 

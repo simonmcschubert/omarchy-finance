@@ -14,6 +14,15 @@
   --green: #9ece6a;
   --yellow: #e0af68;
   color-scheme: dark;
+  /* Charts have colors of their own, so that their lines stay apart in
+     every theme, grey ones too: three hues that people with color blindness
+     tell apart too, a step lighter or darker for the theme's color scheme,
+     and a green and a red for gains and losses. */
+  --series-1: light-dark(#2a78d6, #3987e5);
+  --series-2: light-dark(#eb6834, #d95926);
+  --series-3: light-dark(#1baf7a, #199e70);
+  --good: #0ca30c;
+  --bad: #d03b3b;
   --font: "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
 }
 
@@ -370,9 +379,10 @@ main > div {
   background: var(--fg-muted);
 }
 
+/* The portfolio's color, as on the chart. */
 .split .invested,
 .swatch.invested {
-  background: var(--accent);
+  background: var(--series-1);
 }
 
 .split .left,
@@ -397,9 +407,10 @@ main > div {
 
 .key {
   display: inline-block;
+  flex: none;
   width: 18px;
   height: 0;
-  border-top: 2px solid var(--accent);
+  border-top: 2px solid var(--series-1);
 }
 
 .key.paid {
@@ -407,11 +418,25 @@ main > div {
 }
 
 .key.goal {
-  border-top: 1px dashed var(--green);
+  border-top: 2px dashed var(--fg);
 }
 
+/* The projection: its dashed line over its band. */
 .key.projection {
-  border-top: 2px dotted var(--accent);
+  position: relative;
+  height: 12px;
+  border: none;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--series-1) 30%, transparent);
+}
+
+.key.projection::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 5px;
+  border-top: 2px dashed var(--series-1);
 }
 
 /* Areas: a filled square instead of a line. */
@@ -425,31 +450,27 @@ main > div {
 }
 
 .key.gain {
-  background: color-mix(in srgb, var(--green) 35%, transparent);
+  background: color-mix(in srgb, var(--good) 40%, transparent);
 }
 
 .key.loss {
-  background: color-mix(in srgb, var(--red) 35%, transparent);
+  background: color-mix(in srgb, var(--bad) 40%, transparent);
 }
 
 .key.band {
-  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  background: color-mix(in srgb, var(--series-1) 30%, transparent);
 }
 
 .key.plan-keep {
-  border-top-color: var(--accent);
+  border-top-color: var(--series-1);
 }
 
 .key.plan-coast {
-  border-top-color: var(--yellow);
+  border-top-color: var(--series-2);
 }
 
 .key.plan-fi {
-  border-top-color: var(--fg-strong);
-}
-
-.key.target {
-  border-top: 1px dotted var(--yellow);
+  border-top-color: var(--series-3);
 }
 
 .chart-box {
@@ -489,7 +510,7 @@ main > div {
 }
 
 .chart .line.value {
-  stroke: var(--accent);
+  stroke: var(--series-1);
 }
 
 .chart .line.paid {
@@ -498,23 +519,30 @@ main > div {
 }
 
 .chart .line.projection {
-  stroke: var(--accent);
-  stroke-dasharray: 0 5;
+  stroke: var(--series-1);
+  stroke-dasharray: 5 6;
 }
 
 .chart .goal {
   fill: none;
-  stroke: var(--green);
-  stroke-width: 1;
-  stroke-dasharray: 3 4;
+  stroke: var(--fg);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
 }
 
 .chart .goal-label,
 .chart .reach-label,
+.chart .mark-label,
+.chart .marker-label,
 .chart .end-label {
   fill: var(--fg);
   font-size: 11px;
   font-family: var(--font);
+  /* A halo of the card's color, so a line under a label does not cut it. */
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
 
 .chart .end-label {
@@ -527,35 +555,35 @@ main > div {
 }
 
 .chart .area.gain {
-  fill: var(--green);
-  opacity: 0.16;
-}
-
-.chart .area.loss {
-  fill: var(--red);
+  fill: var(--good);
   opacity: 0.2;
 }
 
+.chart .area.loss {
+  fill: var(--bad);
+  opacity: 0.25;
+}
+
 .chart .band {
-  fill: var(--accent);
-  opacity: 0.14;
+  fill: var(--series-1);
+  opacity: 0.18;
 }
 
 .chart .reach {
-  fill: var(--green);
+  fill: var(--fg-strong);
   stroke: var(--surface);
   stroke-width: 2;
 }
 
 .chart .dot.projection {
   fill: var(--surface);
-  stroke: var(--accent);
+  stroke: var(--series-1);
   stroke-width: 2;
 }
 
 .chart .end.value,
 .chart .dot.value {
-  fill: var(--accent);
+  fill: var(--series-1);
   stroke: var(--surface);
   stroke-width: 2;
 }
@@ -570,23 +598,17 @@ main > div {
   fill: var(--fg);
 }
 
-/* Forecast: one line per plan, the Coast FI target, and retirement. */
+/* Forecast: one line per plan, and retirement. */
 .chart .line.plan-keep {
-  stroke: var(--accent);
+  stroke: var(--series-1);
 }
 
 .chart .line.plan-coast {
-  stroke: var(--yellow);
+  stroke: var(--series-2);
 }
 
 .chart .line.plan-fi {
-  stroke: var(--fg-strong);
-}
-
-.chart .line.target {
-  stroke: var(--yellow);
-  stroke-width: 1;
-  stroke-dasharray: 2 4;
+  stroke: var(--series-3);
 }
 
 .chart .mark,
@@ -598,27 +620,21 @@ main > div {
 }
 
 .chart .plan-keep:is(.mark, .dot) {
-  fill: var(--accent);
+  fill: var(--series-1);
 }
 
 .chart .plan-coast:is(.mark, .dot) {
-  fill: var(--yellow);
+  fill: var(--series-2);
 }
 
 .chart .plan-fi:is(.mark, .dot) {
-  fill: var(--fg-strong);
+  fill: var(--series-3);
 }
 
 .chart .marker {
   stroke: var(--fg-muted);
   stroke-width: 1;
   stroke-dasharray: 4 3;
-}
-
-.chart .marker-label {
-  fill: var(--fg-muted);
-  font-size: 11px;
-  font-family: var(--font);
 }
 
 .chart .cross {
@@ -845,16 +861,31 @@ form.inline input {
   margin-top: 8px;
 }
 
+.forecast-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  align-items: end;
+  margin: 12px 0 4px;
+}
+
 .forecast-form {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: end;
-  margin: 12px 0 4px;
 }
 
 .forecast-form input {
-  width: 180px;
+  width: 160px;
+}
+
+/* A label over a group of buttons, as over a text field. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--fg-muted);
 }
 
 .month-form {
@@ -978,33 +1009,56 @@ th .sub {
   font-size: 12px;
 }
 
-table.plans th,
-table.plans td {
-  padding: 8px 10px;
+/* Forecast: one tile per plan, its key as on the chart. Their rows line up
+   across the tiles. */
+.plan-tiles {
+  grid-auto-rows: auto;
 }
 
-table.plans tbody th {
-  min-width: 160px;
+.plan {
+  display: grid;
+  grid-row: span 5;
+  grid-template-rows: subgrid;
+  row-gap: 4px;
 }
 
-table.plans td {
-  white-space: nowrap;
+.plan .tile-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-strong);
 }
 
-table.plans .key {
-  vertical-align: middle;
+.plan .tile-detail {
+  color: var(--fg);
+  font-size: 13px;
 }
 
-table.plans .chosen {
-  background: var(--selection);
+/* Whether the money lasts: a colored dot, and words that say it. */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  color: var(--fg-strong);
 }
 
-.good {
-  color: var(--green);
+.status::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--good);
 }
 
-.bad {
-  color: var(--red);
+.status.bad::before {
+  background: var(--bad);
+}
+
+.status-note {
+  color: var(--fg-muted);
+  font-size: 12px;
 }
 
 .notes {

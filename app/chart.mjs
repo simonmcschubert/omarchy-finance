@@ -5,9 +5,9 @@
 // gain and red for a loss. The FI number shows once the data reaches it.
 // Path to FI: the portfolio value, then the projection to the FI number
 // (finance.mjs fiProjection): a dashed line at the expected return, a band
-// from the low to the high return, and a dot where the line reaches the FI
-// number. The FI number is today's over the history, and rises with
-// inflation over the projection.
+// from the low to the high return, both ending at the FI number, and a dot
+// where the line reaches it. The FI number is today's over the history, and
+// rises with inflation over the projection.
 //
 // A crosshair tooltip follows the pointer or the arrow keys.
 
@@ -143,12 +143,14 @@ export function renderChart(root, options) {
 
   const valuePoints = series.map((m, i) => [x(i), y(m.value)]);
   if (path) {
-    // The projection starts at the latest value and is cut off at the top.
-    const inPlot = clip(svg("rect", { x: MARGIN.left, y: plotTop, width: plotW, height: plotH }));
+    // The projection starts at the latest value and ends at the FI number:
+    // what goes beyond it is cut off.
     const at = (key) => [[x(last), y(latest.value)], ...projection.map((p, k) => [x(last + 1 + k), y(p[key])])];
     if (projection.length) {
-      chart.append(svg("path", { class: "band", d: areaPath(at("high"), at("low")), "clip-path": inPlot }));
-      chart.append(svg("path", { class: "line projection", d: linePath(at("mid")), "clip-path": inPlot }));
+      const goalLine = [[x(last), y(fiNumber)], ...projection.map((p, k) => [x(last + 1 + k), y(p.goal)])];
+      const belowGoal = clip(svg("path", { d: `${linePath(goalLine)} L${x(count - 1).toFixed(1)},${plotBottom} L${x(last).toFixed(1)},${plotBottom} Z` }));
+      chart.append(svg("path", { class: "band", d: areaPath(at("high"), at("low")), "clip-path": belowGoal }));
+      chart.append(svg("path", { class: "line projection", d: linePath(at("mid")), "clip-path": belowGoal }));
     }
   } else {
     // The gap between the lines: green where the value is above what went
@@ -345,28 +347,47 @@ export function renderChart(root, options) {
 // ---------------------------------------------------------------- forecast
 
 const FORECAST_HEIGHT = 300;
-const FORECAST_MARGIN = { top: 20, right: 20, bottom: 44, left: 72 };
+// Room above the plot for the retirement marker's label.
+const FORECAST_MARGIN = { top: 28, right: 20, bottom: 44, left: 72 };
 
 // The y-axis reaches up to the highest value until retirement (and at least
 // a bit above the FI number then). Lines that grow beyond it after
 // retirement leave the top of the chart; the tooltip still shows their
 // values. goal: the FI number of each month.
-export function forecastTop(lines, goal, target, retirementIndex) {
+export function forecastTop(lines, goal, retirementIndex) {
   const until = retirementIndex >= 0 ? retirementIndex : Infinity;
   let top = 0;
   goal.forEach((v, i) => { if (i <= until && v * 1.2 > top) top = v * 1.2; });
   for (const line of lines) line.values.forEach((v, i) => { if (i <= until && v > top) top = v; });
-  for (const v of target) if (v !== null && v > top) top = v;
   return Math.max(top, 10000);
 }
 
-// options: { months, lines: [{ key, label, values, mark (index or -1) }],
-// goal (the FI number of each month), target (one value or null per
-// month), retirementIndex (or -1), format, formatAxis, formatMonth,
-// ageOf(month) }. Lines are drawn in order, so the last one is on top
-// where they overlap.
+// Where a label of `width` goes next to a dot at (cx, cy): above left, above
+// right, below right or below left, whichever first stays inside `bounds`
+// and clear of the boxes in `taken`; when none does, the same moved sideways
+// into `bounds`. Returns { x, y, box }, x and y for a label anchored at its
+// start.
+export function placeLabel(cx, cy, width, bounds, taken) {
+  const height = 12;
+  const spot = ([dx, dy], inside) => {
+    let left = dx < 0 ? cx - 8 - width : cx + 8;
+    if (inside) left = Math.max(bounds.left, Math.min(left, bounds.right - width));
+    const top = dy < 0 ? cy - 8 - height : cy + 8;
+    return { x: left, y: top + height - 2, box: { left, top, right: left + width, bottom: top + height } };
+  };
+  const sides = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+  const spots = [false, true].flatMap((inside) => sides.map((side) => spot(side, inside)));
+  const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  const fits = (box) => box.left >= bounds.left && box.right <= bounds.right && box.top >= bounds.top && box.bottom <= bounds.bottom;
+  return spots.find((s) => fits(s.box) && !taken.some((t) => overlaps(s.box, t))) ?? spots[sides.length];
+}
+
+// options: { months, lines: [{ key, label, values, mark (index or -1),
+// markLabel }], goal (the FI number of each month), retirementIndex (or
+// -1), format, formatAxis, formatMonth, ageOf(month) }. Lines are drawn in
+// order, so the last one is on top where they overlap.
 export function renderForecastChart(root, options) {
-  const { months, lines, goal, target, retirementIndex, format, formatAxis, formatMonth, ageOf } = options;
+  const { months, lines, goal, retirementIndex, format, formatAxis, formatMonth, ageOf } = options;
   root.replaceChildren();
   const width = Math.max(320, Math.round(root.clientWidth || 640));
   const height = FORECAST_HEIGHT;
@@ -375,7 +396,7 @@ export function renderForecastChart(root, options) {
   const plotH = height - margin.top - margin.bottom;
   const last = months.length - 1;
 
-  const ticks = niceTicks(0, forecastTop(lines, goal, target, retirementIndex));
+  const ticks = niceTicks(0, forecastTop(lines, goal, retirementIndex));
   const yMax = ticks.at(-1);
   const x = (i) => margin.left + (last === 0 ? plotW / 2 : (i * plotW) / last);
   const y = (v) => margin.top + plotH - (v / yMax) * plotH;
@@ -391,17 +412,17 @@ export function renderForecastChart(root, options) {
     tabindex: 0,
     "aria-label": "Forecast of the portfolio for each plan, by year. Use the arrow keys to read each year.",
   });
-  const clip = svg("clipPath", { id: "forecast-clip" });
+  const clipId = `chart-clip-${++ids}`;
+  const clip = svg("clipPath", { id: clipId });
   clip.append(svg("rect", { x: margin.left - 4, y: margin.top - 4, width: plotW + 8, height: plotH + 8 }));
   const defs = svg("defs");
   defs.append(clip);
   chart.append(defs);
+  const inPlot = `url(#${clipId})`;
 
   for (const tick of ticks) {
     chart.append(svg("line", { class: "grid", x1: margin.left, x2: width - margin.right, y1: y(tick), y2: y(tick) }));
-    const label = svg("text", { class: "axis", x: margin.left - 8, y: y(tick), "text-anchor": "end", "dominant-baseline": "middle" });
-    label.textContent = formatAxis(tick);
-    chart.append(label);
+    chart.append(text({ class: "axis", x: margin.left - 8, y: y(tick), "text-anchor": "end", "dominant-baseline": "middle" }, formatAxis(tick)));
   }
 
   // A label every 1, 2, 5, 10 or 20 years, at January of years whose age
@@ -411,46 +432,44 @@ export function renderForecastChart(root, options) {
   const every = [1, 2, 5, 10, 20].find((n) => years / n <= room) ?? 50;
   months.forEach((month, i) => {
     if (!month.endsWith("-01") || ageOf(month) % every !== 0) return;
-    const age = svg("text", { class: "axis strong", x: x(i), y: height - 22, "text-anchor": "middle" });
-    age.textContent = `${ageOf(month)}`;
-    const year = svg("text", { class: "axis", x: x(i), y: height - 8, "text-anchor": "middle" });
-    year.textContent = month.slice(0, 4);
-    chart.append(age, year);
+    chart.append(text({ class: "axis strong", x: x(i), y: height - 22, "text-anchor": "middle" }, `${ageOf(month)}`));
+    chart.append(text({ class: "axis", x: x(i), y: height - 8, "text-anchor": "middle" }, month.slice(0, 4)));
   });
-  const ageTitle = svg("text", { class: "axis", x: margin.left - 8, y: height - 22, "text-anchor": "end" });
-  ageTitle.textContent = "Age";
-  chart.append(ageTitle);
+  chart.append(text({ class: "axis", x: margin.left - 8, y: height - 22, "text-anchor": "end" }, "Age"));
 
+  // Retirement: a line through the plot, labeled above it.
   if (retirementIndex >= 0 && retirementIndex <= last) {
-    chart.append(svg("line", { class: "marker", x1: x(retirementIndex), x2: x(retirementIndex), y1: margin.top - 8, y2: margin.top + plotH }));
-    const label = svg("text", { class: "marker-label", x: x(retirementIndex) + 6, y: margin.top - 8 + 4, "dominant-baseline": "hanging" });
-    label.textContent = "Retirement";
-    chart.append(label);
+    const rx = x(retirementIndex);
+    chart.append(svg("line", { class: "marker", x1: rx, x2: rx, y1: margin.top - 4, y2: margin.top + plotH }));
+    const right = rx > margin.left + plotW * 0.75;
+    chart.append(text({ class: "marker-label", x: right ? rx - 6 : rx + 6, y: margin.top - 10, "text-anchor": right ? "end" : "start" }, `Retirement at ${ageOf(months[retirementIndex])}`));
   }
 
-  // The FI number rises with inflation; its label says today's.
-  const goalPath = goal.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-  chart.append(svg("path", { class: "goal", d: goalPath, "clip-path": "url(#forecast-clip)" }));
+  // The FI number rises with inflation; its label says today's, above the
+  // line all along the label.
+  const points = (values) => values.map((v, i) => [x(i), y(v)]);
+  chart.append(svg("path", { class: "goal", d: linePath(points(goal)), "clip-path": inPlot }));
   const goalText = `FI number ${format(goal[0])}`;
-  // Above the line all along the label.
+  const goalWidth = goalText.length * CHAR_WIDTH;
   let above = y(goal[0]);
-  for (let i = 0; i <= last && x(i) <= margin.left + 6 + goalText.length * CHAR_WIDTH; i++) above = Math.min(above, y(goal[i]));
+  for (let i = 0; i <= last && x(i) <= margin.left + 6 + goalWidth; i++) above = Math.min(above, y(goal[i]));
   chart.append(text({ class: "goal-label", x: margin.left + 6, y: above - 6 }, goalText));
 
-  const targetPath = target
-    .map((v, i) => (v === null ? null : `${i === 0 || target[i - 1] === null ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`))
-    .filter(Boolean)
-    .join(" ");
-  if (targetPath) chart.append(svg("path", { class: "line target", d: targetPath, "clip-path": "url(#forecast-clip)" }));
+  for (const line of lines) chart.append(svg("path", { class: `line plan-${line.key}`, d: linePath(points(line.values)), "clip-path": inPlot }));
 
+  // A dot where a plan changes course, with what happens there, clear of
+  // the FI number's label and of each other.
+  const taken = [{ left: margin.left + 6, right: margin.left + 6 + goalWidth, top: above - 18, bottom: above - 2 }];
+  const bounds = { left: margin.left, right: width - margin.right, top: margin.top, bottom: margin.top + plotH };
   for (const line of lines) {
-    const d = line.values.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-    chart.append(svg("path", { class: `line plan-${line.key}`, d, "clip-path": "url(#forecast-clip)" }));
-  }
-  for (const line of lines) {
-    if (line.mark >= 0 && line.mark <= last) {
-      chart.append(svg("circle", { class: `mark plan-${line.key}`, cx: x(line.mark), cy: yDot(line.values[line.mark]), r: 4.5 }));
-    }
+    if (line.mark < 0 || line.mark > last) continue;
+    const cx = x(line.mark);
+    const cy = yDot(line.values[line.mark]);
+    chart.append(svg("circle", { class: `mark plan-${line.key}`, cx, cy, r: 4.5 }));
+    if (!line.markLabel) continue;
+    const spot = placeLabel(cx, cy, line.markLabel.length * CHAR_WIDTH, bounds, taken);
+    taken.push(spot.box);
+    chart.append(text({ class: "mark-label", x: spot.x, y: spot.y }, line.markLabel));
   }
 
   // Hover layer: a crosshair and one dot per line, a year at a time.
