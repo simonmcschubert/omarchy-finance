@@ -94,6 +94,16 @@ The data file stays.
   **Essential** marks an expense you would pay even on the leanest budget
   (rent, food, insurance): those count for Lean FI as well. New expenses are
   not essential.
+
+  Each one **starts** now, at retirement, at an age or in a month, and
+  **ends** never, at retirement, at an age or after a month: childcare from
+  August 2027 until July 2031, health insurance from retirement until 67, a
+  state pension from 67, a salary until retirement. Ages and retirement
+  start in January of their year. It counts only in its months: what does
+  not count this month is listed under Later or Ended, and is left out of
+  the totals. New income ends at retirement; new expenses never end. Income
+  from before this setting ends at retirement, as it was never counted after
+  it; change that for income that goes on, such as rent from a flat.
 - **Portfolio**: per month, each broker account's value at month end and what
   was paid in that month (negative for withdrawals). An account without a
   value in a month counts with its last value.
@@ -137,15 +147,15 @@ Settings.
 
 | Number | How it is calculated |
 | --- | --- |
-| Monthly income | Sum of income, each divided by its months (a yearly bonus counts one twelfth) |
-| Monthly expenses | Sum of active expenses the same way, plus the buffer |
+| Monthly income | Sum of the income that counts this month, each divided by its months (a yearly bonus counts one twelfth) |
+| Monthly expenses | Sum of the active expenses that count this month the same way, plus the buffer |
 | Investment rate | Average monthly pay-in over the last 12 months ÷ monthly income |
 | Portfolio | Sum of all accounts in the latest month, and its change since the month before |
 | Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins. The return is that gain ÷ (the value 12 months ago + each pay-in for the part of the 12 months it was invested, from the middle of its month) |
 | Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them |
-| FI number | Monthly expenses × 12 ÷ withdrawal rate (× 25 at 4 %) |
+| FI number | What the portfolio would pay a month when retiring now × 12 ÷ withdrawal rate (× 25 at 4 %): the expenses that would count then, plus the buffer, less the income that would. Without starts and ends, the monthly expenses |
 | FI reached | Portfolio ÷ FI number |
-| Time to FI | Months until the portfolio reaches the FI number of that month: from the latest month it grows by the expected return (compounded monthly) and gets the average monthly pay-in each month, while the FI number rises by the inflation. Years from two years on; nothing beyond 100 years |
+| Time to FI | Months until the portfolio reaches the FI number of that month (for retiring then): from the latest month it grows by the expected return (compounded monthly) and gets the average monthly pay-in each month, while the FI number rises by the inflation. Years from two years on; nothing beyond 100 years |
 | Lean FI | The same three for the essential expenses only, with the buffer: the FI number for a lean budget, how much of it the portfolio reaches, and in how long. Shown under the FI numbers once an active expense is essential; the bar under FI reached marks it |
 
 With less than 12 months of history, the average uses the months there
@@ -191,13 +201,15 @@ can be changed, to 0 too). A tile for each answers its question:
 | Coast | until Coast FI, then only the amount set for after it (default 0) | when Coast FI is |
 | Retire early | until the portfolio reaches the FI number, then lives off it | when that is |
 
-Retirement starts in January of the year you reach the retirement age. From
-then on every plan lives off the portfolio: each month it takes out the
-monthly expenses from the dashboard (with the buffer), risen by the
-inflation. Coast FI is the first month from which investing only the
+Retirement starts in January of the year you reach the retirement age; for
+Retire early, the month after it reaches the FI number. From then on every
+plan lives off the portfolio: each month it takes out the expenses that
+count that month (with the buffer), less the income that does, risen by the
+inflation. Expenses and income that start or end at retirement follow each
+plan's retirement. Coast FI is the first month from which investing only the
 amount for after it makes the portfolio reach the FI number when
 retirement starts; with 0, it gets there on its own. The page says what the
-expenses are by then, and the tiles what the FI number is.
+portfolio pays when retirement starts, and the tiles what the FI number is.
 
 Each tile also says whether the money lasts, that is whether some is still
 left at age 150, or at which age it runs out. When it lasts but would run
@@ -218,7 +230,8 @@ course.
   year by default). What is invested stays the same.
 - The growth is the same every year. Real markets are not, and bad years
   right after you start living off the portfolio hurt most.
-- Taxes and the state pension are left out.
+- A state pension or other income that goes on after retirement counts
+  when it is entered under Income, from its age. Taxes are left out.
 
 The amounts typed on the page are not saved; the year of birth and the
 retirement age are in Settings.

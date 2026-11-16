@@ -4,7 +4,7 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 8;
+export const VERSION = 9;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
@@ -25,6 +25,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
 // What the birth year and the retirement age may be.
 export const BIRTH_YEARS = Object.freeze({ min: 1900, max: 2100 });
 export const RETIREMENT_AGES = Object.freeze({ min: 30, max: 80 });
+// What the age an expense or income starts or ends at may be.
+export const AGES = Object.freeze({ min: 0, max: 120 });
 
 // What a new data file starts with; categories can be changed in Settings.
 export const STARTER_CATEGORIES = Object.freeze({
@@ -48,7 +50,7 @@ export function emptyStore() {
 
 const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records"];
 const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge"];
-const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths"];
+const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths", "from", "until"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active", "essential"];
 const ACCOUNT_KEYS = ["id", "name"];
 const RECORD_KEYS = ["month", "account", "value", "payIn"];
@@ -174,6 +176,34 @@ function upgradeFromVersion7(value) {
   return next;
 }
 
+// Version 8 had no start or end for expenses and income: every one counted
+// all the time. Upgraded expenses still do. Upgraded income ends at
+// retirement, as it was never counted after it: income was not in the
+// forecast.
+function upgradeFromVersion8(value) {
+  const next = { ...value, version: 9 };
+  for (const kind of KINDS) {
+    if (!Array.isArray(value[kind])) continue;
+    const until = kind === "income" ? { at: "retirement" } : null;
+    next[kind] = value[kind].map((item) => (isObject(item) ? { ...item, from: null, until } : item));
+  }
+  return next;
+}
+
+// A start or end of an expense or income: null (always), { at: "retirement" },
+// { age: whole years } (January of the year of that age) or { month:
+// "YYYY-MM" } (a start's first month, an end's last month).
+function isBound(value) {
+  if (value === null) return true;
+  if (!isObject(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length !== 1) return false;
+  if (keys[0] === "at") return value.at === "retirement";
+  if (keys[0] === "age") return isWholeIn(value.age, AGES);
+  if (keys[0] === "month") return isMonth(value.month);
+  return false;
+}
+
 // Checks a parsed data file. Returns { ok: true, store } or { ok: false, error }.
 // `null` (no file yet) is an empty store. Older versions are upgraded.
 export function parseStore(value) {
@@ -186,6 +216,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 5) value = upgradeFromVersion5(value);
     if (isObject(value) && value.version === 6) value = upgradeFromVersion6(value);
     if (isObject(value) && value.version === 7) value = upgradeFromVersion7(value);
+    if (isObject(value) && value.version === 8) value = upgradeFromVersion8(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -246,6 +277,8 @@ export function parseStore(value) {
         if (!Number.isInteger(item.everyMonths) || item.everyMonths < 1 || item.everyMonths > 120) {
           throw new Error(`${where} everyMonths must be a whole number from 1 to 120`);
         }
+        if (!isBound(item.from)) throw new Error(`${where} from must be null, a month, an age or retirement`);
+        if (!isBound(item.until)) throw new Error(`${where} until must be null, a month, an age or retirement`);
         if (kind === "expenses" && typeof item.active !== "boolean") throw new Error(`${where} active must be true or false`);
         if (kind === "expenses" && typeof item.essential !== "boolean") throw new Error(`${where} essential must be true or false`);
       });
@@ -432,6 +465,60 @@ export function monthlyAmount(item) {
   return item.amount / item.everyMonths;
 }
 
+// The month index retirement starts in: January of the year of the
+// retirement age. Infinity without a year of birth.
+export function retirementIndex({ birthYear, retirementAge }) {
+  return birthYear == null ? Infinity : (birthYear + retirementAge) * 12;
+}
+
+// The month index a start or end falls on, where `retirement` is the month
+// index retirement starts in. A start is the first month that counts; an
+// end the first month that no longer does (the month after an end month).
+// An age without a year of birth is never reached.
+function boundIndex(bound, end, birthYear, retirement) {
+  if (bound === null) return end ? Infinity : -Infinity;
+  if (bound.at === "retirement") return retirement;
+  if ("age" in bound) return birthYear == null ? Infinity : (birthYear + bound.age) * 12;
+  return monthIndex(bound.month) + (end ? 1 : 0);
+}
+
+// The months an expense or income counts in, as month indexes: from (the
+// first) and until (the first after the last); -Infinity and Infinity when
+// open.
+export function itemWindow(item, birthYear, retirement) {
+  return {
+    from: boundIndex(item.from ?? null, false, birthYear, retirement),
+    until: boundIndex(item.until ?? null, true, birthYear, retirement),
+  };
+}
+
+// Whether an expense or income counts in the month of `index` when
+// retirement starts in the month of `retirement`. Inactive expenses never
+// count.
+export function countsIn(item, index, birthYear, retirement) {
+  if (item.active === false) return false;
+  const { from, until } = itemWindow(item, birthYear, retirement);
+  return from <= index && index < until;
+}
+
+// The items that count in the month of `index`, with retirement when the
+// settings say.
+export function countingIn(items, index, settings) {
+  return items.filter((item) => countsIn(item, index, settings.birthYear, retirementIndex(settings)));
+}
+
+// What the portfolio has to pay in the month of `index` when retirement
+// starts in the month of `retirement`, in today's money: the expenses that
+// count then, with the buffer, less the income that counts then; never
+// below 0. essential: the essential expenses only, for Lean FI.
+export function needIn(store, index, retirement, { essential = false } = {}) {
+  const { birthYear, bufferPercent } = store.settings;
+  const counts = (item) => countsIn(item, index, birthYear, retirement);
+  const expenses = sum(store.expenses.filter((item) => counts(item) && (!essential || item.essential)).map(monthlyAmount));
+  const income = sum(store.income.filter(counts).map(monthlyAmount));
+  return Math.max(0, expenses + (expenses * bufferPercent) / 100 - income);
+}
+
 // The items that count. An inactive expense stays in the list but counts
 // nowhere: not in totals, the FI number or the charts. Income has no
 // inactive items.
@@ -500,20 +587,27 @@ export function inflated(amount, inflation, months) {
   return amount * (1 + monthlyRate(inflation)) ** months;
 }
 
+// A goal as a function of the months from now: `goal` itself when it is
+// one, or always the same amount.
+const goalFunction = (goal) => (typeof goal === "function" ? goal : () => goal);
+
 // The portfolio at the end of each coming month, from `start`: it grows at
 // the yearly return (percent before inflation, compounded monthly) and gets
 // `payIn` each month. Ends with the first month at or above `goal`, which
 // rises by `inflation` percent a year; empty when `start` is there already.
-// null when it takes more than 100 years, or never comes.
+// `goal` is an amount, or a function of the months from now (0 for now)
+// giving the goal of that month in today's money. null when it takes more
+// than 100 years, or never comes.
 export function projectToGoal(start, payIn, returnPercent, goal, inflation = 0) {
-  if (start >= goal) return [];
+  const goalIn = goalFunction(goal);
+  if (start >= goalIn(0)) return [];
   const rate = monthlyRate(returnPercent);
   const values = [];
   let value = start;
   while (values.length < MAX_PROJECTION_MONTHS) {
     value = value * (1 + rate) + payIn;
     values.push(value);
-    if (value >= inflated(goal, inflation, values.length)) return values;
+    if (value >= inflated(goalIn(values.length), inflation, values.length)) return values;
   }
   return null;
 }
@@ -553,7 +647,8 @@ export const RETURN_SPREAD = 2;
 // month's value, in month `month`) if `payIn` keeps being paid in at each
 // month end and it grows by `rate` % a year before inflation, as
 // projectToGoal counts; and a low and high one at RETURN_SPREAD points less
-// and more. The goal (today's FI number) rises by `inflation` % a year.
+// and more. The goal (today's FI number, or a function of the months from
+// `month` as for projectToGoal) rises by `inflation` % a year.
 // Returns null without a goal, otherwise:
 // - rates: { low, mid, high }, percent a year
 // - reach: { low, mid, high }, the first month (YYYY-MM) at or above the
@@ -565,17 +660,18 @@ export const RETURN_SPREAD = 2;
 //   little after; at least a year, at most MAX_PROJECTION_MONTHS. None when
 //   start is at the goal already.
 export function fiProjection({ month, start, payIn, goal, rate, inflation = 0 }) {
-  if (!(goal > 0)) return null;
+  const goalIn = goalFunction(goal);
+  if (!(goalIn(0) > 0)) return null;
   const rates = { low: rate - RETURN_SPREAD, mid: rate, high: rate + RETURN_SPREAD };
   const keys = Object.keys(rates);
-  if (start >= goal) return { rates, reach: { low: month, mid: month, high: month }, points: [] };
+  if (start >= goalIn(0)) return { rates, reach: { low: month, mid: month, high: month }, points: [] };
   const monthly = Object.fromEntries(keys.map((k) => [k, monthlyRate(rates[k])]));
   const values = { low: start, mid: start, high: start };
   const reach = { low: null, mid: null, high: null }; // months after `month`
   const points = [];
   for (let n = 1; n <= MAX_PROJECTION_MONTHS; n++) {
     const point = { month: addMonths(month, n) };
-    const goalNow = inflated(goal, inflation, n);
+    const goalNow = inflated(goalIn(n), inflation, n);
     for (const k of keys) {
       values[k] = Math.max(0, values[k] * (1 + monthly[k]) + payIn);
       point[k] = values[k];
@@ -595,28 +691,42 @@ export function fiProjection({ month, start, payIn, goal, rate, inflation = 0 })
   };
 }
 
-// Current numbers for the dashboard. Amounts are in cents and may carry
-// fractions of a cent; round when displaying. Ratios are fractions (0.25).
-export function metrics(store) {
+// The FI number if retirement starts in the month of `index`, in today's
+// money: what the portfolio pays then (needIn), times 12 and the multiple
+// of the withdrawal rate. essential: Lean FI's.
+export function fiNumberIn(store, index, { essential = false } = {}) {
+  return needIn(store, index, index, { essential }) * 12 * (100 / store.settings.withdrawalRate);
+}
+
+// Current numbers for the dashboard, for the month `now`. Amounts are in
+// cents and may carry fractions of a cent; round when displaying. Ratios
+// are fractions (0.25). Income and expenses are the ones that count now;
+// the FI number is for retiring now: the expenses that would count then,
+// less the income that would.
+export function metrics(store, now = currentMonth()) {
   const { withdrawalRate, bufferPercent, expectedReturn, inflation } = store.settings;
-  const income = sum(store.income.map(monthlyAmount));
-  const baseExpenses = sum(counted(store.expenses).map(monthlyAmount));
+  const nowIndex = monthIndex(now);
+  const income = sum(countingIn(store.income, nowIndex, store.settings).map(monthlyAmount));
+  const baseExpenses = sum(countingIn(store.expenses, nowIndex, store.settings).map(monthlyAmount));
   const buffer = (baseExpenses * bufferPercent) / 100;
   const expenses = baseExpenses + buffer;
   const multiple = 100 / withdrawalRate;
-  const fiNumber = expenses * 12 * multiple;
   const series = portfolioSeries(store);
   const last = series.at(-1) ?? null;
   const payIn = averagePayIn(series);
+  // Retiring in a month after the latest one: the FI number of that month.
+  const from = last ? monthIndex(last.month) : nowIndex;
+  const goal = (options) => (n) => fiNumberIn(store, Math.max(from + n, nowIndex), options);
+  const fiNumber = fiNumberIn(store, nowIndex);
   // From the latest month on, with the average pay-in of the last 12 months.
-  const ahead = last && fiNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, fiNumber, inflation) : null;
-  // Lean FI: the same for the essential expenses only, with the buffer.
-  const essential = counted(store.expenses).filter((item) => item.essential);
+  const ahead = last && fiNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, goal(), inflation) : null;
+  // Lean FI: the same for the essential expenses only.
+  const essential = store.expenses.some((item) => item.active !== false && item.essential);
   let lean = null;
-  if (essential.length > 0) {
-    const leanExpenses = sum(essential.map(monthlyAmount)) * (1 + bufferPercent / 100);
-    const leanNumber = leanExpenses * 12 * multiple;
-    const leanAhead = last && leanNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, leanNumber, inflation) : null;
+  if (essential) {
+    const leanExpenses = needIn(store, nowIndex, nowIndex, { essential: true });
+    const leanNumber = fiNumberIn(store, nowIndex, { essential: true });
+    const leanAhead = last && leanNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, goal({ essential: true }), inflation) : null;
     lean = {
       expenses: leanExpenses,
       fiNumber: leanNumber,
@@ -631,6 +741,11 @@ export function metrics(store) {
     expenses,
     multiple,
     fiNumber,
+    // What the portfolio pays a month when retiring now, with the buffer.
+    retiredNeed: needIn(store, nowIndex, nowIndex),
+    // The FI number of each month from the latest one on (n months later),
+    // in today's money, for the Path to FI chart.
+    goal: goal(),
     series,
     latestMonth: last ? last.month : null,
     portfolio: last ? last.value : null,
@@ -721,9 +836,14 @@ export function ageIn(month, birthYear) {
 //
 // params: { start (month), value, expenses (a month), fiNumber, birthYear,
 // retirementAge, growth (percent a year, before inflation), inflation
-// (percent a year), contribution (a month), coastContribution (a month) }.
-// Amounts in cents; expenses and fiNumber in the money of `start`, and
-// rising by the inflation from then on.
+// (percent a year), contribution (a month), coastContribution (a month),
+// need(index, retirement), goal(index) }. Amounts in cents; expenses and
+// fiNumber in the money of `start`, and rising by the inflation from then
+// on. need and goal, when given, replace them month by month: need is what
+// the portfolio pays in the month of `index` when retirement starts in the
+// month of `retirement` (needIn), goal the FI number for retiring in the
+// month of `index` (fiNumberIn), both in today's money. A plan's retirement
+// starts with the retirement age, or for Retire early the month after FI.
 //
 // Returns { months: shown months from start on, retirement: its first
 // month, goal: the FI number of each shown month, fiAtRetirement: the FI
@@ -734,17 +854,20 @@ export function ageIn(month, birthYear) {
 // month with nothing left, or null if it lasts) }.
 export function forecast(params) {
   const { start, value, expenses, fiNumber, birthYear, retirementAge, growth, inflation = 0, contribution, coastContribution } = params;
+  const need = params.need ?? (() => expenses);
+  const goal = params.goal ?? (() => fiNumber);
   const rate = monthlyRate(growth);
   const first = monthIndex(start);
   const retirement = (birthYear + retirementAge) * 12;
   const lastShown = Math.max((birthYear + SHOWN_AGE) * 12 + 11, first + 120);
   const lastChecked = Math.max((birthYear + LASTS_AGE) * 12 + 11, lastShown);
-  // Expenses and the FI number in the month of `index`.
-  const expensesAt = (index) => inflated(expenses, inflation, index - first);
-  const goalAt = (index) => inflated(fiNumber, inflation, index - first);
+  // What the portfolio pays in the month of `index`, retired from the month
+  // of `from`, and the FI number of that month, in the money of then.
+  const expensesAt = (index, from) => inflated(need(index, from), inflation, index - first);
+  const goalAt = (index) => inflated(goal(index), inflation, index - first);
   // The value at the end of the month before retirement is what has to
-  // reach the FI number.
-  const fiAtRetirement = goalAt(retirement - 1);
+  // reach the FI number of retiring then.
+  const fiAtRetirement = inflated(goal(retirement), inflation, retirement - 1 - first);
 
   // What a month-end value grows to when retirement starts, with `monthly`
   // paid in every month until then.
@@ -755,10 +878,10 @@ export function forecast(params) {
   };
 
   const months = [];
-  const goal = [];
+  const goals = [];
   for (let index = first; index <= lastShown; index++) {
     months.push(monthFromIndex(index));
-    goal.push(goalAt(index));
+    goals.push(goalAt(index));
   }
 
   const run = (plan) => {
@@ -767,25 +890,31 @@ export function forecast(params) {
     let coastMonth = null;
     let fiMonth = null;
     let runsOut = null;
+    let retiredFrom = retirement; // Retire early's is the month after FI
     let atRetirement = first === retirement - 1 ? v : null;
     const values = [v];
     // Milestones are checked on month-end values, and change what is paid
-    // from the next month on.
+    // from the next month on. FI is reached when the value at the end of a
+    // month reaches the FI number of retiring the month after, in the
+    // money of that month-end.
     const check = (index) => {
       if (index >= retirement) return;
       if (coastMonth === null && grown(v, index, coastContribution) >= fiAtRetirement) {
         coastMonth = monthFromIndex(index);
         if (plan === "coast" && phase === "full") phase = "coast";
       }
-      if (fiMonth === null && v >= goalAt(index)) {
+      if (fiMonth === null && v >= inflated(goal(index + 1), inflation, index - first)) {
         fiMonth = monthFromIndex(index);
-        if (plan === "fi") phase = "out";
+        if (plan === "fi") {
+          phase = "out";
+          retiredFrom = index + 1;
+        }
       }
     };
     check(first);
     for (let index = first + 1; index <= lastChecked; index++) {
       const out = phase === "out" || index >= retirement;
-      v = v * (1 + rate) + (out ? -expensesAt(index) : phase === "coast" ? coastContribution : contribution);
+      v = v * (1 + rate) + (out ? -expensesAt(index, retiredFrom) : phase === "coast" ? coastContribution : contribution);
       if (out && v <= 0) {
         v = 0;
         runsOut ??= monthFromIndex(index);
@@ -801,7 +930,7 @@ export function forecast(params) {
   return {
     months,
     retirement: monthFromIndex(retirement),
-    goal,
+    goal: goals,
     fiAtRetirement: first < retirement ? fiAtRetirement : null,
     plans: Object.fromEntries(PLANS.map((plan) => [plan, run(plan)])),
   };
