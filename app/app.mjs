@@ -168,6 +168,7 @@ const state = {
   notice: null, // { kind: "error" | "info", text }
   view: "dashboard",
   editing: { expenses: null, income: null }, // item id being edited
+  editingEvent: null, // planned one-off being edited
   renaming: null, // { list: "accounts" | "expenses" | "income", key: account id or category name }
   month: null,
   importText: "",
@@ -426,7 +427,7 @@ function viewDashboard() {
         : `${money(m.payIn.average)} a month paid in, average of ${m.payIn.months === 12 ? "the last 12 months" : m.payIn.months === 1 ? "1 month" : `${m.payIn.months} months`}`),
     tile("Portfolio", m.portfolio === null ? "–" : money(m.portfolio),
       m.series.length >= 2
-        ? `${signedMoney(m.portfolio - m.series.at(-2).value)} in ${monthLabel(m.latestMonth)} (${money(m.series.at(-1).payIn)} paid in)`
+        ? `${signedMoney(m.portfolio - m.series.at(-2).value)} in ${monthLabel(m.latestMonth)} (${money(m.series.at(-1).payIn)} paid in${m.series.at(-1).oneOff ? `, ${signedMoney(m.series.at(-1).oneOff)} one-off` : ""})`
         : m.latestMonth ? `as of ${monthLabel(m.latestMonth)}` : h("a", { href: "#portfolio" }, "Add broker values"),
       nudge),
     tile(`Gains, last ${m.gains === null || m.gains.months === 12 ? "12 months" : m.gains.months === 1 ? "month" : `${m.gains.months} months`}`,
@@ -538,7 +539,7 @@ function chartView(m) {
 
 function projection(m) {
   const { expectedReturn, inflation } = state.store.settings;
-  return F.fiProjection({ month: m.latestMonth, start: m.portfolio, payIn: m.payIn.average, goal: chartGoal(m) > 0 ? m.goal : 0, rate: expectedReturn, inflation });
+  return F.fiProjection({ month: m.latestMonth, start: m.portfolio, payIn: m.payIn.average, goal: chartGoal(m) > 0 ? m.goal : 0, rate: expectedReturn, inflation, oneOffs: m.oneOffs });
 }
 
 function portfolioCard(m) {
@@ -984,17 +985,20 @@ function viewPortfolio() {
       for (const account of store.accounts) {
         const valueText = String(data.get(`value-${account.id}`) ?? "").trim();
         const payInText = String(data.get(`payin-${account.id}`) ?? "").trim();
-        if (valueText === "" && payInText === "") {
-          entries.push({ account: account.id, value: null, payIn: 0 });
+        const oneOffText = String(data.get(`oneoff-${account.id}`) ?? "").trim();
+        if (valueText === "" && payInText === "" && oneOffText === "") {
+          entries.push({ account: account.id, value: null, payIn: 0, oneOff: 0 });
           continue;
         }
         const value = F.parseMoney(valueText);
         const payIn = payInText === "" ? { ok: true, cents: 0 } : F.parseMoney(payInText);
+        const oneOff = oneOffText === "" ? { ok: true, cents: 0 } : F.parseMoney(oneOffText);
         if (valueText === "") errors.push(`${account.name}: enter the value too.`);
         else if (!value.ok) errors.push(`${account.name} value: ${value.error}.`);
         else if (value.cents < 0) errors.push(`${account.name} value: must not be negative.`);
         if (!payIn.ok) errors.push(`${account.name} pay-in: ${payIn.error}.`);
-        if (valueText !== "" && value.ok && value.cents >= 0 && payIn.ok) entries.push({ account: account.id, value: value.cents, payIn: payIn.cents });
+        if (!oneOff.ok) errors.push(`${account.name} one-off: ${oneOff.error}.`);
+        if (valueText !== "" && value.ok && value.cents >= 0 && payIn.ok && oneOff.ok) entries.push({ account: account.id, value: value.cents, payIn: payIn.cents, oneOff: oneOff.cents });
       }
       if (errors.length === 0 && entries.every((e) => e.value === null) && monthRecords.size === 0) errors.push("Enter at least one value.");
       if (errors.length) return showError(event.currentTarget, errors.join(" "));
@@ -1011,7 +1015,8 @@ function viewPortfolio() {
     store.accounts.length === 0
       ? h("p", { class: "muted" }, "Add your broker accounts in ", h("a", { href: "#settings" }, "Settings"), " first, or import past months from a CSV file there.")
       : h("div", { class: "table-wrap" }, h("table", { class: "entry" },
-          h("thead", null, h("tr", null, h("th", null, "Account"), h("th", null, "Value at month end"), h("th", null, "Paid in this month"))),
+          h("thead", null, h("tr", null, h("th", null, "Account"), h("th", null, "Value at month end"), h("th", null, "Paid in this month"),
+            h("th", { title: "An inheritance in, a house deposit out: counts as paid in, but not for the average pay-in" }, "One-off this month"))),
           h("tbody", null, store.accounts.map((account) => {
             const record = monthRecords.get(account.id);
             const before = lastValueBefore(store, account.id, month);
@@ -1020,7 +1025,9 @@ function viewPortfolio() {
               h("td", null, h("input", { name: `value-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} value`,
                 value: record ? inputMoney(record.value) : "", placeholder: before ? `last: ${inputMoney(before.value)}` : zero })),
               h("td", null, h("input", { name: `payin-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} pay-in`,
-                value: record && record.payIn !== 0 ? inputMoney(record.payIn) : "", placeholder: zero })));
+                value: record && record.payIn !== 0 ? inputMoney(record.payIn) : "", placeholder: zero })),
+              h("td", null, h("input", { name: `oneoff-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} one-off`,
+                value: record && record.oneOff !== 0 ? inputMoney(record.oneOff) : "", placeholder: zero })));
           })))),
     store.accounts.length
       ? h("div", { class: "form-actions" },
@@ -1050,14 +1057,19 @@ function viewPortfolio() {
           store.accounts.map((a) => {
             const r = records?.get(a.id);
             return h("td", { class: "num" }, r ? money(r.value) : h("span", { class: "muted" }, "–"),
-              r && r.payIn !== 0 ? h("div", { class: "sub" }, signedMoney(r.payIn)) : null);
+              r && r.payIn !== 0 ? h("div", { class: "sub" }, signedMoney(r.payIn)) : null,
+              r && r.oneOff !== 0 ? h("div", { class: "sub" }, `${signedMoney(r.oneOff)} one-off`) : null);
           }),
           h("td", { class: "num strong" }, money(m.value)),
-          h("td", { class: "num" }, m.payIn !== 0 ? signedMoney(m.payIn) : h("span", { class: "muted" }, "–")));
+          h("td", { class: "num" }, m.payIn !== 0 ? signedMoney(m.payIn) : h("span", { class: "muted" }, "–"),
+            m.oneOff !== 0 ? h("div", { class: "sub" }, `${signedMoney(m.oneOff)} one-off`) : null));
       })))));
 
   return h("div", null,
     card("Monthly values", monthForm,
+      h("p", { class: "muted" }, "Paid in: your regular pay-ins, such as savings plans, negative for withdrawals; their average of the last 12 months is what Time to FI and the forecast go on with. ",
+        "One-off: a lump sum in or out, such as an inheritance or a house deposit; it counts as paid in, but not for that average. ",
+        "Planned one-offs go on the ", h("a", { href: "#forecast" }, "Forecast"), " page."),
       h("p", { class: "muted" }, "Broker accounts, CSV import and export are in ", h("a", { href: "#settings" }, "Settings"), ".")),
     history);
 }
@@ -1085,6 +1097,7 @@ function forecastBase(store) {
       // Month by month, with the expenses and income that count then.
       need: (index, retirement) => F.needIn(store, index, retirement),
       goal: (index) => F.fiNumberIn(store, Math.max(index, thisMonth())),
+      oneOffs: (index) => F.oneOffsIn(store, index),
       birthYear,
       retirementAge,
       inflation,
@@ -1159,7 +1172,54 @@ function viewForecast() {
         !m.payIn ? "There are no pay-ins yet to start from."
           : m.payIn.average < 0 ? `Your average of ${months} is a withdrawal of ${money(-m.payIn.average)} a month, so invested per month starts at 0.`
           : `Invested per month starts as your average pay-in of ${months}, ${money(average)}.`)),
-    h("div", { id: "forecast-results", class: "stack" }, forecastResults()));
+    h("div", { id: "forecast-results", class: "stack" }, forecastResults()),
+    eventsCard(params.start));
+}
+
+// Planned one-offs: an inheritance, a house deposit, a sabbatical. Saved,
+// unlike the amounts at the top.
+function eventsCard(start) {
+  const store = state.store;
+  const editing = store.events.find((e) => e.id === state.editingEvent) ?? null;
+  const form = h("form", { class: "event-form", onsubmit: (event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const amount = F.parseMoney(data.get("amount"));
+    if (!amount.ok) return showError(event.currentTarget, `Amount: ${amount.error}.`);
+    const result = F.saveEvent(store, { id: editing?.id ?? null, name: data.get("name"), month: String(data.get("month")), amount: amount.cents });
+    if (!result.ok) return showError(event.currentTarget, `${result.error}.`);
+    state.editingEvent = null;
+    state.focus = "#event-name";
+    commit(result.store, `${editing ? "Saved" : "Added"} ${String(data.get("name")).trim()}.`);
+  } },
+    h("label", null, "Name", h("input", { id: "event-name", name: "name", autocomplete: "off", required: true, value: editing?.name ?? "", placeholder: "Inheritance" })),
+    h("label", null, "Month", h("input", { name: "month", type: "month", required: true, value: editing?.month ?? "" })),
+    h("label", null, "Amount (negative: taken out)", h("input", { name: "amount", inputmode: "decimal", autocomplete: "off", required: true,
+      value: editing ? inputMoney(editing.amount) : "", placeholder: inputMoney(-2000000) })),
+    h("div", { class: "form-actions" },
+      h("button", { type: "submit", class: "primary" }, editing ? "Save" : "Add"),
+      editing ? h("button", { type: "button", onclick: () => { state.editingEvent = null; render(); } }, "Cancel") : null));
+  const rows = store.events.map((event) => {
+    const past = event.month <= start;
+    return h("tr", { class: event.id === state.editingEvent ? "editing" : null },
+      h("td", null, monthLabel(event.month)),
+      h("td", null, event.name, past ? h("div", { class: "sub" }, "Before the forecast starts: enter it under Portfolio as a one-off") : null),
+      h("td", { class: "num" }, signedMoney(event.amount)),
+      h("td", { class: "actions" },
+        h("button", { type: "button", class: "link", onclick: () => { state.editingEvent = event.id; state.focus = "#event-name"; render(); } }, "Edit"),
+        h("button", { type: "button", class: "link danger", onclick: () => {
+          if (!confirm(`Delete ${event.name}?`)) return;
+          if (state.editingEvent === event.id) state.editingEvent = null;
+          commit(F.deleteEvent(store, event.id), `Deleted ${event.name}.`);
+        } }, "Delete")));
+  });
+  return card("Planned one-offs",
+    h("p", { class: "muted" }, "Money that comes in or goes out once: an inheritance, a house deposit, a car, a sabbatical (what you live on, and the pay-ins you skip). ",
+      "Every plan gets it in its month, as do Time to FI and the Path to FI chart. Amounts are in today's money and rise with inflation, like expenses."),
+    rows.length ? h("div", { class: "table-wrap" }, h("table", null,
+      h("thead", null, h("tr", null, h("th", null, "Month"), h("th", null, "Name"), h("th", { class: "num" }, "Amount"), h("th"))),
+      h("tbody", null, rows))) : null,
+    form);
 }
 
 function readForecastForm(form, average) {
@@ -1480,7 +1540,7 @@ function importCard(store) {
     h("details", { open: state.importText !== "" || null },
       h("summary", null, h("h2", null, "Import past months from CSV")),
       h("p", null, "One row per account and month, with the columns ", h("code", null, "date"), ", ", h("code", null, "account"), ", ",
-        h("code", null, "value"), " and ", h("code", null, "pay_in"), ". Dates as 2025-01-31, 2025.01.31 or 31.01.2025: a row counts for the month of its date. ",
+        h("code", null, "value"), ", ", h("code", null, "pay_in"), " and ", h("code", null, "one_off"), " (both optional). Dates as 2025-01-31, 2025.01.31 or 31.01.2025: a row counts for the month of its date. ",
         "Semicolons, commas or tabs work, and so do amounts like 1.234,56 or 1,234.56. ",
         "Rows for a month and account that already exist replace the old values. New account names become new accounts."),
       h("div", { class: "form-actions" },
@@ -1520,7 +1580,7 @@ function exportCard(store) {
   const months = new Set(store.records.map((r) => r.month)).size;
   return card("Export portfolio to CSV",
     h("p", null, "Every monthly value with the columns ", h("code", null, "date"), " (the last day of the month), ", h("code", null, "account"), ", ",
-      h("code", null, "value"), " and ", h("code", null, "pay_in"), ": opens in a spreadsheet, and the import above reads it back."),
+      h("code", null, "value"), ", ", h("code", null, "pay_in"), " and ", h("code", null, "one_off"), ": opens in a spreadsheet, and the import above reads it back."),
     h("div", { class: "form-actions" },
       h("button", { type: "button", disabled: rows === 0, onclick: () => {
         const d = new Date();

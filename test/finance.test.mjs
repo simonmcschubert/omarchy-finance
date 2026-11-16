@@ -12,14 +12,20 @@ function store(parts = {}) {
   const s = { ...F.emptyStore(), ...parts };
   s.expenses = s.expenses.map((item) => ({ from: null, until: null, ...item }));
   s.income = s.income.map((item) => ({ from: null, until: { at: "retirement" }, ...item }));
+  s.records = s.records.map((record) => ({ oneOff: 0, ...record }));
   return s;
 }
 
 // An upgraded store without what versions after 7 added, to compare with
 // the file it came from.
-function withoutLater(s) {
+function withoutLater({ events, ...s }) {
   const plain = ({ from, until, ...item }) => item;
-  return { ...s, expenses: s.expenses.map(({ essential, ...item }) => plain(item)), income: s.income.map(plain) };
+  return {
+    ...s,
+    expenses: s.expenses.map(({ essential, ...item }) => plain(item)),
+    income: s.income.map(plain),
+    records: s.records.map(({ oneOff, ...record }) => record),
+  };
 }
 
 test("parseMoney reads German and English amounts", () => {
@@ -169,9 +175,9 @@ test("portfolio: accounts keep their last value through gaps", () => {
     ],
   });
   assert.deepEqual(F.portfolioSeries(s), [
-    { month: "2026-01", value: 1500, payIn: 100, invested: 1500 },
-    { month: "2026-02", value: 1500, payIn: 0, invested: 1500 },
-    { month: "2026-03", value: 1800, payIn: 100, invested: 1600 },
+    { month: "2026-01", value: 1500, payIn: 100, oneOff: 0, invested: 1500 },
+    { month: "2026-02", value: 1500, payIn: 0, oneOff: 0, invested: 1500 },
+    { month: "2026-03", value: 1800, payIn: 100, oneOff: 0, invested: 1600 },
   ]);
 });
 
@@ -428,6 +434,13 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
     [{ ...roundTrip, records: [{ ...roundTrip.records[0], account: "nope" }] }, /unknown account/],
     [{ ...roundTrip, records: [roundTrip.records[0], roundTrip.records[0]] }, /repeats a month/],
     [{ ...roundTrip, records: [{ ...roundTrip.records[0], value: -1 }] }, /value/],
+    [{ ...roundTrip, records: [{ ...roundTrip.records[0], oneOff: 1.5 }] }, /oneOff must be a number of cents/],
+    [{ ...roundTrip, records: [(({ oneOff, ...rest }) => rest)(roundTrip.records[0])] }, /missing "oneOff"/],
+    [(({ events, ...rest }) => rest)(roundTrip), /missing "events"/],
+    [{ ...roundTrip, events: [{ id: "e", name: "Inheritance", month: "2031-13", amount: 100 }] }, /events\[0\] has an invalid month/],
+    [{ ...roundTrip, events: [{ id: "e", name: "Inheritance", month: "2031-01", amount: 0 }] }, /other than 0/],
+    [{ ...roundTrip, events: [{ id: "e", name: "", month: "2031-01", amount: 100 }] }, /has no name/],
+    [{ ...roundTrip, events: [{ id: "e", name: "A", month: "2031-01", amount: 1 }, { id: "e", name: "B", month: "2031-01", amount: 1 }] }, /repeated id/],
     [{ ...roundTrip, accounts: [...roundTrip.accounts, { id: "x", name: "broker" }] }, /repeats the name/],
     [[], /not an object/],
   ];
@@ -485,9 +498,9 @@ test("planImport and applyImport: German semicolon file", () => {
   const next = F.applyImport(s, plan);
   const ing = F.findAccount(next, "ING").id;
   assert.deepEqual(next.records, [
-    { month: "2026-01", account: tr, value: 1234567, payIn: 50000 },
-    { month: "2026-02", account: tr, value: 1300000, payIn: 50000 },
-    { month: "2026-02", account: ing, value: 800000, payIn: 0 },
+    { month: "2026-01", account: tr, value: 1234567, payIn: 50000, oneOff: 0 },
+    { month: "2026-02", account: tr, value: 1300000, payIn: 50000, oneOff: 0 },
+    { month: "2026-02", account: ing, value: 800000, payIn: 0, oneOff: 0 },
   ]);
   assert.equal(F.parseStore(JSON.parse(JSON.stringify(next))).ok, true);
 });
@@ -542,8 +555,8 @@ test("a version 1 file is upgraded: euros, and the categories its items use", ()
   assert.deepEqual(s.expenses.map((e) => e.category), ["Housing", "Housing", "", "Car"]);
   assert.deepEqual(s.expenses.map((e) => e.active), [true, true, true, true], "every expense was active");
   assert.equal("active" in s.income[0], false);
-  assert.deepEqual(s.records, v1.records);
-  assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records"]);
+  assert.deepEqual(s.records, v1.records.map((r) => ({ ...r, oneOff: 0 })));
+  assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events"]);
   assert.equal(v1.expenses[1].category, "housing", "the parsed value is left alone");
 
   assert.match(F.parseStore({ ...v1, extra: 1 }).error, /unknown field "extra"/);
@@ -570,7 +583,7 @@ test("a version 2 file is upgraded: every expense is active", () => {
   assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67 });
   assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true, essential: false, from: null, until: null })));
   assert.deepEqual(s.income, v2.income.map((i) => ({ ...i, from: null, until: { at: "retirement" } })));
-  assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records"]);
+  assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events"]);
   assert.equal("active" in v2.expenses[0], false, "the parsed value is left alone");
   assert.equal(F.metrics(s).baseExpenses, 100 + 30 / 12);
 
@@ -778,12 +791,75 @@ test("a version 8 file is upgraded: expenses always count, income until retireme
     version: F.VERSION,
     expenses: [{ ...v8.expenses[0], from: null, until: null }],
     income: [{ ...v8.income[0], from: null, until: { at: "retirement" } }],
+    events: [],
   });
   assert.equal("from" in v8.expenses[0], false, "the parsed value is left alone");
   // As before: the salary does not lower the FI number.
   const m = F.metrics(result.store, "2026-11");
   assert.equal(m.income, 300);
   assert.equal(m.fiNumber, 110 * 12 * 25);
+});
+
+test("a version 9 file is upgraded: no one-offs", () => {
+  const v9 = {
+    version: 9,
+    settings: { ...F.DEFAULT_SETTINGS },
+    categories: { expenses: [], income: [] },
+    expenses: [],
+    income: [],
+    accounts: [{ id: "a", name: "A" }],
+    records: [{ month: "2026-10", account: "a", value: 500, payIn: 100 }],
+  };
+  const result = F.parseStore(v9);
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.store, { ...v9, version: F.VERSION, records: [{ ...v9.records[0], oneOff: 0 }], events: [] });
+  assert.equal("oneOff" in v9.records[0], false, "the parsed value is left alone");
+});
+
+test("one-offs count as paid in, but not for the average pay-in", () => {
+  // 500 a month, and an inheritance of 50,000 in March.
+  const s = store({
+    accounts: [{ id: "a", name: "A" }],
+    records: [
+      { month: "2026-01", account: "a", value: 10000, payIn: 0 },
+      { month: "2026-02", account: "a", value: 10600, payIn: 500 },
+      { month: "2026-03", account: "a", value: 61200, payIn: 500, oneOff: 50000 },
+    ],
+  });
+  const series = F.portfolioSeries(s);
+  assert.deepEqual(series.at(-1), { month: "2026-03", value: 61200, payIn: 500, oneOff: 50000, invested: 61000 });
+  assert.deepEqual(F.averagePayIn(series), { average: 1000 / 3, months: 3 });
+  // The gain leaves the inheritance out: 61,200 - 10,000 - 1,000 - 50,000.
+  assert.equal(F.gains(series).gain, 200);
+  const m = F.metrics({ ...s, settings: { ...F.DEFAULT_SETTINGS } });
+  assert.equal(m.investmentRate, null);
+  assert.equal(m.payIn.average, 1000 / 3);
+});
+
+test("planned one-offs: saved, checked, and in the month they come", () => {
+  let s = F.emptyStore();
+  const added = F.saveEvent(s, { id: null, name: " House deposit ", month: "2028-04", amount: -6000000 });
+  assert.equal(added.ok, true);
+  s = added.store;
+  s = F.saveEvent(s, { id: null, name: "Inheritance", month: "2027-01", amount: 5000000 }).store;
+  assert.deepEqual(s.events.map((e) => [e.month, e.name]), [["2027-01", "Inheritance"], ["2028-04", "House deposit"]]);
+  assert.deepEqual(F.saveEvent(s, { id: null, name: "", month: "2027-01", amount: 1 }), { ok: false, error: "Enter a name" });
+  assert.deepEqual(F.saveEvent(s, { id: null, name: "X", month: "2027", amount: 1 }), { ok: false, error: "Choose a month" });
+  assert.deepEqual(F.saveEvent(s, { id: null, name: "X", month: "2027-01", amount: 0 }), { ok: false, error: "Enter an amount other than 0" });
+  const changed = F.saveEvent(s, { ...s.events[1], amount: -7000000 }).store;
+  assert.equal(changed.events.length, 2);
+  assert.equal(F.oneOffsIn(changed, F.monthIndex("2028-04")), -7000000);
+  assert.equal(F.oneOffsIn(changed, F.monthIndex("2028-05")), 0);
+  assert.equal(F.deleteEvent(changed, s.events[0].id).events.length, 1);
+  assert.equal(F.parseStore(JSON.parse(JSON.stringify(changed))).ok, true);
+  assert.equal(s.events[1].amount, -6000000, "the original is untouched");
+
+  // 1,000 a month without growth to 50,000: an inheritance of 20,000 after
+  // 10 months saves 20 months.
+  assert.equal(F.projectToGoal(0, 1000, 0, 50000).length, 50);
+  assert.equal(F.projectToGoal(0, 1000, 0, 50000, 0, (n) => (n === 10 ? 20000 : 0)).length, 30);
+  const p = F.fiProjection({ month: "2026-10", start: 0, payIn: 1000, goal: 50000, rate: 2, oneOffs: (n) => (n === 1 ? 49000 : 0) });
+  assert.equal(p.points[0].mid, 50000);
 });
 
 test("countsIn: from its first month until before its end", () => {
@@ -977,18 +1053,18 @@ test("exportCsv writes what planImport reads", () => {
   s = F.saveAccount(s, null, "Trade Republic").store;
   s = F.saveAccount(s, null, 'ING; "Extra"').store;
   const [tr, ing] = s.accounts.map((a) => a.id);
-  s = F.saveMonth(s, "2026-02", [{ account: tr, value: 123456789, payIn: -5005 }]);
+  s = F.saveMonth(s, "2026-02", [{ account: tr, value: 123456789, payIn: -5005, oneOff: 25000000 }]);
   s = F.saveMonth(s, "2026-01", [{ account: ing, value: 7, payIn: 0 }, { account: tr, value: 100000, payIn: 50000 }]);
 
   assert.equal(F.exportCsv(s), [
-    "date,account,value,pay_in",
-    "2026-01-31,Trade Republic,1000.00,500.00",
-    '2026-01-31,"ING; ""Extra""",0.07,0.00',
-    "2026-02-28,Trade Republic,1234567.89,-50.05",
+    "date,account,value,pay_in,one_off",
+    "2026-01-31,Trade Republic,1000.00,500.00,0.00",
+    '2026-01-31,"ING; ""Extra""",0.07,0.00,0.00',
+    "2026-02-28,Trade Republic,1234567.89,-50.05,250000.00",
     "",
   ].join("\n"));
-  assert.equal(F.exportCsv(s, { decimal: "," }).split("\n")[3], "2026-02-28;Trade Republic;1234567,89;-50,05");
-  assert.equal(F.exportCsv(F.emptyStore()), "date,account,value,pay_in\n");
+  assert.equal(F.exportCsv(s, { decimal: "," }).split("\n")[3], "2026-02-28;Trade Republic;1234567,89;-50,05;250000,00");
+  assert.equal(F.exportCsv(F.emptyStore()), "date,account,value,pay_in,one_off\n");
 
   for (const decimal of [".", ","]) {
     const plan = F.planImport(s, F.exportCsv(s, { decimal }));
@@ -998,6 +1074,11 @@ test("exportCsv writes what planImport reads", () => {
     const fresh = F.applyImport(F.emptyStore(), F.planImport(F.emptyStore(), F.exportCsv(s, { decimal })));
     assert.deepEqual(F.portfolioSeries(fresh), F.portfolioSeries(s));
   }
+  // Files without one_off import as before.
+  const old = F.planImport(F.emptyStore(), "date;account;value;pay_in\n31.01.2026;TR;100;10\n");
+  assert.equal(old.entries[0].oneOff, 0);
+  const bad = F.planImport(F.emptyStore(), "date;account;value;pay_in;one_off\n31.01.2026;TR;100;10;x\n");
+  assert.match(bad.errors[0].message, /One-off/);
 });
 
 // ---------------------------------------------------------------- forecast
@@ -1076,6 +1157,31 @@ test("forecast: Retire early needs the FI number of the month it retires in", ()
   }));
   // 300 months of 1,000 more: November 2051.
   assert.equal(f.plans.fi.fiMonth, "2051-11");
+});
+
+test("forecast: planned one-offs go into every plan, and Coast FI counts on them", () => {
+  const at = (month) => F.monthIndex(month) - F.monthIndex("2026-10");
+  const inheritance = F.monthIndex("2040-01");
+  const deposit = F.monthIndex("2028-01");
+  const oneOffs = (index) => (index === inheritance ? 300000 * EUR : index === deposit ? -20000 * EUR : 0);
+  const base = plan({ growth: 0, contribution: 0, value: 50000 * EUR });
+  const f = F.forecast({ ...base, oneOffs });
+  for (const name of F.PLANS) {
+    const values = f.plans[name].values;
+    assert.equal(values[at("2028-01")] - values[at("2027-12")], -20000 * EUR, name);
+  }
+  assert.equal(f.plans.keep.values[at("2040-01")], 330000 * EUR);
+  // Without growth, from 300,000 and 1,000 a month: Coast FI when nothing
+  // more is needed to reach 600,000. With the inheritance to come and the
+  // deposit to pay, 20,000 more are enough: after 20 months.
+  const coast = F.forecast({ ...plan({ growth: 0, value: 300000 * EUR }), oneOffs }).plans.coast;
+  const without = F.forecast(plan({ growth: 0, value: 300000 * EUR })).plans.coast;
+  assert.equal(coast.coastMonth, "2028-06");
+  assert.equal(without.coastMonth, "2051-10");
+  // A one-off bigger than the portfolio leaves nothing, not a debt.
+  const broke = F.forecast({ ...base, oneOffs: (index) => (index === deposit ? -100000 * EUR : 0) });
+  assert.equal(broke.plans.keep.values[at("2028-01")], 0);
+  assert.equal(broke.plans.keep.runsOut, "2057-01", "it runs out when it pays expenses from nothing");
 });
 
 test("forecast: the growth rates are the expected return and 2 points less and more", () => {

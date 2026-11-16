@@ -1243,3 +1243,23 @@ table.entry th {
   color: var(--fg-strong);
   margin-top: 10px;
 }
+
+/* ---- planned one-offs on the Forecast page */
+
+.event-form {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1.5fr auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 8px;
+}
+
+.event-form input {
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .event-form {
+    grid-template-columns: 1fr 1fr;
+  }
+}
