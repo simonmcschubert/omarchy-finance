@@ -1,9 +1,11 @@
 # Finance
 
 A personal finance dashboard for [Omarchy](https://omarchy.org/): regular
-expenses and income, broker accounts with monthly values and pay-ins, and the
-numbers that matter on the way to financial independence (FI). No account and
-no sync: everything stays in one file on this computer.
+expenses and income, the monthly values of your accounts, and the numbers
+that matter on the way to financial independence (FI), with a forecast of
+how your portfolio could grow and whether it lasts, a state pension
+included. No account and no sync: everything stays in one file on this
+computer.
 
 It runs as an Omarchy web app: a small local server and a "Finance" window
 in the app launcher. Colors follow the current Omarchy theme; the charts
@@ -84,65 +86,18 @@ The data file stays.
 
 ## Use
 
-- **Expenses** and **Income**: regular payments with a name, a category, an
-  amount, and how often they are paid, in months (1 monthly, 3 quarterly,
-  12 yearly, 24 every two years, or any other number up to 120). Enter income
-  after tax. Only current amounts: when the rent goes up, edit it and the
-  numbers change. **Deactivate** sets an expense inactive: it stays in the
-  list, under Inactive, but counts nowhere (not in the totals, the FI number
-  or the charts) until **Activate** counts it again. New expenses are active.
-  **Essential** marks an expense you would pay even on the leanest budget
-  (rent, food, insurance): those count for Lean FI as well. New expenses are
-  not essential.
-
-  Each one **starts** now, at retirement, at an age or in a month, and
-  **ends** never, at retirement, at an age or after a month: childcare from
-  August 2027 until July 2031, health insurance from retirement until 67, a
-  state pension from 67, a salary until retirement. Ages and retirement
-  start in January of their year. It counts only in its months: what does
-  not count this month is listed under Later or Ended, and is left out of
-  the totals. New income ends at retirement; new expenses never end. Income
-  from before this setting ends at retirement, as it was never counted after
-  it; change that for income that goes on, such as rent from a flat.
-
-  Two helpers, for Germany, add what changes when you stop working:
-  - **State pension** (under Income): your Rentenpunkte so far, from the
-    Renteninformation, plus those of the years you still plan to work,
-    times the value of a point (42,52 € from July 2026), 0,3 % less a month
-    before the regular age (your retirement age in Settings; at most 4
-    years) or 0,5 % more a month after it, less what pensioners pay for
-    health and care insurance (12,95 % by default). Added as the income
-    "State pension" from the age it starts, or updates it. The
-    Renteninformation's own pension at 67 assumes you pay in until then;
-    early retirees get less.
-  - **Health and care insurance after you stop working** (under
-    Expenses): as a voluntary member of a statutory insurer, at least the
-    minimum base (1.318,33 € a month in 2026) × 14 % + the Zusatzbeitrag
-    (2,9 % on average) + care insurance (4,2 % without children, 3,6 %
-    with): about 280 € a month. Added as the essential expense "Health and
-    care insurance" from retirement until the age the pension starts.
-
-  Both numbers can be changed; income tax is left out.
-- **Portfolio**: per month, each invested account's value at month end, what
-  was paid in that month (negative for withdrawals), and a one-off: a lump
-  sum in or out, such as an inheritance or a house deposit. A one-off counts
-  as paid in (so it is no gain), but not for the average pay-in that the
-  investment rate, Time to FI and the forecast go on with. Cash, property,
-  pension assets and debts have only a value: what they are worth, or still
-  owed, at month end; the history adds the net worth. An account without a
-  value in a month counts with its last value.
-  **Returns**, under the monthly values, for the portfolio and each
-  invested account: time-weighted this year, over the last 1, 3 and 5 years
-  (3 and 5 a year) and since the start (a year from 12 months on): each
-  month's return (the change in value less what went in, ÷ the value at
-  the start plus half of what went in) chained, so it says what the
-  investments did, whenever money went in or out, and compares with an
-  index. And money-weighted since the start, the same way (the internal rate of
-  return): what your money earned, with when it went in. Pay-ins, one-offs
-  and an account's first value count from the middle of their month.
+- **Dashboard**: the numbers on the way to FI, the portfolio's history or
+  its path to FI, the net worth, and where the income goes. See
+  [Dashboard numbers](#dashboard-numbers).
+- **Expenses** and **Income**: regular payments, from now or a month to
+  come, until they end. See [Expenses and income](#expenses-and-income).
+- **Portfolio**: each account's value at the end of each month, and what
+  was paid in, with the returns and the history. See
+  [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
 - **Forecast**: how the portfolio could grow until retirement, and whether
   it lasts after, in three plans and at three growth rates (6, 8 and 10 % a
-  year before inflation, by default). See [Forecast](#forecast).
+  year before inflation, by default), with planned one-offs. See
+  [Forecast](#forecast).
 - **Settings**:
   - Currency (default euro). It only changes how amounts are shown; nothing
     is converted.
@@ -161,32 +116,112 @@ The data file stays.
     from before this setting get 3 % inflation and 3 points more expected
     return, so 5 % after inflation becomes 8 % before it.
   - Year of birth and retirement age (default 67), for the forecast. The
-    forecast needs the year of birth; it is empty until entered.
+    forecast needs the year of birth; it is empty until entered. Ages and
+    retirement start in January of their year.
   - Emergency fund (default 6): how many months of expenses to keep in
     cash accounts; 0 sets no target.
   - Categories, one list for expenses and one for income. A new data file
     starts with a few common ones. Renaming a category renames it on every
     expense or income that has it; deleting one leaves them without a
     category.
-  - Accounts, each with what it holds: **invested** (brokers, ETF savings
-    plans: the portfolio), **cash** (Tagesgeld, the emergency fund),
-    **property**, **pension assets** (Riester, Rürup, a company pension:
-    locked until retirement) or **debt** (what is still owed, such as a
-    mortgage). Only invested accounts are the portfolio that the FI number,
-    Time to FI and the forecast count; all of them, debts taken off, are the
-    net worth. Accounts from before this setting, and new ones from a CSV
-    import, are invested. Deleting one deletes its monthly values too.
+  - Accounts, each with what it holds; see
+    [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
+    Deleting one deletes its monthly values too.
   - Import past months from CSV, and export all monthly values as CSV.
+  - Where the data file and its daily backups are, and which updates to
+    offer.
 
 `Ctrl+1` to `Ctrl+6` open Dashboard, Expenses, Income, Portfolio, Forecast and
 Settings. `Ctrl+Shift+H`, or the eye at the right end of the top bar, hides
-every amount (as `••• €`, in charts and fields too) and keeps the
+every amount (as `••• €`, in charts and amount fields too) and keeps the
 percentages, for sharing the screen; again shows them. The choice is kept in
 this browser.
 
-![Expenses, two of them inactive](docs/expenses.png)
+### Expenses and income
 
-![Portfolio](docs/portfolio.png)
+Each expense and income has a name, a category, an amount, and how often it
+is paid, in months (1 monthly, 3 quarterly, 12 yearly, 24 every two years,
+or any other number up to 120). Enter income after tax. Only current
+amounts: when the rent goes up, edit it and the numbers change.
+
+- **Starts** now, at retirement, at an age or in a month, and **ends**
+  never, at retirement, at an age or after a month: childcare from August
+  2027 until July 2031, health insurance from retirement until 67, a state
+  pension from 67, a salary until retirement. It counts only in its
+  months: what does not count this month is listed under Later or Ended,
+  and is left out of the totals. In the forecast, retirement is each plan's
+  own (for Retire early, the month after FI). New income ends at
+  retirement; new expenses never end. Income from before starts and ends
+  ends at retirement, as it was never counted after it; change that for
+  income that goes on, such as rent from a flat.
+- **Essential** marks an expense you would pay even on the leanest budget
+  (rent, food, insurance): those count for Lean FI as well. New expenses
+  are not essential.
+- **Deactivate** sets an expense inactive: it stays in the list, under
+  Inactive, but counts nowhere (not in the totals, the FI number or the
+  charts) until **Activate** counts it again.
+
+![Expenses: essential ones marked, health insurance from retirement until 67 under Later, two inactive](docs/expenses.png)
+
+Two helpers, for Germany, at the bottom of the pages, add what changes when
+you stop working:
+
+- **State pension** (under Income): your Rentenpunkte so far, from the
+  Renteninformation, plus those of the years you still plan to work,
+  times the value of a point (42,52 € from July 2026), 0,3 % less a month
+  before the regular age (your retirement age in Settings; at most 4
+  years) or 0,5 % more a month after it, less what pensioners pay for
+  health and care insurance (12,95 % by default). Added as the income
+  "State pension" from the age it starts, or updates it. The
+  Renteninformation's own pension at 67 assumes you pay in until then;
+  early retirees get less.
+- **Health and care insurance after you stop working** (under Expenses):
+  as a voluntary member of a statutory insurer, at least the minimum base
+  (1.318,33 € a month in 2026) × 14 % + the Zusatzbeitrag (2,9 % on
+  average) + care insurance (4,2 % without children, 3,6 % with): about
+  280 € a month. Added as the essential expense "Health and care
+  insurance" from retirement until the age the pension starts.
+
+Both numbers can be changed; income tax is left out.
+
+![Income: a salary until retirement, and the state pension helper](docs/income.png)
+
+### Portfolio, net worth and returns
+
+Each account holds something: **invested** (brokers, ETF savings plans:
+the portfolio), **cash** (Tagesgeld, the emergency fund), **property**,
+**pension assets** (Riester, Rürup, a company pension: locked until
+retirement) or **debt** (what is still owed, such as a mortgage). Only
+invested accounts are the portfolio that the FI number, Time to FI and the
+forecast count; all of them, debts taken off, are the net worth. Accounts
+are set up in Settings; those from before kinds, and new ones from a CSV
+import without a kind, are invested.
+
+Per month, enter each account's value at month end. For invested accounts
+also what was paid in that month (negative for withdrawals), and a
+**one-off**: a lump sum in or out, such as an inheritance or a house
+deposit. A one-off counts as paid in (so it is no gain), but not for the
+average pay-in that the investment rate, Time to FI and the forecast go on
+with. An account without a value in a month counts with its last value.
+The history lists every month with each account, the portfolio, what was
+paid in and, with other kinds of accounts, the net worth.
+
+**Returns**, for the portfolio and each invested account:
+
+- Time-weighted this year, over the last 1, 3 and 5 years (3 and 5 a year)
+  and since the start: each month's return (the change in value less what
+  went in, ÷ the value at the start plus half of what went in) chained.
+  It says what the investments did, whenever money went in or out, and
+  compares with an index or a fund.
+- Money-weighted since the start (the internal rate of return): what your
+  money earned, with when it went in; paying in before a rise makes it
+  higher, before a fall lower.
+
+Since the start, both are a year from 12 months of history on, and over the
+whole time before. Pay-ins, one-offs and an account's first value count
+from the middle of their month.
+
+![Portfolio: two invested accounts, cash and a car loan, a one-off column, and the returns](docs/portfolio.png)
 
 ### Dashboard numbers
 
@@ -194,8 +229,8 @@ this browser.
 | --- | --- |
 | Monthly income | Sum of the income that counts this month, each divided by its months (a yearly bonus counts one twelfth) |
 | Monthly expenses | Sum of the active expenses that count this month the same way, plus the buffer |
-| Investment rate | Average monthly pay-in over the last 12 months ÷ monthly income |
-| Portfolio | Sum of all accounts in the latest month, and its change since the month before |
+| Investment rate | Average monthly pay-in over the last 12 months (one-offs left out) ÷ monthly income |
+| Portfolio | Sum of the invested accounts in the latest month, and its change since the month before |
 | Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins and one-offs. The return is that gain ÷ (the value 12 months ago + each pay-in and one-off for the part of the 12 months it was invested, from the middle of its month) |
 | Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them. Under it, the emergency fund: the latest values of the cash accounts ÷ monthly expenses, and how much is missing to the months set in Settings |
 | FI number | What the portfolio would need when retiring now. What it pays a month: the expenses that count then, plus the buffer, less the income that does. Once nothing starts or ends any more, that amount × 12 ÷ withdrawal rate (× 25 at 4 %); until then, what it pays on top of that, month by month, such as bridging the years until a pension starts. Never more than the highest monthly amount × 12 ÷ withdrawal rate. Without starts and ends: monthly expenses × 12 ÷ withdrawal rate |
@@ -219,12 +254,14 @@ The **Portfolio** chart has two views; the one picked last stays picked.
   much of that month's change was paid in and how much came from the market.
   The FI number shows once the data reaches it.
 - **Path to FI** (needs active expenses): from the latest month, the value
-  goes on growing the way Time to FI counts, as a dashed line until it
-  reaches the FI number, with a band from 2 points below to 2 points above
-  the expected return (6 % to 10 % at 8 %), also up to the FI number. From the latest month on, the
-  FI number rises by the inflation. The line under the chart says when each
-  reaches the FI number, and what the FI number is by then. Its switch
-  shows the projection in today's money instead, as on the Forecast page.
+  goes on growing the way Time to FI counts, with planned one-offs, as a
+  dashed line until it reaches the FI number, with a band from 2 points
+  below to 2 points above the expected return (6 % to 10 % at 8 %), also up
+  to the FI number. From the latest month on, the FI number is that of
+  retiring in each month, risen by the inflation. The line under the chart
+  says when each reaches the FI number, and what the FI number is by then.
+  Its switch shows the projection in today's money instead, as on the
+  Forecast page.
 
 ![Path to FI](docs/path-to-fi.png)
 
@@ -284,9 +321,10 @@ not in the data file.
 - It starts from the portfolio in the latest month, and grows it by the
   growth rate every month (8 % a year is about 0.64 % a month), as Time to
   FI on the dashboard does.
-- Every amount is in the money of its year: growth is before inflation, and
-  the expenses and the FI number rise by the inflation from Settings (3 % a
-  year by default). What is invested stays the same.
+- Every amount is in the money of its year, unless Amounts in is set to
+  today's money: growth is before inflation, and the expenses and the FI
+  number rise by the inflation from Settings (3 % a year by default). What
+  is invested stays the same.
 - The growth is the same every year. Real markets are not, and bad years
   right after you start living off the portfolio hurt most.
 - A state pension or other income that goes on after retirement counts
@@ -310,9 +348,10 @@ Settings → **Import past months from CSV**: choose a file or paste rows
 copied from a spreadsheet. One row per account and month:
 
 ```csv
-date;account;value;pay_in;one_off
-31.01.2025;Trade Republic;12.345,67;500;0
-31.01.2025;ING;58.000;0;50.000
+date;account;value;pay_in;one_off;kind
+31.01.2025;Trade Republic;12.345,67;500;0;invested
+31.01.2025;ING;58.000;0;50.000;invested
+31.01.2025;Tagesgeld;10.000;;;cash
 ```
 
 - Semicolons, commas or tabs between columns.
@@ -370,11 +409,11 @@ directory.
 ## Development
 
 ```text
-server.py          # local server: page, /api/data (load/save), /api/update, /theme.css
+server.py          # local server: page, /api/data (load/save, daily backups), /api/update, /theme.css
 app/
 ├── index.html
 ├── app.mjs        # the views; saves every change
-├── finance.mjs    # data format, parsing, metrics, forecast, CSV import and export (no DOM)
+├── finance.mjs    # data format, parsing, metrics, returns, forecast, German helpers, CSV (no DOM)
 ├── chart.mjs      # portfolio and forecast charts (SVG)
 ├── update.mjs     # the update button, and the channel in Settings
 └── style.css
