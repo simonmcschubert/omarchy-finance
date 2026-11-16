@@ -1298,3 +1298,9 @@ table.entry th {
   gap: 16px;
   align-items: end;
 }
+
+/* Amounts hidden: what is typed into amount fields shows as dots too;
+   percentages and other numbers stay. */
+body.hide-amounts input.amount {
+  -webkit-text-security: disc;
+}

@@ -715,6 +715,112 @@ export function projectToGoal(start, payIn, returnPercent, goal, inflation = 0, 
   return null;
 }
 
+// ---------------------------------------------------------------- returns
+
+// The portfolioSeries of one account: its values, pay-ins and one-offs.
+// With `until` (a month), it goes on to that month with its last value, as
+// the portfolio counts it, so its returns cover the same months.
+export function accountSeries(store, accountId, until = null) {
+  const series = portfolioSeries({
+    ...store,
+    accounts: store.accounts.filter((a) => a.id === accountId).map((a) => ({ ...a, kind: "invested" })),
+    records: store.records.filter((r) => r.account === accountId),
+  });
+  while (until !== null && series.length > 0 && series.at(-1).month < until) {
+    const last = series.at(-1);
+    series.push({ month: addMonths(last.month, 1), value: last.value, payIn: 0, oneOff: 0, invested: last.invested });
+  }
+  return series;
+}
+
+// Each month's return of a portfolioSeries after its first month (Modified
+// Dietz): the change in value less what went in, ÷ the value at the start
+// of the month plus half of what went in (paid in during the month). What
+// went in is the change in `invested`: pay-ins, one-offs, and what an
+// account held in its first month. A month with nothing in the account and
+// nothing going in is 0; rate is null only when the value changed without
+// anything invested. Returns [{ month, rate }].
+export function monthlyReturns(series) {
+  const returns = [];
+  for (let i = 1; i < series.length; i++) {
+    const start = series[i - 1].value;
+    const flow = series[i].invested - series[i - 1].invested;
+    const base = start + flow / 2;
+    const gain = series[i].value - start - flow;
+    returns.push({ month: series[i].month, rate: base > 0 ? gain / base : gain === 0 ? 0 : null });
+  }
+  return returns;
+}
+
+// The time-weighted return of the last `months` of monthly returns (all
+// with null), chained: what the investments did, whenever money went in or
+// out. A year a year when `annual` and over 12 months or more. null when
+// there are fewer months, or one has no rate.
+export function timeWeighted(returns, months = null, { annual = false } = {}) {
+  const window = months === null ? returns : returns.slice(-months);
+  if (window.length === 0 || (months !== null && window.length < months) || window.some((r) => r.rate === null)) return null;
+  const total = window.reduce((product, r) => product * (1 + r.rate), 1);
+  return annual && window.length >= 12 ? total ** (12 / window.length) - 1 : total - 1;
+}
+
+// The time-weighted return of this year so far: the months of the latest
+// month's year. null without one.
+export function yearToDate(returns) {
+  if (returns.length === 0) return null;
+  const year = returns.at(-1).month.slice(0, 4);
+  return timeWeighted(returns, returns.filter((r) => r.month.startsWith(year)).length || null);
+}
+
+// The money-weighted return of a portfolioSeries, a year (an internal rate
+// of return): the rate at which what went in, from what was there in the
+// first month on, grows to the latest value. What went in during a month
+// counts from its middle. Found as a monthly rate, from -99,99 % to
+// +1000 % a month, so short histories with large moves have one too; a year
+// from 12 months on, over the whole time before, as timeWeighted. null
+// with less than two months or no rate.
+export function moneyWeighted(series) {
+  if (series.length < 2) return null;
+  const flows = [{ at: 0, amount: -series[0].value }];
+  for (let i = 1; i < series.length; i++) flows.push({ at: i - 0.5, amount: -(series[i].invested - series[i - 1].invested) });
+  flows.push({ at: series.length - 1, amount: series.at(-1).value });
+  // The sign of the flows' present value at a monthly growth of e^g - 1.
+  // Each flow is discounted by e^(-g × at); all are scaled by the largest
+  // of those, which leaves the sign alone and keeps every term finite over
+  // long histories.
+  const npvSign = (g) => {
+    const exponents = flows.map((f) => -g * f.at);
+    const top = Math.max(...exponents);
+    return Math.sign(flows.reduce((total, f, i) => total + f.amount * Math.exp(exponents[i] - top), 0));
+  };
+  let low = Math.log(1e-4);
+  let high = Math.log(11);
+  if (npvSign(low) === npvSign(high)) return null;
+  for (let i = 0; i < 200; i++) {
+    const mid = (low + high) / 2;
+    if (npvSign(mid) === npvSign(low)) low = mid;
+    else high = mid;
+  }
+  const months = series.length - 1;
+  return Math.exp(((low + high) / 2) * (months >= 12 ? 12 : months)) - 1;
+}
+
+// What the portfolioSeries `series` returned: this year, the last 1, 3 and
+// 5 years (3 and 5 a year), since its first month (a year from 12 months
+// on), and money-weighted since then. Fractions; null where too short.
+export function returnsOf(series) {
+  const returns = monthlyReturns(series);
+  return {
+    since: series[0]?.month ?? null,
+    months: returns.length,
+    ytd: yearToDate(returns),
+    year: timeWeighted(returns, 12),
+    three: timeWeighted(returns, 36, { annual: true }),
+    five: timeWeighted(returns, 60, { annual: true }),
+    all: timeWeighted(returns, null, { annual: true }),
+    moneyWeighted: moneyWeighted(series),
+  };
+}
+
 // What the portfolio gained over the last `window` months besides pay-ins:
 // the change in value minus what was paid in, from the month before the
 // window (the first month when there are fewer). rate is a Modified Dietz

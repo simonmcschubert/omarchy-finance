@@ -47,9 +47,14 @@ function useFormats({ currency: code, numberFormat }) {
 }
 useFormats(F.DEFAULT_SETTINGS);
 
-const money = (cents) => whole.format(Math.round(cents / 100));
-const moneyExact = (cents) => exact.format(cents / 100);
-const signedMoney = (cents) => (cents > 0 ? "+" : "") + money(cents);
+// With amounts hidden (for sharing the screen), every amount shows as
+// dots with the currency sign; percentages stay.
+const hidden = () => state.hideAmounts;
+const masked = (format) => format.format(0).replace(/[0-9]+([.,][0-9]+)?/, "•••");
+const money = (cents) => (hidden() ? masked(whole) : whole.format(Math.round(cents / 100)));
+const moneyExact = (cents) => (hidden() ? masked(exact) : exact.format(cents / 100));
+const signedMoney = (cents) => (hidden() ? money(cents) : (cents > 0 ? "+" : "") + money(cents));
+const axisMoney = (cents) => (hidden() ? masked(axis) : axis.format(cents / 100));
 const signedPercent = (fraction) => (fraction > 0 ? "+" : "") + percent.format(fraction);
 const inputMoney = (cents) => plain.format(cents / 100);
 
@@ -190,6 +195,43 @@ function setMoney(money) {
 }
 const inTodaysMoney = () => state.money === "today";
 
+const HIDE_KEY = "finance.hideAmounts";
+function savedHidden() {
+  try {
+    return localStorage.getItem(HIDE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function toggleHidden() {
+  state.hideAmounts = !state.hideAmounts;
+  try {
+    localStorage.setItem(HIDE_KEY, state.hideAmounts ? "1" : "0");
+  } catch {
+    // remembered until the window closes
+  }
+  // A notice may name an amount: it goes.
+  state.notice = null;
+  // The page is drawn again with every amount: what is typed into its forms
+  // and not saved yet stays, and so does the focus.
+  const forms = () => [...document.querySelectorAll("#main form")];
+  const drafts = forms().map((form) => [...form.elements].filter((el) => el.name).map((el) => [el.name, el.type === "checkbox" ? el.checked : el.value]));
+  const active = document.activeElement;
+  const focused = active?.form ? [forms().indexOf(active.form), active.name] : null;
+  render();
+  forms().forEach((form, i) => {
+    for (const [name, value] of drafts[i] ?? []) {
+      const el = form.elements.namedItem(name);
+      if (!el || el instanceof RadioNodeList) continue;
+      if (el.type === "checkbox") el.checked = value;
+      else el.value = value;
+      // A start or end shows the field of its choice.
+      if (el.tagName === "SELECT" && el.closest(".bound")) el.dispatchEvent(new Event("change"));
+    }
+  });
+  if (focused && focused[0] >= 0) forms()[focused[0]]?.elements.namedItem(focused[1])?.focus?.();
+}
+
 // Buttons to switch between the money of each year and today's money;
 // onswitch redraws what shows amounts.
 function moneySwitch(onswitch) {
@@ -215,6 +257,7 @@ const state = {
   importPlan: null,
   chartView: savedChartView(), // "history" | "path"
   money: savedMoney(), // "nominal" (the money of each year) | "today"
+  hideAmounts: savedHidden(), // amounts as dots, for sharing the screen
   // On the forecast page. contribution null: the average pay-in. growth:
   // "low", "mid" or "high", the expected return and RETURN_SPREAD around it.
   forecast: { contribution: null, coastContribution: 0, growth: "mid" },
@@ -360,6 +403,12 @@ addEventListener("hashchange", () => {
 // Ctrl+1 to Ctrl+6 open the views. Matched by key position, not by the
 // character, so it works the same on every keyboard layout.
 addEventListener("keydown", (event) => {
+  // Ctrl+Shift+H hides or shows the amounts.
+  if (event.code === "KeyH" && event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey) {
+    event.preventDefault();
+    toggleHidden();
+    return;
+  }
   const digit = /^(?:Digit|Numpad)([1-9])$/.exec(event.code);
   if (!digit || !event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) return;
   const view = VIEWS[Number(digit[1]) - 1];
@@ -375,9 +424,34 @@ function viewFromHash() {
 
 // ---------------------------------------------------------------- render
 
+// The button that hides or shows the amounts, in the header.
+const EYE = ["M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z", "M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6"];
+const EYE_OFF = [...EYE, "M4 4l16 16"];
+function renderPrivacy() {
+  const root = document.getElementById("privacy");
+  if (!root) return;
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of state.hideAmounts ? EYE_OFF : EYE) {
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  const label = state.hideAmounts ? "Show amounts (Ctrl+Shift+H)" : "Hide amounts, for sharing the screen (Ctrl+Shift+H)";
+  const button = h("button", { type: "button", class: "update-button", title: label, "aria-label": label, "aria-pressed": String(state.hideAmounts),
+    "aria-keyshortcuts": "Control+Shift+H", onclick: toggleHidden }, svg);
+  const hadFocus = root.contains(document.activeElement);
+  root.replaceChildren(button);
+  if (hadFocus) button.focus();
+}
+
 function render() {
   resizeObserver?.disconnect();
   if (state.store) useFormats(state.store.settings);
+  document.body.classList.toggle("hide-amounts", state.hideAmounts);
+  renderPrivacy();
   const nav = document.getElementById("nav");
   nav.replaceChildren(
     ...VIEWS.map(([view, label], i) => h("a", {
@@ -702,7 +776,7 @@ function drawChart() {
     formatPercent: (fraction) => percent.format(fraction),
     formatSignedPercent: signedPercent,
     formatRate: (rate) => percentUnit.format(rate),
-    formatAxis: (cents) => axis.format(cents / 100),
+    formatAxis: axisMoney,
     formatMonth: monthLabel,
     monthNumber: F.monthIndex,
   };
@@ -816,7 +890,7 @@ function pensionCard() {
   },
     h("label", null, "Rentenpunkte so far", h("input", { name: "points", inputmode: "decimal", autocomplete: "off", placeholder: "25,5", required: true })),
     h("label", null, "More points until you stop working", h("input", { name: "more", inputmode: "decimal", autocomplete: "off", value: "0" })),
-    h("label", null, "Value of a point", h("input", { name: "pointValue", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.pointValue) })),
+    h("label", null, "Value of a point", h("input", { name: "pointValue", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.pointValue) })),
     h("label", null, "Starts at age", h("input", { name: "startAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.from?.age ?? regularAge) })),
     h("label", null, "Health and care insurance (%)",
       h("input", { name: "deductions", inputmode: "decimal", autocomplete: "off", value: plain.format(g.pensionerRate + g.extraRate / 2 + g.careRateChildless) })),
@@ -871,7 +945,7 @@ function healthCard() {
       commit(F.saveItem(store, "expenses", item), `${existing ? "Updated" : "Added"} ${HEALTH_NAME}: ${money(item.amount)} a month from retirement until age ${r.untilAge}.`);
     },
   },
-    h("label", null, "Minimum base a month", h("input", { name: "base", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.minimumBase) })),
+    h("label", null, "Minimum base a month", h("input", { name: "base", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.minimumBase) })),
     h("label", null, "Zusatzbeitrag (%)", h("input", { name: "extra", inputmode: "decimal", autocomplete: "off", value: plain.format(g.extraRate) })),
     h("label", null, "Until age (the pension starts)",
       h("input", { name: "untilAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.until?.age ?? store.settings.retirementAge) })),
@@ -968,7 +1042,7 @@ function viewItems(kind) {
       h("select", { name: "category", value: editing?.category ?? "" },
         h("option", { value: "" }, "No category"),
         categories.map((c) => h("option", { value: c }, c)))),
-    h("label", null, kind === "income" ? "Amount (net)" : "Amount", h("input", { name: "amount", inputmode: "decimal", autocomplete: "off", required: true, value: editing ? inputMoney(editing.amount) : "", placeholder: zero })),
+    h("label", null, kind === "income" ? "Amount (net)" : "Amount", h("input", { name: "amount", class: "amount", inputmode: "decimal", autocomplete: "off", required: true, value: editing ? inputMoney(editing.amount) : "", placeholder: zero })),
     h("label", null, "Paid every … months",
       h("input", { name: "everyMonths", type: "number", min: 1, max: 120, step: 1, required: true, list: "intervals", value: String(editing?.everyMonths ?? 1) })),
     h("datalist", { id: "intervals" }, INTERVALS.map(([v, label]) => h("option", { value: String(v), label }))),
@@ -1116,15 +1190,15 @@ function viewPortfolio() {
             const invested = isInvested(account);
             return h("tr", null,
               h("th", { scope: "row" }, account.name, invested ? null : h("div", { class: "sub" }, kindLabel(account.kind))),
-              h("td", null, h("input", { name: `value-${account.id}`, inputmode: "decimal", autocomplete: "off",
+              h("td", null, h("input", { name: `value-${account.id}`, class: "amount", inputmode: "decimal", autocomplete: "off",
                 "aria-label": `${account.name} ${account.kind === "debt" ? "still owed" : "value"}`,
-                value: record ? inputMoney(record.value) : "", placeholder: before ? `last: ${inputMoney(before.value)}` : zero })),
+                value: record ? inputMoney(record.value) : "", placeholder: before ? `last: ${hidden() ? "•••" : inputMoney(before.value)}` : zero })),
               invested
-                ? h("td", null, h("input", { name: `payin-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} pay-in`,
+                ? h("td", null, h("input", { name: `payin-${account.id}`, class: "amount", inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} pay-in`,
                     value: record && record.payIn !== 0 ? inputMoney(record.payIn) : "", placeholder: zero }))
                 : h("td", { class: "muted" }, "–"),
               invested
-                ? h("td", null, h("input", { name: `oneoff-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} one-off`,
+                ? h("td", null, h("input", { name: `oneoff-${account.id}`, class: "amount", inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} one-off`,
                     value: record && record.oneOff !== 0 ? inputMoney(record.oneOff) : "", placeholder: zero }))
                 : h("td", { class: "muted" }, "–"));
           })))),
@@ -1183,7 +1257,38 @@ function viewPortfolio() {
         "Planned one-offs go on the ", h("a", { href: "#forecast" }, "Forecast"), " page."),
       h("p", { class: "muted" }, "For cash, property, pension assets and debts, enter only what they are worth, or still owed, at month end. ",
         "Accounts, CSV import and export are in ", h("a", { href: "#settings" }, "Settings"), ".")),
+    returnsCard(store),
     history);
+}
+
+// What the portfolio and each invested account returned, time-weighted
+// over several periods and money-weighted since the start.
+function returnsCard(store) {
+  const series = F.portfolioSeries(store);
+  if (series.length < 2) return null;
+  const invested = store.accounts.filter(isInvested);
+  const rows = [["Portfolio", F.returnsOf(series)]];
+  if (invested.length > 1) {
+    for (const account of invested) {
+      // Up to the portfolio's latest month, so every row covers the same months.
+      const own = F.accountSeries(store, account.id, series.at(-1).month);
+      if (own.length >= 2) rows.push([account.name, F.returnsOf(own)]);
+    }
+  }
+  const cell = (rate) => h("td", { class: "num" }, rate === null ? h("span", { class: "muted" }, "–") : signedPercent(rate));
+  const latestYear = series.at(-1).month.slice(0, 4);
+  return card("Returns",
+    h("div", { class: "table-wrap" }, h("table", null,
+      h("thead", null, h("tr", null, h("th", null, ""), h("th", { class: "num" }, latestYear), h("th", { class: "num" }, "1 year"),
+        h("th", { class: "num" }, "3 years, a year"), h("th", { class: "num" }, "5 years, a year"), h("th", { class: "num" }, "Since the start"),
+        h("th", { class: "num", title: "The internal rate of return of what you paid in and when" }, "Your money, since the start"))),
+      h("tbody", null, rows.map(([name, r]) => h("tr", null,
+        h("th", { scope: "row" }, name, h("div", { class: "sub" }, `since ${monthLabel(r.since)}`)),
+        cell(r.ytd), cell(r.year), cell(r.three), cell(r.five), cell(r.all), cell(r.moneyWeighted)))))),
+    h("p", { class: "muted" }, "Time-weighted (the first five columns): what the investments did, month by month chained, whenever money went in or out. ",
+      "Compare it with an index or a fund's return. Money-weighted (the last): what your money earned, with when you paid it in: ",
+      "paying in before a rise makes it higher, before a fall lower. Pay-ins and one-offs count from the middle of their month; ",
+      "since the start, both are a year from 12 months on, and over the whole time before; – means the history is shorter."));
 }
 
 // ---------------------------------------------------------------- forecast
@@ -1277,9 +1382,9 @@ function viewForecast() {
         : h("form", { class: "forecast-controls", onsubmit: read, onchange: read },
             h("div", { class: "forecast-form" },
               h("label", null, "Invested per month",
-                h("input", { id: "forecast-contribution", name: "contribution", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.contribution) })),
+                h("input", { id: "forecast-contribution", name: "contribution", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.contribution) })),
               h("label", null, "After Coast FI, per month",
-                h("input", { id: "forecast-coast", name: "coastContribution", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.coastContribution) })),
+                h("input", { id: "forecast-coast", name: "coastContribution", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.coastContribution) })),
               h("button", { type: "submit" }, "Show")),
             growthField),
       retired ? null : h("p", { class: "muted" },
@@ -1308,7 +1413,7 @@ function eventsCard(start) {
   } },
     h("label", null, "Name", h("input", { id: "event-name", name: "name", autocomplete: "off", required: true, value: editing?.name ?? "", placeholder: "Inheritance" })),
     h("label", null, "Month", h("input", { name: "month", type: "month", required: true, value: editing?.month ?? "" })),
-    h("label", null, "Amount (negative: taken out)", h("input", { name: "amount", inputmode: "decimal", autocomplete: "off", required: true,
+    h("label", null, "Amount (negative: taken out)", h("input", { name: "amount", class: "amount", inputmode: "decimal", autocomplete: "off", required: true,
       value: editing ? inputMoney(editing.amount) : "", placeholder: inputMoney(-2000000) })),
     h("div", { class: "form-actions" },
       h("button", { type: "submit", class: "primary" }, editing ? "Save" : "Add"),
@@ -1483,7 +1588,7 @@ function drawForecast() {
       goal: result.goal,
       retirementIndex: index(result.retirement),
       format: money,
-      formatAxis: (cents) => axis.format(cents / 100),
+      formatAxis: axisMoney,
       formatMonth: monthLabel,
       ageOf: age,
     }));
