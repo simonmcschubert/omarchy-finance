@@ -101,7 +101,10 @@ export function renderChart(root, options) {
   // The FI number at x position i.
   const goalAt = (i) => (i > last ? projection[i - last - 1].goal : fiNumber);
   const values = path ? series.map((m) => m.value) : series.flatMap((m) => [m.value, m.invested]);
-  const top = Math.max(...values, showGoal ? goalAt(count - 1) * (path ? GOAL_HEADROOM : 1) : 0, 10000);
+  // The FI number can fall over the projection (a pension coming closer),
+  // so the highest one sets the top.
+  const highestGoal = path ? Math.max(fiNumber, ...projection.map((p) => p.goal)) * GOAL_HEADROOM : fiNumber;
+  const top = Math.max(...values, showGoal ? highestGoal : 0, 10000);
   const ticks = niceTicks(Math.min(0, ...values), top);
   const yMin = ticks[0];
   const yMax = ticks.at(-1);
