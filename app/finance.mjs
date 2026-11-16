@@ -783,17 +783,25 @@ export function moneyWeighted(series) {
   const flows = [{ at: 0, amount: -series[0].value }];
   for (let i = 1; i < series.length; i++) flows.push({ at: i - 0.5, amount: -(series[i].invested - series[i - 1].invested) });
   flows.push({ at: series.length - 1, amount: series.at(-1).value });
-  const npv = (monthly) => flows.reduce((total, f) => total + f.amount / (1 + monthly) ** f.at, 0);
-  let low = -0.9999;
-  let high = 10;
-  if (Math.sign(npv(low)) === Math.sign(npv(high))) return null;
+  // The sign of the flows' present value at a monthly growth of e^g - 1.
+  // Each flow is discounted by e^(-g × at); all are scaled by the largest
+  // of those, which leaves the sign alone and keeps every term finite over
+  // long histories.
+  const npvSign = (g) => {
+    const exponents = flows.map((f) => -g * f.at);
+    const top = Math.max(...exponents);
+    return Math.sign(flows.reduce((total, f, i) => total + f.amount * Math.exp(exponents[i] - top), 0));
+  };
+  let low = Math.log(1e-4);
+  let high = Math.log(11);
+  if (npvSign(low) === npvSign(high)) return null;
   for (let i = 0; i < 200; i++) {
     const mid = (low + high) / 2;
-    if (Math.sign(npv(mid)) === Math.sign(npv(low))) low = mid;
+    if (npvSign(mid) === npvSign(low)) low = mid;
     else high = mid;
   }
   const months = series.length - 1;
-  return (1 + (low + high) / 2) ** (months >= 12 ? 12 : months) - 1;
+  return Math.exp(((low + high) / 2) * (months >= 12 ? 12 : months)) - 1;
 }
 
 // What the portfolioSeries `series` returned: this year, the last 1, 3 and

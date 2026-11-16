@@ -994,6 +994,11 @@ test("returns: time-weighted months chained, and money-weighted", () => {
   close(F.moneyWeighted(month(1300)), 0.3, "30 % in a month");
   close(F.moneyWeighted(month(500)), -0.5, "half in a month");
   close(F.returnsOf(month(1300)).all, 0.3, "time-weighted, the same");
+  // Long histories too: 1 % a month for 82 and 360 months.
+  for (const months of [82, 360]) {
+    const long = Array.from({ length: months + 1 }, (_, i) => ({ month: F.addMonths("1990-01", i), value: 1000 * 1.01 ** i, payIn: 0, oneOff: 0, invested: 1000 }));
+    close(F.moneyWeighted(long), 1.01 ** 12 - 1, `${months} months`);
+  }
   // An empty month with nothing going in is no return, not a gap.
   const emptied = F.monthlyReturns([
     { month: "2026-01", value: 0, payIn: 0, oneOff: 0, invested: 0 },
