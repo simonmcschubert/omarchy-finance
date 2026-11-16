@@ -988,10 +988,19 @@ test("returns: time-weighted months chained, and money-weighted", () => {
   assert.equal(all.three, null);
   assert.equal(all.since, "2024-10");
   assert.equal(F.moneyWeighted(steady.slice(0, 1)), null);
-  // Large moves over a short history have a rate too.
+  // Large moves over a short history have a rate too: over the whole time,
+  // as the time-weighted one, before 12 months.
   const month = (value) => [{ month: "2026-01", value: 1000, payIn: 0, oneOff: 0, invested: 1000 }, { month: "2026-02", value, payIn: 0, oneOff: 0, invested: 1000 }];
-  close(F.moneyWeighted(month(1300)), 1.3 ** 12 - 1, "30 % in a month");
-  close(F.moneyWeighted(month(500)), 0.5 ** 12 - 1, "half in a month");
+  close(F.moneyWeighted(month(1300)), 0.3, "30 % in a month");
+  close(F.moneyWeighted(month(500)), -0.5, "half in a month");
+  close(F.returnsOf(month(1300)).all, 0.3, "time-weighted, the same");
+  // An empty month with nothing going in is no return, not a gap.
+  const emptied = F.monthlyReturns([
+    { month: "2026-01", value: 0, payIn: 0, oneOff: 0, invested: 0 },
+    { month: "2026-02", value: 0, payIn: 0, oneOff: 0, invested: 0 },
+    { month: "2026-03", value: 1100, payIn: 1000, oneOff: 0, invested: 1000 },
+  ]);
+  assert.deepEqual(emptied.map((r) => r.rate), [0, 0.2]);
 
   // Paying in before a fall weighs it more with money than with time.
   const timing = [
@@ -1001,7 +1010,8 @@ test("returns: time-weighted months chained, and money-weighted", () => {
   ];
   const t = F.returnsOf(timing);
   close(t.all, (1 + 200 / 1500) * 0.5 - 1, "two months, time-weighted");
-  const perMonth = { time: (1 + t.all) ** (1 / 2) - 1, money: (1 + t.moneyWeighted) ** (1 / 12) - 1 };
+  // Both over the two months.
+  const perMonth = { time: (1 + t.all) ** (1 / 2) - 1, money: (1 + t.moneyWeighted) ** (1 / 2) - 1 };
   assert.ok(perMonth.money < perMonth.time - 0.03, `money-weighted ${perMonth.money} is worse than time-weighted ${perMonth.time}`);
 });
 

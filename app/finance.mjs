@@ -737,15 +737,17 @@ export function accountSeries(store, accountId, until = null) {
 // Dietz): the change in value less what went in, ÷ the value at the start
 // of the month plus half of what went in (paid in during the month). What
 // went in is the change in `invested`: pay-ins, one-offs, and what an
-// account held in its first month. rate is null when nothing was invested.
-// Returns [{ month, rate }].
+// account held in its first month. A month with nothing in the account and
+// nothing going in is 0; rate is null only when the value changed without
+// anything invested. Returns [{ month, rate }].
 export function monthlyReturns(series) {
   const returns = [];
   for (let i = 1; i < series.length; i++) {
     const start = series[i - 1].value;
     const flow = series[i].invested - series[i - 1].invested;
     const base = start + flow / 2;
-    returns.push({ month: series[i].month, rate: base > 0 ? (series[i].value - start - flow) / base : null });
+    const gain = series[i].value - start - flow;
+    returns.push({ month: series[i].month, rate: base > 0 ? gain / base : gain === 0 ? 0 : null });
   }
   return returns;
 }
@@ -773,7 +775,8 @@ export function yearToDate(returns) {
 // of return): the rate at which what went in, from what was there in the
 // first month on, grows to the latest value. What went in during a month
 // counts from its middle. Found as a monthly rate, from -99,99 % to
-// +1000 % a month, so short histories with large moves have one too. null
+// +1000 % a month, so short histories with large moves have one too; a year
+// from 12 months on, over the whole time before, as timeWeighted. null
 // with less than two months or no rate.
 export function moneyWeighted(series) {
   if (series.length < 2) return null;
@@ -789,7 +792,8 @@ export function moneyWeighted(series) {
     if (Math.sign(npv(mid)) === Math.sign(npv(low))) low = mid;
     else high = mid;
   }
-  return (1 + (low + high) / 2) ** 12 - 1;
+  const months = series.length - 1;
+  return (1 + (low + high) / 2) ** (months >= 12 ? 12 : months) - 1;
 }
 
 // What the portfolioSeries `series` returned: this year, the last 1, 3 and

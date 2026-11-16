@@ -1280,15 +1280,15 @@ function returnsCard(store) {
   return card("Returns",
     h("div", { class: "table-wrap" }, h("table", null,
       h("thead", null, h("tr", null, h("th", null, ""), h("th", { class: "num" }, latestYear), h("th", { class: "num" }, "1 year"),
-        h("th", { class: "num" }, "3 years, a year"), h("th", { class: "num" }, "5 years, a year"), h("th", { class: "num" }, "Since the start, a year"),
-        h("th", { class: "num", title: "The internal rate of return of what you paid in and when" }, "Your money, a year"))),
+        h("th", { class: "num" }, "3 years, a year"), h("th", { class: "num" }, "5 years, a year"), h("th", { class: "num" }, "Since the start"),
+        h("th", { class: "num", title: "The internal rate of return of what you paid in and when" }, "Your money, since the start"))),
       h("tbody", null, rows.map(([name, r]) => h("tr", null,
         h("th", { scope: "row" }, name, h("div", { class: "sub" }, `since ${monthLabel(r.since)}`)),
         cell(r.ytd), cell(r.year), cell(r.three), cell(r.five), cell(r.all), cell(r.moneyWeighted)))))),
     h("p", { class: "muted" }, "Time-weighted (the first five columns): what the investments did, month by month chained, whenever money went in or out. ",
       "Compare it with an index or a fund's return. Money-weighted (the last): what your money earned, with when you paid it in: ",
       "paying in before a rise makes it higher, before a fall lower. Pay-ins and one-offs count from the middle of their month; ",
-      "periods under a year are not made yearly, and – means the history is shorter."));
+      "since the start, both are a year from 12 months on, and over the whole time before; – means the history is shorter."));
 }
 
 // ---------------------------------------------------------------- forecast

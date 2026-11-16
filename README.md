@@ -137,7 +137,7 @@ The data file stays.
   month's return (the change in value less what went in, ÷ the value at
   the start plus half of what went in) chained, so it says what the
   investments did, whenever money went in or out, and compares with an
-  index. And money-weighted since the start, a year (the internal rate of
+  index. And money-weighted since the start, the same way (the internal rate of
   return): what your money earned, with when it went in. Pay-ins, one-offs
   and an account's first value count from the middle of their month.
 - **Forecast**: how the portfolio could grow until retirement, and whether
