@@ -259,6 +259,14 @@ can open. Copy it to back it up. Amounts are stored in cents (hundredths of
 the currency). Files from older versions of Finance are upgraded on the
 first change; those versions cannot read them after that.
 
+Before the first change of each day, Finance keeps a copy of the file as it
+was, as `backups/finance-<date>.json` next to it (for example
+`finance-2026-11-16.json`), and keeps the copies of the last 30 days with
+changes. A bad import or a slip can be undone by copying that day's file
+over `finance.json`; open windows show it once they get focus. Settings ›
+Data file shows where the copies are. A copy that cannot be written is
+logged, and the change is still saved.
+
 If the file cannot be read, Finance shows an error and saves nothing until the
 file is fixed or moved away. When two Finance windows are open, a save from a
 window with old data is refused and that window reloads.

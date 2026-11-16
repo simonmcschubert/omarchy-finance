@@ -109,7 +109,8 @@ class ServerTest(unittest.TestCase):
             idle.close()
 
     def test_no_file_yet(self):
-        self.assertEqual(self.get_data(), {"revision": "none", "file": str(self.data_file), "data": None})
+        backups = str(self.data_file.parent / "backups")
+        self.assertEqual(self.get_data(), {"revision": "none", "file": str(self.data_file), "backups": backups, "data": None})
 
     def test_save_and_load(self):
         origin = {"Origin": f"http://127.0.0.1:{self.port}"}
@@ -125,6 +126,59 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.data_file.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(self.data_file.parent.stat().st_mode), 0o700)
         self.assertEqual(list(self.data_file.parent.iterdir()), [self.data_file], "no temporary files left")
+
+    def save(self, revision, data):
+        response, body = self.request("PUT", "/api/data", {"revision": revision, "data": data})
+        self.assertEqual(response.status, 200)
+        return json.loads(body)["revision"]
+
+    def on(self, day):
+        original = server.today
+        server.today = lambda: day
+        self.addCleanup(setattr, server, "today", original)
+
+    def test_keeps_the_file_from_before_the_first_save_of_each_day(self):
+        backups = self.data_file.parent / "backups"
+        first, second, third = ({**STORE, "settings": {**STORE["settings"], "withdrawalRate": rate}} for rate in (4, 3.5, 3))
+        self.on("2026-11-15")
+        revision = self.save("none", first)
+        self.assertFalse(backups.exists(), "nothing to keep before the first save ever")
+
+        revision = self.save(revision, second)
+        copy = backups / "finance-2026-11-15.json"
+        self.assertEqual(json.loads(copy.read_text())["settings"]["withdrawalRate"], 4)
+        self.assertEqual(stat.S_IMODE(copy.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(backups.stat().st_mode), 0o700)
+
+        # Later saves that day keep the copy from the morning.
+        revision = self.save(revision, third)
+        self.assertEqual(json.loads(copy.read_text())["settings"]["withdrawalRate"], 4)
+
+        self.on("2026-11-16")
+        self.save(revision, first)
+        self.assertEqual(json.loads((backups / "finance-2026-11-16.json").read_text())["settings"]["withdrawalRate"], 3)
+        self.assertEqual(sorted(p.name for p in backups.iterdir()), ["finance-2026-11-15.json", "finance-2026-11-16.json"])
+
+    def test_keeps_the_newest_backups_only(self):
+        backups = self.data_file.parent / "backups"
+        backups.mkdir(parents=True)
+        old = [f"finance-2026-10-{day:02}.json" for day in range(1, 32)]
+        for name in [*old, "other-2026-01-01.json", "notes.txt"]:
+            (backups / name).write_text("{}")
+        revision = self.save("none", STORE)
+        self.on("2026-11-16")
+        self.save(revision, {**STORE, "settings": {**STORE["settings"], "withdrawalRate": 3}})
+        kept = sorted(p.name for p in backups.glob("finance-*.json"))
+        self.assertEqual(kept, [*old[-29:], "finance-2026-11-16.json"])
+        self.assertTrue((backups / "other-2026-01-01.json").exists(), "another file's backups stay")
+        self.assertTrue((backups / "notes.txt").exists())
+
+    def test_a_failed_backup_does_not_stop_the_save(self):
+        revision = self.save("none", STORE)
+        (self.data_file.parent / "backups").write_text("not a directory")
+        changed = {**STORE, "settings": {**STORE["settings"], "withdrawalRate": 3}}
+        self.save(revision, changed)
+        self.assertEqual(self.get_data()["data"], changed)
 
     def test_stale_revision_is_a_conflict(self):
         _, data = self.request("PUT", "/api/data", {"revision": "none", "data": STORE})
