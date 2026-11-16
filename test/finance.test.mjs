@@ -988,6 +988,10 @@ test("returns: time-weighted months chained, and money-weighted", () => {
   assert.equal(all.three, null);
   assert.equal(all.since, "2024-10");
   assert.equal(F.moneyWeighted(steady.slice(0, 1)), null);
+  // Large moves over a short history have a rate too.
+  const month = (value) => [{ month: "2026-01", value: 1000, payIn: 0, oneOff: 0, invested: 1000 }, { month: "2026-02", value, payIn: 0, oneOff: 0, invested: 1000 }];
+  close(F.moneyWeighted(month(1300)), 1.3 ** 12 - 1, "30 % in a month");
+  close(F.moneyWeighted(month(500)), 0.5 ** 12 - 1, "half in a month");
 
   // Paying in before a fall weighs it more with money than with time.
   const timing = [

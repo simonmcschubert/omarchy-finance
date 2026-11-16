@@ -1299,7 +1299,8 @@ table.entry th {
   align-items: end;
 }
 
-/* Amounts hidden: what is typed into amount fields shows as dots too. */
-body.hide-amounts input[inputmode="decimal"] {
+/* Amounts hidden: what is typed into amount fields shows as dots too;
+   percentages and other numbers stay. */
+body.hide-amounts input.amount {
   -webkit-text-security: disc;
 }

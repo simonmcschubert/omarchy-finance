@@ -772,14 +772,16 @@ export function yearToDate(returns) {
 // The money-weighted return of a portfolioSeries, a year (an internal rate
 // of return): the rate at which what went in, from what was there in the
 // first month on, grows to the latest value. What went in during a month
-// counts from its middle. null with less than two months or no rate.
+// counts from its middle. Found as a monthly rate, from -99,99 % to
+// +1000 % a month, so short histories with large moves have one too. null
+// with less than two months or no rate.
 export function moneyWeighted(series) {
   if (series.length < 2) return null;
   const flows = [{ at: 0, amount: -series[0].value }];
   for (let i = 1; i < series.length; i++) flows.push({ at: i - 0.5, amount: -(series[i].invested - series[i - 1].invested) });
   flows.push({ at: series.length - 1, amount: series.at(-1).value });
-  const npv = (rate) => flows.reduce((total, f) => total + f.amount / (1 + rate) ** (f.at / 12), 0);
-  let low = -0.99;
+  const npv = (monthly) => flows.reduce((total, f) => total + f.amount / (1 + monthly) ** f.at, 0);
+  let low = -0.9999;
   let high = 10;
   if (Math.sign(npv(low)) === Math.sign(npv(high))) return null;
   for (let i = 0; i < 200; i++) {
@@ -787,7 +789,7 @@ export function moneyWeighted(series) {
     if (Math.sign(npv(mid)) === Math.sign(npv(low))) low = mid;
     else high = mid;
   }
-  return (low + high) / 2;
+  return (1 + (low + high) / 2) ** 12 - 1;
 }
 
 // What the portfolioSeries `series` returned: this year, the last 1, 3 and

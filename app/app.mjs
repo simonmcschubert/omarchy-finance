@@ -210,6 +210,8 @@ function toggleHidden() {
   } catch {
     // remembered until the window closes
   }
+  // A notice may name an amount: it goes.
+  state.notice = null;
   // The page is drawn again with every amount: what is typed into its forms
   // and not saved yet stays, and so does the focus.
   const forms = () => [...document.querySelectorAll("#main form")];
@@ -888,7 +890,7 @@ function pensionCard() {
   },
     h("label", null, "Rentenpunkte so far", h("input", { name: "points", inputmode: "decimal", autocomplete: "off", placeholder: "25,5", required: true })),
     h("label", null, "More points until you stop working", h("input", { name: "more", inputmode: "decimal", autocomplete: "off", value: "0" })),
-    h("label", null, "Value of a point", h("input", { name: "pointValue", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.pointValue) })),
+    h("label", null, "Value of a point", h("input", { name: "pointValue", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.pointValue) })),
     h("label", null, "Starts at age", h("input", { name: "startAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.from?.age ?? regularAge) })),
     h("label", null, "Health and care insurance (%)",
       h("input", { name: "deductions", inputmode: "decimal", autocomplete: "off", value: plain.format(g.pensionerRate + g.extraRate / 2 + g.careRateChildless) })),
@@ -943,7 +945,7 @@ function healthCard() {
       commit(F.saveItem(store, "expenses", item), `${existing ? "Updated" : "Added"} ${HEALTH_NAME}: ${money(item.amount)} a month from retirement until age ${r.untilAge}.`);
     },
   },
-    h("label", null, "Minimum base a month", h("input", { name: "base", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.minimumBase) })),
+    h("label", null, "Minimum base a month", h("input", { name: "base", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.minimumBase) })),
     h("label", null, "Zusatzbeitrag (%)", h("input", { name: "extra", inputmode: "decimal", autocomplete: "off", value: plain.format(g.extraRate) })),
     h("label", null, "Until age (the pension starts)",
       h("input", { name: "untilAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.until?.age ?? store.settings.retirementAge) })),
@@ -1040,7 +1042,7 @@ function viewItems(kind) {
       h("select", { name: "category", value: editing?.category ?? "" },
         h("option", { value: "" }, "No category"),
         categories.map((c) => h("option", { value: c }, c)))),
-    h("label", null, kind === "income" ? "Amount (net)" : "Amount", h("input", { name: "amount", inputmode: "decimal", autocomplete: "off", required: true, value: editing ? inputMoney(editing.amount) : "", placeholder: zero })),
+    h("label", null, kind === "income" ? "Amount (net)" : "Amount", h("input", { name: "amount", class: "amount", inputmode: "decimal", autocomplete: "off", required: true, value: editing ? inputMoney(editing.amount) : "", placeholder: zero })),
     h("label", null, "Paid every … months",
       h("input", { name: "everyMonths", type: "number", min: 1, max: 120, step: 1, required: true, list: "intervals", value: String(editing?.everyMonths ?? 1) })),
     h("datalist", { id: "intervals" }, INTERVALS.map(([v, label]) => h("option", { value: String(v), label }))),
@@ -1188,15 +1190,15 @@ function viewPortfolio() {
             const invested = isInvested(account);
             return h("tr", null,
               h("th", { scope: "row" }, account.name, invested ? null : h("div", { class: "sub" }, kindLabel(account.kind))),
-              h("td", null, h("input", { name: `value-${account.id}`, inputmode: "decimal", autocomplete: "off",
+              h("td", null, h("input", { name: `value-${account.id}`, class: "amount", inputmode: "decimal", autocomplete: "off",
                 "aria-label": `${account.name} ${account.kind === "debt" ? "still owed" : "value"}`,
                 value: record ? inputMoney(record.value) : "", placeholder: before ? `last: ${hidden() ? "•••" : inputMoney(before.value)}` : zero })),
               invested
-                ? h("td", null, h("input", { name: `payin-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} pay-in`,
+                ? h("td", null, h("input", { name: `payin-${account.id}`, class: "amount", inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} pay-in`,
                     value: record && record.payIn !== 0 ? inputMoney(record.payIn) : "", placeholder: zero }))
                 : h("td", { class: "muted" }, "–"),
               invested
-                ? h("td", null, h("input", { name: `oneoff-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} one-off`,
+                ? h("td", null, h("input", { name: `oneoff-${account.id}`, class: "amount", inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} one-off`,
                     value: record && record.oneOff !== 0 ? inputMoney(record.oneOff) : "", placeholder: zero }))
                 : h("td", { class: "muted" }, "–"));
           })))),
@@ -1380,9 +1382,9 @@ function viewForecast() {
         : h("form", { class: "forecast-controls", onsubmit: read, onchange: read },
             h("div", { class: "forecast-form" },
               h("label", null, "Invested per month",
-                h("input", { id: "forecast-contribution", name: "contribution", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.contribution) })),
+                h("input", { id: "forecast-contribution", name: "contribution", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.contribution) })),
               h("label", null, "After Coast FI, per month",
-                h("input", { id: "forecast-coast", name: "coastContribution", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.coastContribution) })),
+                h("input", { id: "forecast-coast", name: "coastContribution", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.coastContribution) })),
               h("button", { type: "submit" }, "Show")),
             growthField),
       retired ? null : h("p", { class: "muted" },
@@ -1411,7 +1413,7 @@ function eventsCard(start) {
   } },
     h("label", null, "Name", h("input", { id: "event-name", name: "name", autocomplete: "off", required: true, value: editing?.name ?? "", placeholder: "Inheritance" })),
     h("label", null, "Month", h("input", { name: "month", type: "month", required: true, value: editing?.month ?? "" })),
-    h("label", null, "Amount (negative: taken out)", h("input", { name: "amount", inputmode: "decimal", autocomplete: "off", required: true,
+    h("label", null, "Amount (negative: taken out)", h("input", { name: "amount", class: "amount", inputmode: "decimal", autocomplete: "off", required: true,
       value: editing ? inputMoney(editing.amount) : "", placeholder: inputMoney(-2000000) })),
     h("div", { class: "form-actions" },
       h("button", { type: "submit", class: "primary" }, editing ? "Save" : "Add"),
