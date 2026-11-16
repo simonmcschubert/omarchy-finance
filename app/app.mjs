@@ -108,6 +108,17 @@ const KINDS = {
   income: { title: "Income", one: "income", noun: "Net income" },
 };
 
+// What an account holds, in words: in the order of F.ACCOUNT_KINDS.
+const ACCOUNT_KIND_LABELS = {
+  invested: "Invested (portfolio)",
+  cash: "Cash",
+  property: "Property",
+  pension: "Pension assets",
+  debt: "Debt",
+};
+const kindLabel = (kind) => ACCOUNT_KIND_LABELS[kind] ?? kind;
+const isInvested = (account) => account.kind === "invested";
+
 // In this order on Ctrl+1 to Ctrl+6.
 const VIEWS = [
   ["dashboard", "Dashboard"],
@@ -494,7 +505,7 @@ function viewDashboard() {
           h("div", { class: "bar" }, fill));
       })));
   };
-  const columns = [incomeCard(m), breakdown("expenses", m.baseExpenses)].filter(Boolean);
+  const columns = [incomeCard(m), netWorthCard(m), breakdown("expenses", m.baseExpenses)].filter(Boolean);
   if (columns.length) parts.push(h("div", { class: "columns" }, columns));
   return h("div", null, parts);
 }
@@ -527,6 +538,35 @@ function incomeCard(m) {
   });
   return card("Where the income goes", bar, h("ul", { class: "split-list" }, rows),
     split.over > 0 ? h("p", { class: "muted" }, `Expenses and pay-ins are ${money(split.over)} a month more than the income.`) : null);
+}
+
+// Whether an account has its first value in `month`.
+function firstEntered(month) {
+  const first = new Map();
+  for (const r of state.store.records) if (!first.has(r.account) || r.month < first.get(r.account)) first.set(r.account, r.month);
+  return [...first.values()].includes(month);
+}
+
+// Net worth: every kind of account, debts taken off, with each kind's share.
+// Only with other accounts than invested ones: otherwise it is the portfolio.
+function netWorthCard(m) {
+  if (!state.store.accounts.some((a) => !isInvested(a)) || m.netWorth.length === 0) return null;
+  const [before, now] = m.netWorth.length === 2 ? m.netWorth : [null, m.netWorth[0]];
+  const largest = Math.max(...F.ACCOUNT_KINDS.map((kind) => now.kinds[kind]));
+  const rows = F.ACCOUNT_KINDS.filter((kind) => now.kinds[kind] !== 0 || state.store.accounts.some((a) => a.kind === kind)).map((kind) => {
+    const fill = h("div", { class: `bar-fill${kind === "debt" ? " debt" : ""}` });
+    fill.style.width = `${largest > 0 ? (now.kinds[kind] / largest) * 100 : 0}%`;
+    return h("li", null,
+      h("div", { class: "bar-text" }, h("span", null, kindLabel(kind)), h("span", { class: "num" }, money(kind === "debt" ? -now.kinds[kind] : now.kinds[kind]))),
+      h("div", { class: "bar" }, fill));
+  });
+  return card("Net worth",
+    h("div", { class: "big num" }, money(now.total)),
+    // An account entered for the first time is no change since the month before.
+    h("p", { class: "muted" }, before && !firstEntered(now.month)
+      ? `${signedMoney(now.total - before.total)} since ${monthLabel(before.month)}, as of ${monthLabel(now.month)}`
+      : `as of ${monthLabel(now.month)}`),
+    h("ul", { class: "bars" }, rows));
 }
 
 // No active expenses, no FI number: the chart then has no goal line and no
@@ -1013,21 +1053,28 @@ function viewPortfolio() {
         }
       } })),
     store.accounts.length === 0
-      ? h("p", { class: "muted" }, "Add your broker accounts in ", h("a", { href: "#settings" }, "Settings"), " first, or import past months from a CSV file there.")
+      ? h("p", { class: "muted" }, "Add your accounts in ", h("a", { href: "#settings" }, "Settings"), " first, or import past months from a CSV file there.")
       : h("div", { class: "table-wrap" }, h("table", { class: "entry" },
           h("thead", null, h("tr", null, h("th", null, "Account"), h("th", null, "Value at month end"), h("th", null, "Paid in this month"),
             h("th", { title: "An inheritance in, a house deposit out: counts as paid in, but not for the average pay-in" }, "One-off this month"))),
           h("tbody", null, store.accounts.map((account) => {
             const record = monthRecords.get(account.id);
             const before = lastValueBefore(store, account.id, month);
+            // Pay-ins count for the portfolio only: other accounts have a value.
+            const invested = isInvested(account);
             return h("tr", null,
-              h("th", { scope: "row" }, account.name),
-              h("td", null, h("input", { name: `value-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} value`,
+              h("th", { scope: "row" }, account.name, invested ? null : h("div", { class: "sub" }, kindLabel(account.kind))),
+              h("td", null, h("input", { name: `value-${account.id}`, inputmode: "decimal", autocomplete: "off",
+                "aria-label": `${account.name} ${account.kind === "debt" ? "still owed" : "value"}`,
                 value: record ? inputMoney(record.value) : "", placeholder: before ? `last: ${inputMoney(before.value)}` : zero })),
-              h("td", null, h("input", { name: `payin-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} pay-in`,
-                value: record && record.payIn !== 0 ? inputMoney(record.payIn) : "", placeholder: zero })),
-              h("td", null, h("input", { name: `oneoff-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} one-off`,
-                value: record && record.oneOff !== 0 ? inputMoney(record.oneOff) : "", placeholder: zero })));
+              invested
+                ? h("td", null, h("input", { name: `payin-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} pay-in`,
+                    value: record && record.payIn !== 0 ? inputMoney(record.payIn) : "", placeholder: zero }))
+                : h("td", { class: "muted" }, "–"),
+              invested
+                ? h("td", null, h("input", { name: `oneoff-${account.id}`, inputmode: "decimal", autocomplete: "off", "aria-label": `${account.name} one-off`,
+                    value: record && record.oneOff !== 0 ? inputMoney(record.oneOff) : "", placeholder: zero }))
+                : h("td", { class: "muted" }, "–"));
           })))),
     store.accounts.length
       ? h("div", { class: "form-actions" },
@@ -1039,30 +1086,42 @@ function viewPortfolio() {
       : null,
   );
 
-  // ---- history
-  const series = F.portfolioSeries(store);
+  // ---- history: every month with a value of any account; the portfolio
+  // of the invested ones, and with other accounts the net worth.
+  const series = new Map(F.portfolioSeries(store).map((m) => [m.month, m]));
+  const firstInvested = series.keys().next().value;
+  const worth = F.netWorthSeries(store);
+  const others = store.accounts.some((a) => !isInvested(a));
   const byMonth = new Map();
   for (const r of store.records) {
     if (!byMonth.has(r.month)) byMonth.set(r.month, new Map());
     byMonth.get(r.month).set(r.account, r);
   }
-  const history = series.length === 0 ? null : card("History",
+  const none = () => h("span", { class: "muted" }, "–");
+  const history = worth.length === 0 ? null : card("History",
     h("p", { class: "muted" }, "An account without a value in a month counts with its last value. Click a month to change it."),
     h("div", { class: "table-wrap" }, h("table", { class: "history" },
-      h("thead", null, h("tr", null, h("th", null, "Month"), store.accounts.map((a) => h("th", { class: "num" }, a.name)), h("th", { class: "num" }, "Total"), h("th", { class: "num" }, "Paid in"))),
-      h("tbody", null, [...series].reverse().map((m) => {
+      h("thead", null, h("tr", null, h("th", null, "Month"),
+        store.accounts.map((a) => h("th", { class: "num" }, a.name, isInvested(a) ? null : h("div", { class: "sub" }, kindLabel(a.kind)))),
+        h("th", { class: "num" }, others ? "Portfolio" : "Total"), h("th", { class: "num" }, "Paid in"), others ? h("th", { class: "num" }, "Net worth") : null)),
+      h("tbody", null, [...worth].reverse().map((w) => {
+        // Invested accounts keep their last values through months with
+        // values of other accounts only, as in the net worth.
+        const m = series.get(w.month) ?? { month: w.month, payIn: 0, oneOff: 0 };
+        const portfolio = firstInvested !== undefined && w.month >= firstInvested ? w.kinds.invested : null;
         const records = byMonth.get(m.month);
         return h("tr", { class: m.month === month ? "editing" : null },
           h("th", { scope: "row" }, h("button", { type: "button", class: "link", onclick: () => { state.month = m.month; render(); scrollTo(0, 0); } }, monthLabel(m.month))),
           store.accounts.map((a) => {
             const r = records?.get(a.id);
-            return h("td", { class: "num" }, r ? money(r.value) : h("span", { class: "muted" }, "–"),
+            return h("td", { class: "num" }, r ? (a.kind === "debt" ? money(-r.value) : money(r.value)) : h("span", { class: "muted" }, "–"),
               r && r.payIn !== 0 ? h("div", { class: "sub" }, signedMoney(r.payIn)) : null,
               r && r.oneOff !== 0 ? h("div", { class: "sub" }, `${signedMoney(r.oneOff)} one-off`) : null);
           }),
-          h("td", { class: "num strong" }, money(m.value)),
+          h("td", { class: "num strong" }, portfolio === null ? none() : money(portfolio)),
           h("td", { class: "num" }, m.payIn !== 0 ? signedMoney(m.payIn) : h("span", { class: "muted" }, "–"),
-            m.oneOff !== 0 ? h("div", { class: "sub" }, `${signedMoney(m.oneOff)} one-off`) : null));
+            m.oneOff !== 0 ? h("div", { class: "sub" }, `${signedMoney(m.oneOff)} one-off`) : null),
+          others ? h("td", { class: "num strong" }, money(w.total)) : null);
       })))));
 
   return h("div", null,
@@ -1070,7 +1129,8 @@ function viewPortfolio() {
       h("p", { class: "muted" }, "Paid in: your regular pay-ins, such as savings plans, negative for withdrawals; their average of the last 12 months is what Time to FI and the forecast go on with. ",
         "One-off: a lump sum in or out, such as an inheritance or a house deposit; it counts as paid in, but not for that average. ",
         "Planned one-offs go on the ", h("a", { href: "#forecast" }, "Forecast"), " page."),
-      h("p", { class: "muted" }, "Broker accounts, CSV import and export are in ", h("a", { href: "#settings" }, "Settings"), ".")),
+      h("p", { class: "muted" }, "For cash, property, pension assets and debts, enter only what they are worth, or still owed, at month end. ",
+        "Accounts, CSV import and export are in ", h("a", { href: "#settings" }, "Settings"), ".")),
     history);
 }
 
@@ -1376,7 +1436,10 @@ function viewSettings() {
     card("Categories",
       h("p", { class: "muted" }, "Expenses and income each have their own. Renaming a category renames it everywhere; deleting one leaves what had it without a category."),
       h("div", { class: "columns" }, F.KINDS.map((kind) => h("div", null, h("h3", null, KINDS[kind].title), categoryList(store, kind))))),
-    card("Broker accounts", accountList(store)),
+    card("Accounts",
+      h("p", { class: "muted" }, "Invested accounts (brokers, ETF savings plans) are the portfolio: the FI number, Time to FI and the forecast count them alone. ",
+        "Cash (Tagesgeld, the emergency fund), property, pension assets (Riester, Rürup, company pension: locked until retirement) and debts (what is still owed, such as a mortgage) count for the net worth."),
+      accountList(store)),
     importCard(store),
     exportCard(store),
     card("Data file", h("p", null, "Everything is saved in one file on this computer:"), h("p", null, h("code", null, state.file)),
@@ -1451,15 +1514,17 @@ function settingsForm(store) {
 
 // A list of names, each with Rename and Delete, and a field to add one.
 // `list` tells this list apart in state.renaming. rows: [{ key, name,
-// detail }]; save(key or null to add, name) returns { ok, store, error };
-// remove(row) asks and deletes.
-function nameList({ list, rows, placeholder, addLabel, save, remove }) {
+// detail }]; save(key or null to add, name, form data) returns { ok,
+// store, error }; remove(row) asks and deletes. control(row) and
+// addControl(), when given, add a field to each row and to the add form.
+function nameList({ list, rows, placeholder, addLabel, save, remove, control, addControl }) {
   const renaming = state.renaming?.list === list ? state.renaming.key : null;
   const items = rows.map((row) => {
     if (row.key === renaming) {
       return h("li", null, h("form", { class: "inline", onsubmit: (event) => {
         event.preventDefault();
-        const result = save(row.key, new FormData(event.currentTarget).get("name"));
+        const data = new FormData(event.currentTarget);
+        const result = save(row.key, data.get("name"), data);
         if (!result.ok) return showError(event.currentTarget, `${result.error}.`);
         state.renaming = null;
         commit(result.store, "Renamed.");
@@ -1469,7 +1534,7 @@ function nameList({ list, rows, placeholder, addLabel, save, remove }) {
         h("button", { type: "button", onclick: () => { state.renaming = null; render(); } }, "Cancel")));
     }
     return h("li", null,
-      h("span", { class: "grow" }, row.name), h("span", { class: "muted" }, row.detail),
+      h("span", { class: "grow" }, row.name), control ? control(row) : null, h("span", { class: "muted" }, row.detail),
       h("button", { type: "button", class: "link", "aria-label": `Rename ${row.name}`,
         onclick: () => { state.renaming = { list, key: row.key }; state.focus = `#rename-${list}`; render(); } }, "Rename"),
       h("button", { type: "button", class: "link danger", "aria-label": `Delete ${row.name}`, onclick: () => remove(row) }, "Delete"));
@@ -1478,27 +1543,35 @@ function nameList({ list, rows, placeholder, addLabel, save, remove }) {
     items.length ? h("ul", { class: "name-list" }, items) : null,
     h("form", { class: "inline", onsubmit: (event) => {
       event.preventDefault();
-      const name = String(new FormData(event.currentTarget).get("name")).trim();
-      const result = save(null, name);
+      const data = new FormData(event.currentTarget);
+      const name = String(data.get("name")).trim();
+      const result = save(null, name, data);
       if (!result.ok) return showError(event.currentTarget, `${result.error}.`);
       state.focus = `#new-${list}`;
       commit(result.store, `Added ${name}.`);
     } },
       h("input", { id: `new-${list}`, name: "name", placeholder, "aria-label": placeholder, autocomplete: "off" }),
+      addControl ? addControl() : null,
       h("button", { type: "submit" }, addLabel)),
   ];
 }
 
 function accountList(store) {
+  const kindSelect = (props) => h("select", props, F.ACCOUNT_KINDS.map((kind) => h("option", { value: kind }, kindLabel(kind))));
   return nameList({
     list: "accounts",
     rows: store.accounts.map((account) => {
       const count = store.records.filter((r) => r.account === account.id).length;
-      return { key: account.id, name: account.name, count, detail: count === 1 ? "1 month" : `${count} months` };
+      return { key: account.id, name: account.name, kind: account.kind, count, detail: count === 1 ? "1 month" : `${count} months` };
     }),
-    placeholder: "Broker account, e.g. Trade Republic",
+    placeholder: "Account, e.g. Trade Republic",
     addLabel: "Add account",
-    save: (id, name) => F.saveAccount(store, id, name),
+    control: (row) => kindSelect({ value: row.kind, "aria-label": `What ${row.name} holds`, onchange: (event) => {
+      const result = F.saveAccount(store, row.key, row.name, event.target.value);
+      if (result.ok) commit(result.store, `${row.name}: ${kindLabel(event.target.value)}.`);
+    } }),
+    addControl: () => kindSelect({ name: "kind", value: "invested", "aria-label": "What it holds" }),
+    save: (id, name, data) => F.saveAccount(store, id, name, data?.get("kind") ?? undefined),
     remove: ({ key, name, count }) => {
       if (!confirm(count ? `Delete ${name} and its ${count} monthly values?` : `Delete ${name}?`)) return;
       commit(F.deleteAccount(store, key), `Deleted ${name}.`);

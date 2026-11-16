@@ -4,9 +4,14 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 10;
+export const VERSION = 11;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
+
+// What an account holds. Only invested accounts are the portfolio: the FI
+// number, Time to FI and the forecast count them alone. Net worth counts
+// them all, debts (what is still owed) taken off.
+export const ACCOUNT_KINDS = Object.freeze(["invested", "cash", "property", "pension", "debt"]);
 
 // How numbers are shown, named by how they write a million.
 export const NUMBER_FORMATS = Object.freeze(["1.000.000,00", "1,000,000.00"]);
@@ -53,7 +58,7 @@ const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "
 const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths", "from", "until"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active", "essential"];
-const ACCOUNT_KEYS = ["id", "name"];
+const ACCOUNT_KEYS = ["id", "name", "kind"];
 const RECORD_KEYS = ["month", "account", "value", "payIn", "oneOff"];
 const EVENT_KEYS = ["id", "name", "month", "amount"];
 const MAX_CENTS = 1e13; // 100 billion; anything bigger is a typo
@@ -200,6 +205,13 @@ function upgradeFromVersion9(value) {
   return next;
 }
 
+// Version 10 had broker accounts only: every account is invested.
+function upgradeFromVersion10(value) {
+  const next = { ...value, version: 11 };
+  if (Array.isArray(value.accounts)) next.accounts = value.accounts.map((account) => (isObject(account) ? { ...account, kind: "invested" } : account));
+  return next;
+}
+
 // A start or end of an expense or income: null (always), { at: "retirement" },
 // { age: whole years } (January of the year of that age) or { month:
 // "YYYY-MM" } (a start's first month, an end's last month).
@@ -228,6 +240,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 7) value = upgradeFromVersion7(value);
     if (isObject(value) && value.version === 8) value = upgradeFromVersion8(value);
     if (isObject(value) && value.version === 9) value = upgradeFromVersion9(value);
+    if (isObject(value) && value.version === 10) value = upgradeFromVersion10(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -305,6 +318,7 @@ export function parseStore(value) {
       if (!isText(account.name) || account.name === "") throw new Error(`${where} has no name`);
       const key = account.name.toLowerCase();
       if (accountNames.has(key)) throw new Error(`${where} repeats the name "${account.name}"`);
+      if (!ACCOUNT_KINDS.includes(account.kind)) throw new Error(`${where} kind must be ${ACCOUNT_KINDS.join(", ")}`);
       accountIds.add(account.id);
       accountNames.add(key);
     });
@@ -562,10 +576,13 @@ function sum(values) {
 // the accounts: each account's value in its first month (what it held when
 // tracking began), then its pay-ins and one-offs. value - invested is the
 // gain since tracking began.
+// Only invested accounts count; see netWorthSeries for all of them.
 export function portfolioSeries(store) {
-  if (store.records.length === 0) return [];
+  const portfolio = new Set(store.accounts.filter((a) => (a.kind ?? "invested") === "invested").map((a) => a.id));
+  const records = store.records.filter((record) => portfolio.has(record.account));
+  if (records.length === 0) return [];
   const byMonth = new Map();
-  for (const record of store.records) {
+  for (const record of records) {
     const index = monthIndex(record.month);
     if (!byMonth.has(index)) byMonth.set(index, []);
     byMonth.get(index).push(record);
@@ -587,6 +604,31 @@ export function portfolioSeries(store) {
       oneOff += record.oneOff ?? 0;
     }
     series.push({ month: monthFromIndex(index), value: sum([...latest.values()]), payIn, oneOff, invested });
+  }
+  return series;
+}
+
+// Net worth by month, from the first to the last month with a value of any
+// account: each account with its last value, as in portfolioSeries.
+// Returns [{ month, total, kinds: { invested, cash, property, pension, debt
+// } }], total being all of them less the debts.
+export function netWorthSeries(store) {
+  if (store.records.length === 0) return [];
+  const kindOf = new Map(store.accounts.map((a) => [a.id, a.kind ?? "invested"]));
+  const byMonth = new Map();
+  for (const record of store.records) {
+    const index = monthIndex(record.month);
+    if (!byMonth.has(index)) byMonth.set(index, []);
+    byMonth.get(index).push(record);
+  }
+  const indexes = [...byMonth.keys()];
+  const latest = new Map();
+  const series = [];
+  for (let index = Math.min(...indexes); index <= Math.max(...indexes); index++) {
+    for (const record of byMonth.get(index) ?? []) latest.set(record.account, record.value);
+    const kinds = Object.fromEntries(ACCOUNT_KINDS.map((kind) => [kind, 0]));
+    for (const [account, value] of latest) kinds[kindOf.get(account)] += value;
+    series.push({ month: monthFromIndex(index), total: kinds.invested + kinds.cash + kinds.property + kinds.pension - kinds.debt, kinds });
   }
   return series;
 }
@@ -881,6 +923,8 @@ export function metrics(store, now = currentMonth()) {
     goal: goal(),
     oneOffs,
     series,
+    // Net worth in the latest month with any value, and the month before.
+    netWorth: netWorthSeries(store).slice(-2),
     latestMonth: last ? last.month : null,
     portfolio: last ? last.value : null,
     payIn,
@@ -1115,15 +1159,22 @@ export function findAccount(store, name) {
 }
 
 // Returns { ok: true, store } or { ok: false, error }.
-export function saveAccount(store, id, name) {
+// Adds an account (id null), of `kind` (invested when left out), or renames
+// one; with a kind, changes its kind too.
+export function saveAccount(store, id, name, kind) {
   const clean = name.trim();
   if (clean === "") return { ok: false, error: "Enter a name" };
+  if (kind !== undefined && !ACCOUNT_KINDS.includes(kind)) return { ok: false, error: "Choose what the account holds" };
   const other = findAccount(store, clean);
   if (other && other.id !== id) return { ok: false, error: `"${clean}" already exists` };
   const next = structuredClone(store);
   const account = next.accounts.find((a) => a.id === id);
-  if (account) account.name = clean;
-  else next.accounts.push({ id: id ?? newId(), name: clean });
+  if (account) {
+    account.name = clean;
+    if (kind !== undefined) account.kind = kind;
+  } else {
+    next.accounts.push({ id: id ?? newId(), name: clean, kind: kind ?? "invested" });
+  }
   return { ok: true, store: next };
 }
 
