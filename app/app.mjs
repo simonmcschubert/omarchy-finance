@@ -883,6 +883,7 @@ function viewForecast() {
           : m.payIn.average < 0 ? `Your average of ${months} is a withdrawal of ${money(-m.payIn.average)} a month, so paid in per month starts at 0. `
           : `Paid in per month starts as your average of ${months}, ${money(average)}. `,
         "Coast FI is when the smaller amount is enough to reach the FI number by retirement; with 0, the portfolio gets there on its own.")),
+    forecastChartCard(),
     h("div", { id: "forecast-results", class: "stack" }, forecastResults()));
 }
 
@@ -904,14 +905,43 @@ function readForecastForm(form, average) {
 }
 
 // Redraws the results only, so the form keeps what is typed and its focus.
-function updateForecast(focus) {
+// The chart card stays, and its growth buttons change in place: a click on
+// one that starts while a field's change redraws the results still lands.
+function updateForecast() {
   const box = document.getElementById("forecast-results");
   if (!box) return render();
   box.replaceChildren(...forecastResults());
+  const rates = F.growthRates(state.store.settings.expectedReturn);
+  const growth = state.forecast.growth;
+  document.getElementById("forecast-title").textContent = `At ${percentUnit.format(rates[growth])} growth a year`;
+  for (const button of document.querySelectorAll("[data-growth]")) {
+    button.classList.toggle("active", button.dataset.growth === growth);
+    button.setAttribute("aria-pressed", String(button.dataset.growth === growth));
+  }
   drawForecast();
-  if (focus) box.querySelector(focus)?.focus();
 }
 
+function forecastChartCard() {
+  const { birthYear, retirementAge, expectedReturn } = state.store.settings;
+  const rates = F.growthRates(expectedReturn);
+  const growth = state.forecast.growth;
+  const retired = F.monthIndex(forecastBase(state.store).params.start) >= (birthYear + retirementAge) * 12;
+  const growthButton = (g) =>
+    h("button", { type: "button", class: g === growth ? "seg active" : "seg", "aria-pressed": String(g === growth), "data-growth": g,
+      onclick: () => { state.forecast.growth = g; updateForecast(); } }, percentUnit.format(rates[g]));
+  const key = (kind, label) => h("span", null, h("span", { class: `key ${kind}` }), label);
+  return h("section", { class: "card" },
+    h("div", { class: "card-head" },
+      h("h2", { id: "forecast-title" }, `At ${percentUnit.format(rates[growth])} growth a year`),
+      h("div", { class: "legend" },
+        F.PLANS.map((plan) => key(`plan-${plan}`, PLAN_INFO[plan].label)),
+        key("goal", "FI number"),
+        retired ? null : key("target", "Coast FI target")),
+      h("div", { class: "segmented", role: "group", "aria-label": "Growth a year" }, F.GROWTHS.map(growthButton))),
+    h("div", { id: "forecast-chart", class: "chart-box" }));
+}
+
+// The table and notes, for the chosen amounts.
 function forecastResults() {
   const store = state.store;
   const { birthYear, retirementAge } = store.settings;
@@ -921,20 +951,6 @@ function forecastResults() {
   const growth = state.forecast.growth;
   const retired = F.monthIndex(params.start) >= (birthYear + retirementAge) * 12;
   const at = (month) => `${F.ageIn(month, birthYear)} (${month.slice(0, 4)})`;
-
-  const growthButton = (g) =>
-    h("button", { type: "button", class: g === growth ? "seg active" : "seg", "aria-pressed": String(g === growth), "data-growth": g,
-      onclick: () => { state.forecast.growth = g; updateForecast(`[data-growth="${g}"]`); } }, percentUnit.format(rates[g]));
-  const key = (kind, label) => h("span", null, h("span", { class: `key ${kind}` }), label);
-  const chartCard = h("section", { class: "card" },
-    h("div", { class: "card-head" },
-      h("h2", null, `At ${percentUnit.format(rates[growth])} growth a year`),
-      h("div", { class: "legend" },
-        F.PLANS.map((plan) => key(`plan-${plan}`, PLAN_INFO[plan].label)),
-        key("goal", "FI number"),
-        retired ? null : key("target", "Coast FI target")),
-      h("div", { class: "segmented", role: "group", "aria-label": "Growth a year" }, F.GROWTHS.map(growthButton))),
-    h("div", { id: "forecast-chart", class: "chart-box" }));
 
   const cell = (plan, g) => {
     const p = results.get(g).plans[plan];
@@ -970,7 +986,7 @@ function forecastResults() {
       h("li", null, "Real markets do not grow the same every year, and bad years right after you start living off the portfolio hurt most."),
       h("li", null, "Taxes and the state pension are left out.")));
 
-  return [chartCard, tableCard, notes];
+  return [tableCard, notes];
 }
 
 function drawForecast() {
