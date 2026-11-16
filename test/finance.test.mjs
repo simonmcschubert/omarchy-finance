@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import * as F from "../app/finance.mjs";
 
 const EUR = 100; // cents
+const monthly = (growth) => (1 + growth / 100) ** (1 / 12) - 1;
+const close = (actual, expected, what) => assert.ok(Math.abs(actual - expected) < 1e-6 * Math.max(1, Math.abs(expected)), `${what}: ${actual} is not ${expected}`);
 
 function store(parts = {}) {
   return { ...F.emptyStore(), ...parts };
@@ -289,7 +291,7 @@ test("fiProjection: growth at the expected return plus the average pay-in", () =
   assert.equal(flat.reach.mid, "2027-10");
   assert.equal(flat.reach.high, "2027-10", "in the 12th month at 2 % too, a bit above 1,200");
   assert.equal(flat.reach.low, "2027-11");
-  assert.deepEqual(flat.points[0], { month: "2026-11", low: 100, mid: 100, high: flat.points[0].high });
+  assert.deepEqual(flat.points[0], { month: "2026-11", low: 100, mid: 100, high: flat.points[0].high, goal: 1200 });
 
   // The mid projection counts as Time to FI does.
   const start = 50000 * EUR;
@@ -305,6 +307,22 @@ test("fiProjection: growth at the expected return plus the average pay-in", () =
   assert.equal(p.points.length, Math.ceil(shown * 1.1), "until a little after the low projection gets there");
   assert.equal(p.points.at(-1).month, F.addMonths("2026-10", p.points.length));
   for (const point of p.points) assert.ok(point.low <= point.mid && point.mid <= point.high);
+});
+
+test("fiProjection: the FI number rises by the inflation", () => {
+  const start = 50000 * EUR;
+  const payIn = 1250 * EUR;
+  const goal = 675000 * EUR;
+  const p = F.fiProjection({ month: "2026-10", start, payIn, goal, rate: 8, inflation: 3 });
+  assert.deepEqual(p.rates, { low: 6, mid: 8, high: 10 });
+  close(p.points[11].goal, goal * 1.03, "a year on");
+  for (const k of ["low", "mid", "high"]) {
+    assert.equal(p.reach[k], F.addMonths("2026-10", F.projectToGoal(start, payIn, p.rates[k], goal, 3).length), k);
+  }
+  const n = F.monthIndex(p.reach.mid) - F.monthIndex("2026-10");
+  assert.ok(p.points[n - 1].mid >= p.points[n - 1].goal && p.points[n - 2].mid < p.points[n - 2].goal);
+  // Later than without inflation, with the same pay-ins.
+  assert.ok(p.reach.mid > F.fiProjection({ month: "2026-10", start, payIn, goal, rate: 8 }).reach.mid);
 });
 
 test("fiProjection: no goal, at the goal already, out of reach, close by", () => {
@@ -368,6 +386,9 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
     [{ ...roundTrip, settings: { withdrawalRate: 4, bufferPercent: 10, currency: "EUR", numberFormat: "1.000.000,00" } }, /missing "expectedReturn"/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, expectedReturn: -1 } }, /expectedReturn must be between 0 and 100/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, expectedReturn: "5" } }, /expectedReturn must be between 0 and 100/],
+    [{ ...roundTrip, settings: (({ inflation, ...rest }) => rest)(roundTrip.settings) }, /missing "inflation"/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, inflation: -1 } }, /inflation must be between 0 and 100/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, inflation: "3" } }, /inflation must be between 0 and 100/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, birthYear: "1990" } }, /birthYear must be null or a year/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, birthYear: 1899 } }, /birthYear must be null or a year from 1900 to 2100/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, retirementAge: 66.5 } }, /retirementAge must be a whole number from 30 to 80/],
@@ -493,7 +514,7 @@ test("a version 1 file is upgraded: euros, and the categories its items use", ()
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 5, birthYear: null, retirementAge: 67 });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67 });
   assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: ["Work"] });
   assert.deepEqual(s.expenses.map((e) => e.category), ["Housing", "Housing", "", "Car"]);
   assert.deepEqual(s.expenses.map((e) => e.active), [true, true, true, true], "every expense was active");
@@ -523,7 +544,7 @@ test("a version 2 file is upgraded: every expense is active", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 5, birthYear: null, retirementAge: 67 });
+  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67 });
   assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true })));
   assert.deepEqual(s.income, v2.income);
   assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records"]);
@@ -548,7 +569,7 @@ test("a version 3 file is upgraded: the default number format", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 5, birthYear: null, retirementAge: 67 });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67 });
   assert.deepEqual({ ...s, version: 3, settings: v3.settings }, v3, "nothing else changes");
   assert.equal("numberFormat" in v3.settings, false, "the parsed value is left alone");
 
@@ -570,12 +591,28 @@ test("a version 4 file is upgraded: the default expected return", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 5, birthYear: null, retirementAge: 67 });
+  // 5 % after inflation then, so 8 % before 3 % inflation now.
+  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67 });
   assert.deepEqual({ ...s, version: 4, settings: v4.settings }, v4, "nothing else changes");
   assert.equal("expectedReturn" in v4.settings, false, "the parsed value is left alone");
 
   assert.match(F.parseStore({ ...v4, extra: 1 }).error, /unknown field "extra"/);
   assert.match(F.parseStore({ ...v4, settings: { ...v4.settings, expectedReturn: 5 } }).error, /unknown field "expectedReturn"/);
+});
+
+test("projectToGoal: the goal rises by the inflation", () => {
+  // 1,000 at 12 % a year is 1,078 after 8 months and 1,089 after 9.
+  assert.deepEqual(F.projectToGoal(250, 100, 0, 1000, 12), [350, 450, 550, 650, 750, 850, 950, 1050, 1150]);
+  assert.equal(F.projectToGoal(0, 100, 0, 1000, 200), null, "prices rise faster than the pay-ins");
+  close(F.inflated(1000, 12, 12), 1120, "a year");
+  close(F.inflated(1000, 3, 0), 1000, "now");
+
+  // With nothing paid in, the FI number is reached in the same month as
+  // when today's FI number is reached at the return after inflation.
+  const real = (1.08 / 1.03 - 1) * 100;
+  const months = F.projectToGoal(100000 * EUR, 0, 8, 675000 * EUR, 3).length;
+  assert.equal(months, F.projectToGoal(100000 * EUR, 0, real, 675000 * EUR).length);
+  assert.ok(months > 39 * 12 && months < 41 * 12, `${months} months`);
 });
 
 test("projectToGoal: monthly values until the goal", () => {
@@ -594,7 +631,7 @@ test("projectToGoal: monthly values until the goal", () => {
 
 test("metrics: time to FI from the latest month with the average pay-in", () => {
   const s = store({
-    settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, expectedReturn: 0 },
+    settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, expectedReturn: 0, inflation: 0 },
     expenses: [{ id: "e", name: "Rent", category: "", amount: 100 * EUR, everyMonths: 1, active: true }],
     accounts: [{ id: "a", name: "A" }],
     records: [
@@ -614,6 +651,12 @@ test("metrics: time to FI from the latest month with the average pay-in", () => 
   const grown = F.metrics(F.saveSettings(s, { expectedReturn: 5 }));
   assert.equal(grown.fiMonths, 2, "the return makes it no later");
   assert.ok(grown.projection[0].value > 29000 * EUR);
+
+  // At 12 % inflation the FI number is 30,000 × 1.12^(1/6) ≈ 30,573 two
+  // months on, so it takes a third month.
+  const pricier = F.metrics(F.saveSettings(s, { inflation: 12 }));
+  assert.equal(pricier.fiNumber, 30000 * EUR, "today's FI number stays");
+  assert.equal(pricier.fiMonths, 3);
 
   const reached = F.metrics(F.saveMonth(s, "2026-11", [{ account: "a", value: 30000 * EUR, payIn: 0 }]));
   assert.equal(reached.fiMonths, 0);
@@ -642,12 +685,36 @@ test("a version 5 file is upgraded: no birth year, retirement at 67", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v5.settings, birthYear: null, retirementAge: 67 });
+  assert.deepEqual(s.settings, { ...v5.settings, expectedReturn: 9, inflation: 3, birthYear: null, retirementAge: 67 });
   assert.deepEqual({ ...s, version: 5, settings: v5.settings }, v5, "nothing else changes");
   assert.equal("birthYear" in v5.settings, false, "the parsed value is left alone");
 
   assert.match(F.parseStore({ ...v5, settings: { ...v5.settings, retirementAge: 65 } }).error, /unknown field "retirementAge"/);
   assert.equal(F.parseStore({ ...s, settings: { ...s.settings, birthYear: 1990, retirementAge: 65 } }).ok, true);
+});
+
+test("a version 6 file is upgraded: the expected return before inflation, and 3 % inflation", () => {
+  const v6 = {
+    version: 6,
+    settings: { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1,000,000.00", expectedReturn: 4.25, birthYear: 1990, retirementAge: 65 },
+    categories: { expenses: ["Housing"], income: [] },
+    expenses: [{ id: "e1", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, active: true }],
+    income: [],
+    accounts: [{ id: "a", name: "Broker" }],
+    records: [{ month: "2026-10", account: "a", value: 5, payIn: 1 }],
+  };
+  const result = F.parseStore(v6);
+  assert.equal(result.ok, true, result.error);
+  const s = result.store;
+  assert.equal(s.version, F.VERSION);
+  assert.deepEqual(s.settings, { ...v6.settings, expectedReturn: 7.25, inflation: 3 });
+  assert.deepEqual({ ...s, version: 6, settings: v6.settings }, v6, "nothing else changes");
+  assert.equal(v6.settings.expectedReturn, 4.25, "the parsed value is left alone");
+
+  assert.equal(F.parseStore({ ...v6, settings: { ...v6.settings, expectedReturn: 99 } }).store.settings.expectedReturn, 100);
+  assert.equal(F.parseStore({ ...v6, settings: { ...v6.settings, expectedReturn: 0.1 } }).store.settings.expectedReturn, 3.1);
+  assert.match(F.parseStore({ ...v6, settings: { ...v6.settings, inflation: 2 } }).error, /unknown field "inflation"/);
+  assert.match(F.parseStore({ ...v6, settings: { ...v6.settings, expectedReturn: "5" } }).error, /expectedReturn must be between 0 and 100/);
 });
 
 test("a new store starts with a few categories", () => {
@@ -732,8 +799,6 @@ function plan(changes = {}) {
     ...changes,
   };
 }
-const monthly = (growth) => (1 + growth / 100) ** (1 / 12) - 1;
-const close = (actual, expected, what) => assert.ok(Math.abs(actual - expected) < 1e-6 * Math.max(1, Math.abs(expected)), `${what}: ${actual} is not ${expected}`);
 
 test("forecast: the growth rates are the expected return and 2 points less and more", () => {
   assert.deepEqual(F.growthRates(5), { low: 3, mid: 5, high: 7 });
@@ -853,4 +918,53 @@ test("forecast: past the retirement age every plan lives off the portfolio", () 
   }
   // At least ten years are shown, also past 95.
   assert.equal(F.forecast(plan({ birthYear: 1925 })).months.at(-1), "2036-10");
+});
+
+test("forecast: with inflation, expenses and the FI number rise and pay-ins stay", () => {
+  const r = monthly(8);
+  const f = F.forecast(plan({ growth: 8, inflation: 3 }));
+  const rise = (months) => 1.03 ** (months / 12);
+  close(f.goal[0], 600000 * EUR, "today");
+  close(f.goal[12], 600000 * EUR * 1.03, "a year on");
+  assert.equal(f.goal.length, f.months.length);
+  // The FI number at the end of December 2056, 362 months on.
+  close(f.fiAtRetirement, 600000 * EUR * rise(362), "when retirement starts");
+
+  const keep = f.plans.keep;
+  close(keep.values[1], 50000 * EUR * (1 + r) + 1000 * EUR, "the same pay-in after a month");
+  close(keep.values[13] - keep.values[12] * (1 + r), 1000 * EUR, "and after a year");
+  const at = F.monthIndex("2057-01") - F.monthIndex("2026-10");
+  close(keep.values[at], keep.atRetirement * (1 + r) - 2000 * EUR * rise(at), "expenses of that month");
+  const i = F.monthIndex(keep.fiMonth) - F.monthIndex("2026-10");
+  assert.ok(keep.values[i] >= f.goal[i] && keep.values[i - 1] < f.goal[i - 1], "FI is the FI number of that month");
+
+  // Coast FI: enough to reach the FI number when retirement starts.
+  const coast = f.plans.coast;
+  assert.ok(coast.atRetirement >= f.fiAtRetirement && coast.atRetirement < f.fiAtRetirement * 1.01);
+  const j = F.monthIndex(coast.coastMonth) - F.monthIndex("2026-10");
+  close(f.target[j], f.fiAtRetirement / (1 + r) ** (362 - j), "target");
+
+  // Retire at FI takes out the expenses of each month.
+  const fi = f.plans.fi;
+  const k = F.monthIndex(fi.fiMonth) - F.monthIndex("2026-10");
+  close(fi.values[k + 1], fi.values[k] * (1 + r) - 2000 * EUR * rise(k + 1), "after FI");
+
+  assert.equal(F.forecast(plan({ birthYear: 1950, inflation: 3 })).fiAtRetirement, null, "retired already");
+});
+
+test("forecast: with nothing paid in, inflation moves no milestone", () => {
+  // 8 % before 3 % inflation is about 4.85 % after: the same months as
+  // growing at that against today's expenses, with every value that many
+  // times more in the money of its month.
+  const real = (1.08 / 1.03 - 1) * 100;
+  const shared = { value: 300000 * EUR, contribution: 0, birthYear: 1980 };
+  const nominal = F.forecast(plan({ ...shared, growth: 8, inflation: 3 }));
+  const today = F.forecast(plan({ ...shared, growth: real }));
+  for (const p of F.PLANS) {
+    const a = nominal.plans[p];
+    const b = today.plans[p];
+    assert.deepEqual([a.coastMonth, a.fiMonth, a.runsOut], [b.coastMonth, b.fiMonth, b.runsOut], p);
+    close(a.values[120], b.values[120] * 1.03 ** 10, `${p} after ten years`);
+  }
+  assert.ok(nominal.plans.fi.fiMonth !== null && nominal.plans.coast.coastMonth !== null);
 });

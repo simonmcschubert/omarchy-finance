@@ -503,6 +503,7 @@ main > div {
 }
 
 .chart .goal {
+  fill: none;
   stroke: var(--green);
   stroke-width: 1;
   stroke-dasharray: 3 4;

@@ -80,8 +80,8 @@ The data file stays.
   was paid in that month (negative for withdrawals). An account without a
   value in a month counts with its last value.
 - **Forecast**: how the portfolio could grow until retirement, and whether
-  it lasts after, in three plans and at three growth rates (3, 5 and 7 % a
-  year by default). See [Forecast](#forecast).
+  it lasts after, in three plans and at three growth rates (6, 8 and 10 % a
+  year before inflation, by default). See [Forecast](#forecast).
 - **Settings**:
   - Currency (default euro). It only changes how amounts are shown; nothing
     is converted.
@@ -91,9 +91,14 @@ The data file stays.
     either way. Dates follow the system language.
   - Safe withdrawal rate (default 4 %) and a buffer on expenses for irregular
     costs (default 10 %).
-  - Expected return (default 5 %): the portfolio's yearly return after
-    inflation, for Time to FI, the Path to FI chart and the forecast. After
-    inflation, because the FI number is in today's money.
+  - Expected return (default 8 %): the portfolio's yearly return before
+    inflation, for Time to FI, the Path to FI chart and the forecast.
+  - Inflation (default 3 %): how much prices rise a year. Time to FI, the
+    Path to FI chart and the forecast raise the expenses and the FI number
+    by it, so their amounts are in the money of each year. Pay-ins stay as
+    they are: when they rise, so does their 12-month average. Data files
+    from before this setting get 3 % inflation and 3 points more expected
+    return, so 5 % after inflation becomes 8 % before it.
   - Year of birth and retirement age (default 67), for the forecast. The
     forecast needs the year of birth; it is empty until entered.
   - Categories, one list for expenses and one for income. A new data file
@@ -122,7 +127,7 @@ Settings.
 | Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them |
 | FI number | Monthly expenses × 12 ÷ withdrawal rate (× 25 at 4 %) |
 | FI reached | Portfolio ÷ FI number |
-| Time to FI | Months until the portfolio reaches the FI number: from the latest month it grows by the expected return (compounded monthly) and gets the average monthly pay-in each month. Years from two years on; nothing beyond 100 years |
+| Time to FI | Months until the portfolio reaches the FI number of that month: from the latest month it grows by the expected return (compounded monthly) and gets the average monthly pay-in each month, while the FI number rises by the inflation. Years from two years on; nothing beyond 100 years |
 
 With less than 12 months of history, the average uses the months there
 are, and so do the gains, from the first month on.
@@ -142,8 +147,9 @@ The **Portfolio** chart has two views; the one picked last stays picked.
 - **Path to FI** (needs active expenses): from the latest month, the value
   goes on growing the way Time to FI counts, as a dotted line until it
   reaches the FI number, with a band from 2 points below to 2 points above
-  the expected return (3 % to 7 % at 5 %). The line under the chart says
-  when each reaches the FI number.
+  the expected return (6 % to 10 % at 8 %). From the latest month on, the
+  FI number rises by the inflation. The line under the chart says when each
+  reaches the FI number, and what the FI number is by then.
 
 ![Path to FI](docs/path-to-fi.png)
 
@@ -167,9 +173,11 @@ average pay-in of the last 12 months, and can be changed, to 0 too):
 
 Retirement starts in January of the year you reach the retirement age. From
 then on every plan lives off the portfolio: each month it takes out the
-monthly expenses from the dashboard (with the buffer). Coast FI is the first
-month from which paying in only the smaller amount makes the portfolio reach
-the FI number when retirement starts; with 0, it gets there on its own.
+monthly expenses from the dashboard (with the buffer), risen by the
+inflation. Coast FI is the first month from which paying in only the
+smaller amount makes the portfolio reach the FI number when retirement
+starts; with 0, it gets there on its own. The page says what the expenses
+and the FI number are by then.
 
 The growth rates are the expected return from Settings and 2 points less
 and more, as on the Path to FI chart. The chart shows one at a time, up to
@@ -180,10 +188,11 @@ value at the retirement age, and whether it lasts. A plan lasts when money
 is still left at age 150; otherwise the table says at which age it runs out.
 
 - It starts from the portfolio in the latest month, and grows it by the
-  growth rate every month (5 % a year is about 0.41 % a month), as Time to
+  growth rate every month (8 % a year is about 0.64 % a month), as Time to
   FI on the dashboard does.
-- Growth is after inflation, so every amount is in today's money: expenses
-  and pay-ins stay as they are today, and so does the FI number.
+- Every amount is in the money of its year: growth is before inflation, and
+  the expenses and the FI number rise by the inflation from Settings (3 % a
+  year by default). What is paid in stays the same.
 - The growth is the same every year. Real markets are not, and bad years
   right after you start living off the portfolio hurt most.
 - Taxes and the state pension are left out.

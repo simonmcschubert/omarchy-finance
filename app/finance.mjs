@@ -4,7 +4,7 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 6;
+export const VERSION = 7;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
@@ -16,7 +16,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   bufferPercent: 10,
   currency: "EUR",
   numberFormat: NUMBER_FORMATS[0],
-  expectedReturn: 5,
+  expectedReturn: 8, // a year, before inflation
+  inflation: 3,
   birthYear: null, // not set until entered; the forecast needs it
   retirementAge: 67,
 });
@@ -46,7 +47,7 @@ export function emptyStore() {
 // ---------------------------------------------------------------- file format
 
 const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records"];
-const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "birthYear", "retirementAge"];
+const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active"];
 const ACCOUNT_KEYS = ["id", "name"];
@@ -135,10 +136,10 @@ function upgradeFromVersion3(value) {
 }
 
 // Version 4 had no expected return, so no time to FI. Upgraded files get
-// the default.
+// the default of then: 5 % after inflation (version 7 makes it 8 % before).
 function upgradeFromVersion4(value) {
   checkKeys(value.settings, ["withdrawalRate", "bufferPercent", "currency", "numberFormat"], "settings");
-  return { ...value, version: 5, settings: { ...value.settings, expectedReturn: DEFAULT_SETTINGS.expectedReturn } };
+  return { ...value, version: 5, settings: { ...value.settings, expectedReturn: 5 } };
 }
 
 // Version 5 had no birth year and no retirement age, which the forecast
@@ -146,6 +147,21 @@ function upgradeFromVersion4(value) {
 function upgradeFromVersion5(value) {
   checkKeys(value.settings, ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn"], "settings");
   return { ...value, version: 6, settings: { ...value.settings, birthYear: null, retirementAge: DEFAULT_SETTINGS.retirementAge } };
+}
+
+// Up to version 6 the expected return was after inflation and every
+// projection was in today's money. Now it is before inflation, and
+// projections are in the money of each year: expenses and the FI number
+// rise by the inflation. Upgraded files get the default inflation, and that
+// much more expected return, so the return after inflation stays about the
+// same: 5 % becomes 8 %.
+function upgradeFromVersion6(value) {
+  checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "inflation"), "settings");
+  const { expectedReturn } = value.settings;
+  const inflation = DEFAULT_SETTINGS.inflation;
+  const settings = { ...value.settings, inflation };
+  if (typeof expectedReturn === "number") settings.expectedReturn = Math.min(100, Math.round((expectedReturn + inflation) * 100) / 100);
+  return { ...value, version: 7, settings };
 }
 
 // Checks a parsed data file. Returns { ok: true, store } or { ok: false, error }.
@@ -158,6 +174,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 3) value = upgradeFromVersion3(value);
     if (isObject(value) && value.version === 4) value = upgradeFromVersion4(value);
     if (isObject(value) && value.version === 5) value = upgradeFromVersion5(value);
+    if (isObject(value) && value.version === 6) value = upgradeFromVersion6(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -165,7 +182,7 @@ export function parseStore(value) {
     if (value.version !== VERSION) throw new Error(`unsupported version ${JSON.stringify(value.version)}`);
 
     checkKeys(value.settings, SETTINGS_KEYS, "settings");
-    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, birthYear, retirementAge } = value.settings;
+    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, inflation, birthYear, retirementAge } = value.settings;
     if (typeof withdrawalRate !== "number" || !(withdrawalRate > 0 && withdrawalRate <= 100)) {
       throw new Error("settings.withdrawalRate must be above 0 and at most 100");
     }
@@ -174,6 +191,9 @@ export function parseStore(value) {
     }
     if (typeof expectedReturn !== "number" || !(expectedReturn >= 0 && expectedReturn <= 100)) {
       throw new Error("settings.expectedReturn must be between 0 and 100");
+    }
+    if (typeof inflation !== "number" || !(inflation >= 0 && inflation <= 100)) {
+      throw new Error("settings.inflation must be between 0 and 100");
     }
     if (!isCurrency(currency)) throw new Error("settings.currency must be a three-letter code such as EUR");
     if (!NUMBER_FORMATS.includes(numberFormat)) {
@@ -455,19 +475,33 @@ export function averagePayIn(series, window = 12) {
 // The longest projection: 100 years.
 export const MAX_PROJECTION_MONTHS = 1200;
 
+// A yearly rate in percent as a monthly one that compounds to it: 12 % a
+// year is about 0.95 % a month, not 1 %.
+export function monthlyRate(percent) {
+  return (1 + percent / 100) ** (1 / 12) - 1;
+}
+
+// Projections are in the money of each month. Pay-ins stay as they are:
+// the average they come from rises on its own when they do. Expenses and
+// the FI number rise by the inflation: `amount` (today's) `months` from now.
+export function inflated(amount, inflation, months) {
+  return amount * (1 + monthlyRate(inflation)) ** months;
+}
+
 // The portfolio at the end of each coming month, from `start`: it grows at
-// the yearly return (percent, compounded monthly) and gets `payIn` each
-// month. Ends with the first month at or above `goal`; empty when `start`
-// is there already. null when it takes more than 100 years, or never comes.
-export function projectToGoal(start, payIn, returnPercent, goal) {
+// the yearly return (percent before inflation, compounded monthly) and gets
+// `payIn` each month. Ends with the first month at or above `goal`, which
+// rises by `inflation` percent a year; empty when `start` is there already.
+// null when it takes more than 100 years, or never comes.
+export function projectToGoal(start, payIn, returnPercent, goal, inflation = 0) {
   if (start >= goal) return [];
-  const rate = (1 + returnPercent / 100) ** (1 / 12) - 1;
+  const rate = monthlyRate(returnPercent);
   const values = [];
   let value = start;
   while (values.length < MAX_PROJECTION_MONTHS) {
     value = value * (1 + rate) + payIn;
     values.push(value);
-    if (value >= goal) return values;
+    if (value >= inflated(goal, inflation, values.length)) return values;
   }
   return null;
 }
@@ -505,35 +539,37 @@ export const RETURN_SPREAD = 2;
 
 // The chart's projection: where the portfolio goes from `start` (the latest
 // month's value, in month `month`) if `payIn` keeps being paid in at each
-// month end and it grows by `rate` % a year after inflation, as
+// month end and it grows by `rate` % a year before inflation, as
 // projectToGoal counts; and a low and high one at RETURN_SPREAD points less
-// and more. Everything is in today's money, as the FI number is. Returns
-// null without a goal, otherwise:
+// and more. The goal (today's FI number) rises by `inflation` % a year.
+// Returns null without a goal, otherwise:
 // - rates: { low, mid, high }, percent a year
 // - reach: { low, mid, high }, the first month (YYYY-MM) at or above the
-//   goal: `month` when start is there already, null when not within
-//   MAX_PROJECTION_MONTHS
-// - points: [{ month, low, mid, high }] for the months after `month` that
+//   goal of that month: `month` when start is there already, null when not
+//   within MAX_PROJECTION_MONTHS
+// - points: [{ month, low, mid, high, goal }] for the months after `month` that
 //   the chart shows: until the low projection reaches the goal (or 1.5
 //   times as long as the mid one takes, or else the high one), and a
 //   little after; at least a year, at most MAX_PROJECTION_MONTHS. None when
 //   start is at the goal already.
-export function fiProjection({ month, start, payIn, goal, rate }) {
+export function fiProjection({ month, start, payIn, goal, rate, inflation = 0 }) {
   if (!(goal > 0)) return null;
   const rates = { low: rate - RETURN_SPREAD, mid: rate, high: rate + RETURN_SPREAD };
   const keys = Object.keys(rates);
   if (start >= goal) return { rates, reach: { low: month, mid: month, high: month }, points: [] };
-  const monthly = Object.fromEntries(keys.map((k) => [k, (1 + rates[k] / 100) ** (1 / 12) - 1]));
+  const monthly = Object.fromEntries(keys.map((k) => [k, monthlyRate(rates[k])]));
   const values = { low: start, mid: start, high: start };
   const reach = { low: null, mid: null, high: null }; // months after `month`
   const points = [];
   for (let n = 1; n <= MAX_PROJECTION_MONTHS; n++) {
     const point = { month: addMonths(month, n) };
+    const goalNow = inflated(goal, inflation, n);
     for (const k of keys) {
       values[k] = Math.max(0, values[k] * (1 + monthly[k]) + payIn);
       point[k] = values[k];
-      if (reach[k] === null && values[k] >= goal) reach[k] = n;
+      if (reach[k] === null && values[k] >= goalNow) reach[k] = n;
     }
+    point.goal = goalNow;
     points.push(point);
   }
   let shown = MAX_PROJECTION_MONTHS;
@@ -550,7 +586,7 @@ export function fiProjection({ month, start, payIn, goal, rate }) {
 // Current numbers for the dashboard. Amounts are in cents and may carry
 // fractions of a cent; round when displaying. Ratios are fractions (0.25).
 export function metrics(store) {
-  const { withdrawalRate, bufferPercent, expectedReturn } = store.settings;
+  const { withdrawalRate, bufferPercent, expectedReturn, inflation } = store.settings;
   const income = sum(store.income.map(monthlyAmount));
   const baseExpenses = sum(counted(store.expenses).map(monthlyAmount));
   const buffer = (baseExpenses * bufferPercent) / 100;
@@ -561,7 +597,7 @@ export function metrics(store) {
   const last = series.at(-1) ?? null;
   const payIn = averagePayIn(series);
   // From the latest month on, with the average pay-in of the last 12 months.
-  const ahead = last && fiNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, fiNumber) : null;
+  const ahead = last && fiNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, fiNumber, inflation) : null;
   return {
     income,
     baseExpenses,
@@ -575,9 +611,9 @@ export function metrics(store) {
     payIn,
     investmentRate: payIn && income > 0 ? payIn.average / income : null,
     fiProgress: last && fiNumber > 0 ? last.value / fiNumber : null,
-    // Months until the portfolio reaches the FI number (0: it has), and the
-    // projected value of each; null without a portfolio and FI number, or
-    // when it takes more than 100 years.
+    // Months until the portfolio reaches the FI number of that month (0: it
+    // has), and the projected value of each; null without a portfolio and
+    // FI number, or when it takes more than 100 years.
     fiMonths: ahead ? ahead.length : null,
     projection: ahead ? ahead.map((value, i) => ({ month: addMonths(last.month, i + 1), value })) : null,
     gains: gains(series),
@@ -619,8 +655,9 @@ export function categoryUse(store, kind, name) {
 }
 
 // ---------------------------------------------------------------- forecast
-// Every amount in the forecast is in today's money: growth is after
-// inflation, and contributions and expenses stay as they are today.
+// Every amount in the forecast is in the money of its month: growth is
+// before inflation, expenses and the FI number rise by the inflation, and
+// what is paid in stays the same.
 
 // The yearly growth rates the forecast compares, in percent: the expected
 // return, and RETURN_SPREAD points less and more, as on the dashboard.
@@ -638,7 +675,7 @@ export const LASTS_AGE = 150;
 // coast: pay in until Coast FI, then the smaller amount until retirement.
 // fi: pay in until FI, then live off the portfolio.
 // From retirement on, every plan lives off the portfolio: it withdraws the
-// monthly expenses.
+// monthly expenses of that month.
 export const PLANS = Object.freeze(["keep", "coast", "fi"]);
 
 // The age someone born in birthYear has in a month's year.
@@ -653,22 +690,32 @@ export function ageIn(month, birthYear) {
 // retirement starts. A milestone counts only before retirement.
 //
 // params: { start (month), value, expenses (a month), fiNumber, birthYear,
-// retirementAge, growth (percent a year), contribution (a month),
-// coastContribution (a month) }. Amounts in cents.
+// retirementAge, growth (percent a year, before inflation), inflation
+// (percent a year), contribution (a month), coastContribution (a month) }.
+// Amounts in cents; expenses and fiNumber in the money of `start`, and
+// rising by the inflation from then on.
 //
 // Returns { months: shown months from start on, retirement: its first
-// month, target: the Coast FI target for each shown month before retirement
-// (null after), plans: { keep, coast, fi } } where each plan is { values:
-// one per shown month, coastMonth, fiMonth (when reached, or null),
-// atRetirement (value when retirement starts, or null if it has already),
-// runsOut (the first month with nothing left, or null if it lasts) }.
+// month, goal: the FI number of each shown month, fiAtRetirement: the FI
+// number when retirement starts (null if it has already), target: the
+// Coast FI target for each shown month before retirement (null after),
+// plans: { keep, coast, fi } } where each plan is { values: one per shown
+// month, coastMonth, fiMonth (when reached, or null), atRetirement (value
+// when retirement starts, or null if it has already), runsOut (the first
+// month with nothing left, or null if it lasts) }.
 export function forecast(params) {
-  const { start, value, expenses, fiNumber, birthYear, retirementAge, growth, contribution, coastContribution } = params;
-  const rate = (1 + growth / 100) ** (1 / 12) - 1;
+  const { start, value, expenses, fiNumber, birthYear, retirementAge, growth, inflation = 0, contribution, coastContribution } = params;
+  const rate = monthlyRate(growth);
   const first = monthIndex(start);
   const retirement = (birthYear + retirementAge) * 12;
   const lastShown = Math.max((birthYear + SHOWN_AGE) * 12 + 11, first + 120);
   const lastChecked = Math.max((birthYear + LASTS_AGE) * 12 + 11, lastShown);
+  // Expenses and the FI number in the month of `index`.
+  const expensesAt = (index) => inflated(expenses, inflation, index - first);
+  const goalAt = (index) => inflated(fiNumber, inflation, index - first);
+  // The value at the end of the month before retirement is what has to
+  // reach the FI number.
+  const fiAtRetirement = goalAt(retirement - 1);
 
   // What a month-end value grows to when retirement starts, with `monthly`
   // paid in every month until then.
@@ -682,13 +729,15 @@ export function forecast(params) {
     const n = retirement - 1 - index;
     const factor = (1 + rate) ** n;
     const paidIn = coastContribution * (rate === 0 ? n : (factor - 1) / rate);
-    return Math.max(0, (fiNumber - paidIn) / factor);
+    return Math.max(0, (fiAtRetirement - paidIn) / factor);
   };
 
   const months = [];
+  const goal = [];
   const target = [];
   for (let index = first; index <= lastShown; index++) {
     months.push(monthFromIndex(index));
+    goal.push(goalAt(index));
     target.push(index < retirement ? coastTarget(index) : null);
   }
 
@@ -704,11 +753,11 @@ export function forecast(params) {
     // from the next month on.
     const check = (index) => {
       if (index >= retirement) return;
-      if (coastMonth === null && grown(v, index, coastContribution) >= fiNumber) {
+      if (coastMonth === null && grown(v, index, coastContribution) >= fiAtRetirement) {
         coastMonth = monthFromIndex(index);
         if (plan === "coast" && phase === "full") phase = "coast";
       }
-      if (fiMonth === null && v >= fiNumber) {
+      if (fiMonth === null && v >= goalAt(index)) {
         fiMonth = monthFromIndex(index);
         if (plan === "fi") phase = "out";
       }
@@ -716,7 +765,7 @@ export function forecast(params) {
     check(first);
     for (let index = first + 1; index <= lastChecked; index++) {
       const out = phase === "out" || index >= retirement;
-      v = v * (1 + rate) + (out ? -expenses : phase === "coast" ? coastContribution : contribution);
+      v = v * (1 + rate) + (out ? -expensesAt(index) : phase === "coast" ? coastContribution : contribution);
       if (out && v <= 0) {
         v = 0;
         runsOut ??= monthFromIndex(index);
@@ -732,6 +781,8 @@ export function forecast(params) {
   return {
     months,
     retirement: monthFromIndex(retirement),
+    goal,
+    fiAtRetirement: first < retirement ? fiAtRetirement : null,
     target,
     plans: Object.fromEntries(PLANS.map((plan) => [plan, run(plan)])),
   };
