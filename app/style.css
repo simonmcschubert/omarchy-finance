@@ -1216,3 +1216,30 @@ table.entry th {
     grid-column: 1 / -1;
   }
 }
+
+/* ---- helpers on the Income and Expenses pages */
+
+.helper-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  align-items: end;
+  margin-top: 8px;
+}
+
+.helper-form .check {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.helper-form .check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.helper-result {
+  color: var(--fg-strong);
+  margin-top: 10px;
+}

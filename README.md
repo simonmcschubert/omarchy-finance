@@ -104,6 +104,25 @@ The data file stays.
   the totals. New income ends at retirement; new expenses never end. Income
   from before this setting ends at retirement, as it was never counted after
   it; change that for income that goes on, such as rent from a flat.
+
+  Two helpers, for Germany, add what changes when you stop working:
+  - **State pension** (under Income): your Rentenpunkte so far, from the
+    Renteninformation, plus those of the years you still plan to work,
+    times the value of a point (42,52 € from July 2026), 0,3 % less a month
+    before the regular age (your retirement age in Settings; at most 4
+    years) or 0,5 % more a month after it, less what pensioners pay for
+    health and care insurance (12,95 % by default). Added as the income
+    "State pension" from the age it starts, or updates it. The
+    Renteninformation's own pension at 67 assumes you pay in until then;
+    early retirees get less.
+  - **Health and care insurance after you stop working** (under
+    Expenses): as a voluntary member of a statutory insurer, at least the
+    minimum base (1.318,33 € a month in 2026) × 14 % + the Zusatzbeitrag
+    (2,9 % on average) + care insurance (4,2 % without children, 3,6 %
+    with): about 280 € a month. Added as the essential expense "Health and
+    care insurance" from retirement until the age the pension starts.
+
+  Both numbers can be changed; income tax is left out.
 - **Portfolio**: per month, each broker account's value at month end and what
   was paid in that month (negative for withdrawals). An account without a
   value in a month counts with its last value.
@@ -153,7 +172,7 @@ Settings.
 | Portfolio | Sum of all accounts in the latest month, and its change since the month before |
 | Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins. The return is that gain ÷ (the value 12 months ago + each pay-in for the part of the 12 months it was invested, from the middle of its month) |
 | Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them |
-| FI number | What the portfolio would pay a month when retiring now × 12 ÷ withdrawal rate (× 25 at 4 %): the expenses that would count then, plus the buffer, less the income that would. Without starts and ends, the monthly expenses |
+| FI number | What the portfolio would need when retiring now. What it pays a month: the expenses that count then, plus the buffer, less the income that does. Once nothing starts or ends any more, that amount × 12 ÷ withdrawal rate (× 25 at 4 %); until then, what it pays on top of that, month by month, such as bridging the years until a pension starts. Never more than the highest monthly amount × 12 ÷ withdrawal rate. Without starts and ends: monthly expenses × 12 ÷ withdrawal rate |
 | FI reached | Portfolio ÷ FI number |
 | Time to FI | Months until the portfolio reaches the FI number of that month (for retiring then): from the latest month it grows by the expected return (compounded monthly) and gets the average monthly pay-in each month, while the FI number rises by the inflation. Years from two years on; nothing beyond 100 years |
 | Lean FI | The same three for the essential expenses only, with the buffer: the FI number for a lean budget, how much of it the portfolio reaches, and in how long. Shown under the FI numbers once an active expense is essential; the bar under FI reached marks it |
@@ -231,7 +250,8 @@ course.
 - The growth is the same every year. Real markets are not, and bad years
   right after you start living off the portfolio hurt most.
 - A state pension or other income that goes on after retirement counts
-  when it is entered under Income, from its age. Taxes are left out.
+  when it is entered under Income, from its age, and the FI number covers
+  the years until it starts. Taxes are left out.
 
 The amounts typed on the page are not saved; the year of birth and the
 retirement age are in Settings.

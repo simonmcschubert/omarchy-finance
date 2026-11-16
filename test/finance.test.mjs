@@ -847,6 +847,58 @@ test("metrics: what counts now, and the FI number for retiring now", () => {
   assert.equal(m.goal(F.monthIndex("2057-01") - F.monthIndex("2026-10")), 0);
 });
 
+test("fiNumberParts: a bridge until income starts or expenses end, then the multiple", () => {
+  const item = (name, amount, from, until, extra = {}) => ({ id: name, name, category: "", amount: amount * EUR, everyMonths: 1, from, until, ...extra });
+  const rent = item("Rent", 2000, null, null, { active: true, essential: true });
+  const health = item("Health", 300, { at: "retirement" }, { age: 67 }, { active: true, essential: false });
+  const pension = item("Pension", 1200, { age: 67 }, null);
+  const s = (expenses, income = []) => store({ settings: { ...F.DEFAULT_SETTINGS, birthYear: 1990, bufferPercent: 0 }, expenses, income });
+  const at50 = F.monthIndex("2040-01");
+  const bridge = F.monthIndex("2057-01") - at50; // 204 months until 67
+
+  // Nothing changes later: the multiple, as before.
+  assert.deepEqual(F.fiNumberParts(s([rent]), at50), { fiNumber: 2000 * 300 * EUR, long: 2000 * EUR, extra: 0, from: at50 });
+  // A pension from 67: 800 a month for good, and 1,200 more until then.
+  const withPension = F.fiNumberParts(s([rent], [pension]), at50);
+  assert.equal(withPension.long, 800 * EUR);
+  assert.equal(withPension.extra, 1200 * bridge * EUR);
+  assert.equal(withPension.fiNumber, (800 * 300 + 1200 * bridge) * EUR);
+  assert.equal(withPension.from, F.monthIndex("2057-01"));
+  // Health insurance from retirement until 67 adds to the bridge.
+  assert.equal(F.fiNumberIn(s([rent, health], [pension]), at50), (800 * 300 + 1500 * bridge) * EUR);
+  // Lean FI: the essential expenses only.
+  assert.equal(F.fiNumberIn(s([rent, health], [pension]), at50, { essential: true }), (800 * 300 + 1200 * bridge) * EUR);
+  // Retiring at 67 there is no bridge.
+  assert.equal(F.fiNumberIn(s([rent, health], [pension]), F.monthIndex("2057-01")), 800 * 300 * EUR);
+  // Never more than paying the most for good: an expense until 100.
+  const long = item("Loan", 1000, null, { age: 100 }, { active: true, essential: false });
+  assert.equal(F.fiNumberIn(s([long]), at50), 1000 * 300 * EUR);
+  // Costs that come later count for good from the start.
+  const care = item("Care", 500, { age: 80 }, null, { active: true, essential: false });
+  assert.equal(F.fiNumberIn(s([rent, care]), at50), 2500 * 300 * EUR);
+  // Inactive ones change nothing.
+  assert.equal(F.fiNumberIn(s([rent, { ...care, active: false }]), at50), 2000 * 300 * EUR);
+});
+
+test("statePension: points × their value, less for starting early, more for late", () => {
+  const base = { points: 30, pointValue: 4252, regularAge: 67, deductions: 12.35 };
+  const at67 = F.statePension({ ...base, startAge: 67 });
+  assert.equal(at67.gross, 127560);
+  assert.equal(at67.change, 0);
+  close(at67.net, 127560 * 0.8765, "net");
+  const at63 = F.statePension({ ...base, startAge: 63 });
+  close(at63.change, -0.144, "4 years early");
+  close(at63.gross, 127560 * 0.856, "gross at 63");
+  close(F.statePension({ ...base, startAge: 60 }).change, -0.144, "at most 48 months early");
+  close(F.statePension({ ...base, startAge: 70 }).change, 0.18, "3 years late");
+});
+
+test("healthInsurance: the minimum base × the rates", () => {
+  const g = F.GERMANY_2026;
+  close(F.healthInsurance({ base: g.minimumBase, rates: [g.generalRate, g.extraRate, g.careRateChildless] }), 131833 * 0.211, "childless");
+  close(F.healthInsurance({ base: g.minimumBase, rates: [g.generalRate, g.extraRate, g.careRate] }), 131833 * 0.205, "with children");
+});
+
 test("projectToGoal and fiProjection take a goal that changes", () => {
   // 1,000 a month without growth; the goal drops from 50,000 to 20,000
   // after 12 months.

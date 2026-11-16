@@ -691,12 +691,101 @@ export function fiProjection({ month, start, payIn, goal, rate, inflation = 0 })
   };
 }
 
-// The FI number if retirement starts in the month of `index`, in today's
-// money: what the portfolio pays then (needIn), times 12 and the multiple
-// of the withdrawal rate. essential: Lean FI's.
-export function fiNumberIn(store, index, { essential = false } = {}) {
-  return needIn(store, index, index, { essential }) * 12 * (100 / store.settings.withdrawalRate);
+// The months after `retirement` (indexes) in which what the portfolio pays
+// can change: where an expense or income starts or ends.
+function changesAfter(store, retirement) {
+  const { birthYear } = store.settings;
+  const changes = new Set();
+  for (const item of [...store.expenses, ...store.income]) {
+    if (item.active === false) continue;
+    const { from, until } = itemWindow(item, birthYear, retirement);
+    for (const at of [from, until]) if (Number.isFinite(at) && at > retirement) changes.add(at);
+  }
+  return [...changes].sort((a, b) => a - b);
 }
+
+// The FI number if retirement starts in the month of `index`, in today's
+// money, and how it comes about. What the portfolio pays from the last
+// change on (when the last expense or income starts or ends; the month of
+// `index` without changes) is `long`, a month; it needs that × 12 × the
+// multiple of the withdrawal rate. Until then it pays `extra` on top: each
+// month's amount above `long`, added up, such as a bridge until a pension
+// starts. Never more than paying the highest monthly amount for good.
+// essential: Lean FI's.
+// Returns { fiNumber, long, extra, from (the month index of the last
+// change, or `index`) }.
+export function fiNumberParts(store, index, { essential = false } = {}) {
+  const cache = fiCache(store);
+  const key = `${index} ${essential}`;
+  if (cache.has(key)) return cache.get(key);
+  const months = 12 * (100 / store.settings.withdrawalRate);
+  const need = (at) => needIn(store, at, index, { essential });
+  const changes = changesAfter(store, index);
+  const from = changes.at(-1) ?? index;
+  const long = need(from);
+  let extra = 0;
+  let most = long;
+  let start = index;
+  for (const end of changes) {
+    const paid = need(start);
+    most = Math.max(most, paid);
+    extra += Math.max(0, paid - long) * (end - start);
+    start = end;
+  }
+  const fiNumber = Math.min(long * months + extra, most * months);
+  const parts = { fiNumber, long, extra: fiNumber - long * months, from };
+  cache.set(key, parts);
+  return parts;
+}
+
+export function fiNumberIn(store, index, options) {
+  return fiNumberParts(store, index, options).fiNumber;
+}
+
+// FI numbers once worked out, per store: projections ask for the same months
+// again and again. Stores are never changed, only replaced.
+const fiCaches = new WeakMap();
+function fiCache(store) {
+  if (!fiCaches.has(store)) fiCaches.set(store, new Map());
+  return fiCaches.get(store);
+}
+
+// ---------------------------------------------------------------- Germany
+
+// The state pension (gesetzliche Rente) a month: Rentenpunkte × the value of
+// a point (aktueller Rentenwert), 0.3 % less for each month it starts before
+// the regular age (at most 48 months) and 0.5 % more for each month after
+// it, less what pensioners pay for health and care insurance (percent).
+// Amounts in cents. Returns { gross, change (a fraction, -0.144 to …),
+// net }.
+export function statePension({ points, pointValue, startAge, regularAge, deductions }) {
+  const months = (startAge - regularAge) * 12;
+  const change = months < 0 ? Math.max(months, -48) * 0.003 : months * 0.005;
+  const gross = points * pointValue * (1 + change);
+  return { gross, change, net: gross * (1 - deductions / 100) };
+}
+
+// Health and care insurance a month as a voluntary member of a statutory
+// insurer (freiwillig gesetzlich versichert) without other income: the
+// minimum assessment base × the rates (percent). Amounts in cents.
+export function healthInsurance({ base, rates }) {
+  return (base * sum(rates)) / 100;
+}
+
+// Defaults for the helpers, as of 2026: the value of a point from July 2026,
+// the minimum assessment base, the reduced general rate (no sick pay), the
+// average Zusatzbeitrag, care insurance with and without children, and
+// what pensioners pay of it (half the general rate and Zusatzbeitrag, all
+// of the care rate).
+export const GERMANY_2026 = Object.freeze({
+  pointValue: 4252,
+  minimumBase: 131833,
+  generalRate: 14,
+  extraRate: 2.9,
+  careRate: 3.6,
+  careRateChildless: 4.2,
+  pensionerRate: 7.3,
+});
 
 // Current numbers for the dashboard, for the month `now`. Amounts are in
 // cents and may carry fractions of a cent; round when displaying. Ratios
@@ -741,8 +830,10 @@ export function metrics(store, now = currentMonth()) {
     expenses,
     multiple,
     fiNumber,
-    // What the portfolio pays a month when retiring now, with the buffer.
+    // What the portfolio pays a month when retiring now, with the buffer,
+    // and how the FI number comes about (fiNumberParts).
     retiredNeed: needIn(store, nowIndex, nowIndex),
+    fiParts: fiNumberParts(store, nowIndex),
     // The FI number of each month from the latest one on (n months later),
     // in today's money, for the Path to FI chart.
     goal: goal(),

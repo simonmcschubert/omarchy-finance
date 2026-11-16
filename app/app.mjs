@@ -436,9 +436,12 @@ function viewDashboard() {
       m.coveredMonths === null ? "needs expenses and a portfolio value" : `by the portfolio, at ${money(m.expenses)} a month`),
     tile("FI number", expenses.length ? money(m.fiNumber) : "–",
       [`${plain.format(m.multiple)} × yearly expenses (${percentUnit.format(withdrawalRate)} withdrawal rate)`,
-        Math.abs(m.retiredNeed - m.expenses) >= 100
-          ? h("div", null, `Retiring now, the portfolio would pay ${money(m.retiredNeed)} a month: the expenses and income that count after retirement`)
-          : null,
+        m.fiParts.extra >= 100
+          ? h("div", null, `Retiring now: ${plain.format(m.multiple)} × ${money(m.fiParts.long * 12)} a year from ${monthLabel(F.monthFromIndex(m.fiParts.from), true)} on, `,
+              `plus ${money(m.fiParts.extra)} to bridge the years until then`)
+          : Math.abs(m.retiredNeed - m.expenses) >= 100
+            ? h("div", null, `Retiring now, the portfolio would pay ${money(m.retiredNeed)} a month: the expenses and income that count after retirement`)
+            : null,
         m.lean ? h("div", null, `Lean FI: ${money(m.lean.fiNumber)}, for the essential expenses only`) : null]),
     tile("FI reached", m.fiProgress === null ? "–" : percent.format(m.fiProgress),
       [m.fiProgress === null ? "needs expenses and a portfolio value" : m.fiProgress >= 1 ? "Financially independent" : `${money(m.fiNumber - m.portfolio)} to go`,
@@ -664,6 +667,135 @@ function readBound(data, name, label) {
   return { bound: null };
 }
 
+// What the helpers below name the items they add, and find them by.
+const PENSION_NAME = "State pension";
+const HEALTH_NAME = "Health and care insurance";
+
+// A decimal number such as "25,5" or "2.9"; null when it is none.
+function readNumber(text, decimals = 4) {
+  const result = F.parsePercent(text, { decimals });
+  return result.ok ? result.value : null;
+}
+
+// Germany: Rentenpunkte to a state pension a month, added as income from
+// the age it starts.
+function pensionCard() {
+  const store = state.store;
+  const g = F.GERMANY_2026;
+  const regularAge = store.settings.retirementAge;
+  const existing = store.income.find((item) => item.name === PENSION_NAME) ?? null;
+  const result = h("p", { class: "helper-result", "aria-live": "polite" });
+  const read = (form) => {
+    const data = new FormData(form);
+    const points = readNumber(data.get("points"));
+    const more = readNumber(data.get("more"));
+    const pointValue = F.parseMoney(data.get("pointValue"));
+    const ageText = String(data.get("startAge")).trim();
+    const startAge = Number(ageText);
+    const deductions = readNumber(data.get("deductions"), 2);
+    if (points === null) return { error: "Rentenpunkte so far: enter a number, such as 25,5." };
+    if (more === null) return { error: "More points: enter a number, or 0." };
+    if (!pointValue.ok || pointValue.cents <= 0) return { error: "Value of a point: enter an amount." };
+    if (!/^[0-9]+$/.test(ageText) || startAge < regularAge - 4 || startAge > F.AGES.max) return { error: `Starts at age: from ${regularAge - 4} on.` };
+    if (deductions === null || deductions >= 100) return { error: "Health and care insurance: enter a percentage." };
+    return { startAge, ...F.statePension({ points: points + more, pointValue: pointValue.cents, startAge, regularAge, deductions }) };
+  };
+  const show = (form) => {
+    const r = read(form);
+    if (r.error) {
+      result.textContent = String(new FormData(form).get("points")).trim() === "" ? "" : r.error;
+      return;
+    }
+    const change = r.change === 0 ? "" : ` (${signedPercent(r.change)} for starting ${r.change < 0 ? "early" : "late"})`;
+    result.textContent = `${money(r.gross)} a month before deductions${change}, ${money(r.net)} after health and care insurance, from age ${r.startAge}, in today's money.`;
+  };
+  const form = h("form", {
+    class: "helper-form",
+    oninput: (event) => show(event.currentTarget),
+    onsubmit: (event) => {
+      event.preventDefault();
+      const r = read(event.currentTarget);
+      if (r.error) return showError(event.currentTarget, r.error);
+      if (store.settings.birthYear === null) return showError(event.currentTarget, "The pension starts at an age, which needs your year of birth, in Settings.");
+      const item = { id: existing?.id ?? F.newId(), name: PENSION_NAME, category: existing?.category ?? "", amount: Math.round(r.net), everyMonths: 1, from: { age: r.startAge }, until: null };
+      commit(F.saveItem(store, "income", item), `${existing ? "Updated" : "Added"} ${PENSION_NAME}: ${money(item.amount)} a month from age ${r.startAge}.`);
+    },
+  },
+    h("label", null, "Rentenpunkte so far", h("input", { name: "points", inputmode: "decimal", autocomplete: "off", placeholder: "25,5", required: true })),
+    h("label", null, "More points until you stop working", h("input", { name: "more", inputmode: "decimal", autocomplete: "off", value: "0" })),
+    h("label", null, "Value of a point", h("input", { name: "pointValue", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.pointValue) })),
+    h("label", null, "Starts at age", h("input", { name: "startAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.from?.age ?? regularAge) })),
+    h("label", null, "Health and care insurance (%)",
+      h("input", { name: "deductions", inputmode: "decimal", autocomplete: "off", value: plain.format(g.pensionerRate + g.extraRate / 2 + g.careRateChildless) })),
+    h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, existing ? `Update ${PENSION_NAME}` : "Add as income")));
+  queueMicrotask(() => show(form));
+  return h("section", { class: "card" },
+    h("details", null,
+      h("summary", null, h("h2", null, "State pension (Germany)")),
+      h("p", null, "Your Renteninformation lists the Rentenpunkte (Entgeltpunkte) you have so far; its pension at ", regularAge,
+        " assumes you pay in until then. Enter only what you have, and add the points for the years you still plan to work: about 1 a year at the average wage, 51.944 € in 2026."),
+      h("p", { class: "muted" }, "A point is worth 42,52 € from July 2026. Starting before the regular age, your retirement age in Settings (", regularAge,
+        "), costs 0,3 % a month, at most 4 years early (63 with 35 years of contributions); later adds 0,5 % a month. Pensioners pay half the general and the extra health rate (7,3 % + about 1,45 %) and the whole care rate (3,6 %, 4,2 % without children). ",
+        "Income tax is left out. Income rises with inflation in the forecast, as pensions about do."),
+      form, result));
+}
+
+// Germany: health and care insurance at the minimum, as a voluntary member,
+// from retirement until the pension starts.
+function healthCard() {
+  const store = state.store;
+  const g = F.GERMANY_2026;
+  const existing = store.expenses.find((item) => item.name === HEALTH_NAME) ?? null;
+  const result = h("p", { class: "helper-result", "aria-live": "polite" });
+  const read = (form) => {
+    const data = new FormData(form);
+    const base = F.parseMoney(data.get("base"));
+    const extra = readNumber(data.get("extra"), 2);
+    const care = data.get("childless") === "on" ? g.careRateChildless : g.careRate;
+    const ageText = String(data.get("untilAge")).trim();
+    const untilAge = Number(ageText);
+    if (!base.ok || base.cents <= 0) return { error: "Minimum base: enter an amount." };
+    if (extra === null || extra >= 100) return { error: "Zusatzbeitrag: enter a percentage." };
+    if (!/^[0-9]+$/.test(ageText) || untilAge > F.AGES.max) return { error: "Until age: enter whole years." };
+    const rates = [g.generalRate, extra, care];
+    return { untilAge, rates, base: base.cents, amount: F.healthInsurance({ base: base.cents, rates }) };
+  };
+  const show = (form) => {
+    const r = read(form);
+    result.textContent = r.error ?? `${money(r.amount)} a month: ${r.rates.map((rate) => percentUnit.format(rate)).join(" + ")} of ${moneyExact(r.base)}, from retirement until age ${r.untilAge}.`;
+  };
+  const form = h("form", {
+    class: "helper-form",
+    oninput: (event) => show(event.currentTarget),
+    onsubmit: (event) => {
+      event.preventDefault();
+      const r = read(event.currentTarget);
+      if (r.error) return showError(event.currentTarget, r.error);
+      if (store.settings.birthYear === null) return showError(event.currentTarget, "It ends at an age, which needs your year of birth, in Settings.");
+      const category = existing?.category ?? (store.categories.expenses.includes("Insurance") ? "Insurance" : "");
+      const item = { id: existing?.id ?? F.newId(), name: HEALTH_NAME, category, amount: Math.round(r.amount), everyMonths: 1,
+        from: { at: "retirement" }, until: { age: r.untilAge }, active: existing?.active ?? true, essential: true };
+      commit(F.saveItem(store, "expenses", item), `${existing ? "Updated" : "Added"} ${HEALTH_NAME}: ${money(item.amount)} a month from retirement until age ${r.untilAge}.`);
+    },
+  },
+    h("label", null, "Minimum base a month", h("input", { name: "base", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.minimumBase) })),
+    h("label", null, "Zusatzbeitrag (%)", h("input", { name: "extra", inputmode: "decimal", autocomplete: "off", value: plain.format(g.extraRate) })),
+    h("label", null, "Until age (the pension starts)",
+      h("input", { name: "untilAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.until?.age ?? store.settings.retirementAge) })),
+    h("label", { class: "check" }, h("input", { type: "checkbox", name: "childless", checked: true }), "No children (care insurance 4,2 % instead of 3,6 %)"),
+    h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, existing ? `Update ${HEALTH_NAME}` : "Add as expense")));
+  queueMicrotask(() => show(form));
+  return h("section", { class: "card" },
+    h("details", null,
+      h("summary", null, h("h2", null, "Health and care insurance after you stop working (Germany)")),
+      h("p", null, "While you work, health and care insurance come out of your pay, so they are in none of your expenses. ",
+        "Once you live off the portfolio before the pension, you insure yourself, as a voluntary member of a statutory insurer, and pay at least on the minimum base: about 280 € a month in 2026."),
+      h("p", { class: "muted" }, "The rates: 14 % (without sick pay), your insurer's Zusatzbeitrag (2,9 % on average in 2026), and care insurance. ",
+        "Gains and dividends count as income too: above the minimum base, you pay on them. From the pension on, insured as a pensioner (KVdR, after 9/10 of the second half of your working life insured), only the pension counts; this is in the pension helper under Income. ",
+        "Added from retirement until the age the pension starts, as an essential expense."),
+      form, result));
+}
+
 function viewItems(kind) {
   const store = state.store;
   const info = KINDS[kind];
@@ -813,7 +945,8 @@ function viewItems(kind) {
       ? card(null, h("div", { class: "table-wrap" }, h("table", null,
           h("thead", null, h("tr", null, h("th", null, "Name"), h("th", { class: "num" }, "Amount"), h("th", null, "Paid"), h("th", { class: "num" }, "Per month"), h("th"))),
           h("tbody", null, rows))))
-      : null);
+      : null,
+    kind === "income" ? pensionCard() : healthCard());
 }
 
 // ---------------------------------------------------------------- portfolio
@@ -1063,7 +1196,7 @@ function updateForecast() {
 // notes.
 function forecastResults() {
   const store = state.store;
-  const { birthYear, retirementAge, expectedReturn, inflation } = store.settings;
+  const { birthYear, retirementAge, expectedReturn, inflation, withdrawalRate } = store.settings;
   const { params } = forecastBase(store);
   const rates = F.growthRates(expectedReturn);
   const growth = state.forecast.growth;
@@ -1131,7 +1264,9 @@ function forecastResults() {
         ? `It starts from the portfolio in ${monthLabel(params.start)}, ${money(params.value)}.`
         : "It starts from 0, as there are no broker values yet."),
       h("li", null, "Expenses and income with a start or an end count only in their months; for Retire early, retirement starts the month after FI. ",
-        "Income that goes on after retirement, such as a pension, lowers what the portfolio pays."),
+        "Income that goes on after retirement, such as a pension, lowers what the portfolio pays: the FI number is what it pays for good once nothing changes any more, ",
+        `× ${plain.format(100 / withdrawalRate)}, plus what it pays on top until then, such as bridging the years until the pension. `,
+        "The ", h("a", { href: "#income" }, "Income"), " and ", h("a", { href: "#expenses" }, "Expenses"), " pages help with the state pension and health insurance."),
       h("li", null, `Money lasts when some is still left at age ${F.LASTS_AGE}. Taxes are left out.`)));
 
   return [h("div", { class: "tiles plan-tiles" }, tiles), chartCard, notes];
