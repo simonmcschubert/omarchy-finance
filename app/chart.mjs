@@ -6,7 +6,8 @@
 // Path to FI: the portfolio value, then the projection to the FI number
 // (finance.mjs fiProjection): a dashed line at the expected return, a band
 // from the low to the high return, and a dot where the line reaches the FI
-// number.
+// number. The FI number is today's over the history, and rises with
+// inflation over the projection.
 //
 // A crosshair tooltip follows the pointer or the arrow keys.
 
@@ -97,8 +98,10 @@ export function renderChart(root, options) {
   const latest = series[last];
 
   const showGoal = path ? true : goalVisible(series, fiNumber);
+  // The FI number at x position i.
+  const goalAt = (i) => (i > last ? projection[i - last - 1].goal : fiNumber);
   const values = path ? series.map((m) => m.value) : series.flatMap((m) => [m.value, m.invested]);
-  const top = Math.max(...values, showGoal ? fiNumber * (path ? GOAL_HEADROOM : 1) : 0, 10000);
+  const top = Math.max(...values, showGoal ? goalAt(count - 1) * (path ? GOAL_HEADROOM : 1) : 0, 10000);
   const ticks = niceTicks(Math.min(0, ...values), top);
   const yMin = ticks[0];
   const yMax = ticks.at(-1);
@@ -162,30 +165,36 @@ export function renderChart(root, options) {
   chart.append(svg("path", { class: "line value", d: linePath(valuePoints) }));
 
   // The FI number, and on the path view where the projection reaches it.
-  // Its label goes on the left, above the line, where the portfolio is
-  // still far below it; on the right when the reach label is on the left;
-  // below the line when the two would run into each other.
+  // Its label goes on the left, above the line, where it is today's FI
+  // number and the portfolio is still far below it; below the line when
+  // the reach label would run into it.
   if (showGoal) {
-    chart.append(svg("line", { class: "goal", x1: MARGIN.left, x2: width - MARGIN.right, y1: y(fiNumber), y2: y(fiNumber) }));
+    if (path) {
+      const goalPoints = [[x(0), y(fiNumber)], [x(last), y(fiNumber)], ...projection.map((p, k) => [x(last + 1 + k), y(p.goal)])];
+      chart.append(svg("path", { class: "goal", d: linePath(goalPoints) }));
+    } else {
+      chart.append(svg("line", { class: "goal", x1: MARGIN.left, x2: width - MARGIN.right, y1: y(fiNumber), y2: y(fiNumber) }));
+    }
     const goalText = `FI number ${format(fiNumber)}`;
+    const goalWidth = goalText.length * CHAR_WIDTH;
     const reachIndex = path && options.projection.reach.mid ? months.indexOf(options.projection.reach.mid) : -1;
-    let side = "left";
+    let below = false;
     if (reachIndex > last) {
       const rx = x(reachIndex);
+      const ry = y(goalAt(reachIndex));
       const reachText = `FI ≈ ${formatMonth(months[reachIndex], true)}`;
-      const right = rx > MARGIN.left + plotW / 2;
-      chart.append(svg("circle", { class: "reach", cx: rx, cy: y(fiNumber), r: 4 }));
-      chart.append(text({ class: "reach-label", x: right ? rx - 8 : rx + 8, y: y(fiNumber) - 7, "text-anchor": right ? "end" : "start" }, reachText));
       const reachWidth = reachText.length * CHAR_WIDTH;
-      const free = right ? rx - 8 - reachWidth - MARGIN.left : width - MARGIN.right - (rx + 8 + reachWidth);
-      side = free < goalText.length * CHAR_WIDTH + 16 ? "below" : right ? "left" : "right";
+      const right = rx > MARGIN.left + plotW / 2;
+      chart.append(svg("circle", { class: "reach", cx: rx, cy: ry, r: 4 }));
+      chart.append(text({ class: "reach-label", x: right ? rx - 8 : rx + 8, y: ry - 7, "text-anchor": right ? "end" : "start" }, reachText));
+      const from = right ? rx - 8 - reachWidth : rx - 8;
+      const to = right ? rx + 8 : rx + 8 + reachWidth;
+      below = from < MARGIN.left + 4 + goalWidth + 8 && to > MARGIN.left && Math.abs(ry - y(fiNumber)) < 16;
     }
-    chart.append(text({
-      class: "goal-label",
-      x: side === "right" ? width - MARGIN.right : MARGIN.left + 4,
-      y: side === "below" ? y(fiNumber) + 15 : y(fiNumber) - 7,
-      "text-anchor": side === "right" ? "end" : "start",
-    }, goalText));
+    // Above the line all along the label, as the line rises after the history.
+    let above = y(fiNumber);
+    for (let i = 0; i < count && x(i) <= MARGIN.left + 4 + goalWidth; i++) above = Math.min(above, y(goalAt(i)));
+    chart.append(text({ class: "goal-label", x: MARGIN.left + 4, y: below ? y(fiNumber) + 15 : above - 7 }, goalText));
   }
 
   // The latest value, at the end of its line: above it, or below when the
@@ -223,7 +232,8 @@ export function renderChart(root, options) {
         rows: [
           ["projection", format(p.mid), `at ${formatRate(rates.mid)}`],
           ["band", `${format(p.low)} – ${format(p.high)}`, `at ${formatRate(rates.low)} to ${formatRate(rates.high)}`],
-          [null, formatPercent(p.mid / fiNumber), "of the FI number"],
+          ["goal", format(p.goal), "FI number"],
+          [null, formatPercent(p.mid / p.goal), "of the FI number"],
         ],
       };
     }
@@ -338,22 +348,25 @@ const FORECAST_HEIGHT = 300;
 const FORECAST_MARGIN = { top: 20, right: 20, bottom: 44, left: 72 };
 
 // The y-axis reaches up to the highest value until retirement (and at least
-// a bit above the FI number). Lines that grow beyond it after retirement
-// leave the top of the chart; the tooltip still shows their values.
-export function forecastTop(lines, fiNumber, target, retirementIndex) {
+// a bit above the FI number then). Lines that grow beyond it after
+// retirement leave the top of the chart; the tooltip still shows their
+// values. goal: the FI number of each month.
+export function forecastTop(lines, goal, target, retirementIndex) {
   const until = retirementIndex >= 0 ? retirementIndex : Infinity;
-  let top = fiNumber * 1.2;
+  let top = 0;
+  goal.forEach((v, i) => { if (i <= until && v * 1.2 > top) top = v * 1.2; });
   for (const line of lines) line.values.forEach((v, i) => { if (i <= until && v > top) top = v; });
   for (const v of target) if (v !== null && v > top) top = v;
   return Math.max(top, 10000);
 }
 
 // options: { months, lines: [{ key, label, values, mark (index or -1) }],
-// fiNumber, target (one value or null per month), retirementIndex (or -1),
-// format, formatAxis, formatMonth, ageOf(month) }. Lines are drawn in
-// order, so the last one is on top where they overlap.
+// goal (the FI number of each month), target (one value or null per
+// month), retirementIndex (or -1), format, formatAxis, formatMonth,
+// ageOf(month) }. Lines are drawn in order, so the last one is on top
+// where they overlap.
 export function renderForecastChart(root, options) {
-  const { months, lines, fiNumber, target, retirementIndex, format, formatAxis, formatMonth, ageOf } = options;
+  const { months, lines, goal, target, retirementIndex, format, formatAxis, formatMonth, ageOf } = options;
   root.replaceChildren();
   const width = Math.max(320, Math.round(root.clientWidth || 640));
   const height = FORECAST_HEIGHT;
@@ -362,7 +375,7 @@ export function renderForecastChart(root, options) {
   const plotH = height - margin.top - margin.bottom;
   const last = months.length - 1;
 
-  const ticks = niceTicks(0, forecastTop(lines, fiNumber, target, retirementIndex));
+  const ticks = niceTicks(0, forecastTop(lines, goal, target, retirementIndex));
   const yMax = ticks.at(-1);
   const x = (i) => margin.left + (last === 0 ? plotW / 2 : (i * plotW) / last);
   const y = (v) => margin.top + plotH - (v / yMax) * plotH;
@@ -415,10 +428,14 @@ export function renderForecastChart(root, options) {
     chart.append(label);
   }
 
-  chart.append(svg("line", { class: "goal", x1: margin.left, x2: width - margin.right, y1: y(fiNumber), y2: y(fiNumber) }));
-  const goalLabel = svg("text", { class: "goal-label", x: margin.left + 6, y: y(fiNumber) - 6 });
-  goalLabel.textContent = `FI number ${format(fiNumber)}`;
-  chart.append(goalLabel);
+  // The FI number rises with inflation; its label says today's.
+  const goalPath = goal.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  chart.append(svg("path", { class: "goal", d: goalPath, "clip-path": "url(#forecast-clip)" }));
+  const goalText = `FI number ${format(goal[0])}`;
+  // Above the line all along the label.
+  let above = y(goal[0]);
+  for (let i = 0; i <= last && x(i) <= margin.left + 6 + goalText.length * CHAR_WIDTH; i++) above = Math.min(above, y(goal[i]));
+  chart.append(text({ class: "goal-label", x: margin.left + 6, y: above - 6 }, goalText));
 
   const targetPath = target
     .map((v, i) => (v === null ? null : `${i === 0 || target[i - 1] === null ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`))
@@ -462,15 +479,17 @@ export function renderForecastChart(root, options) {
     title.className = "tip-title";
     title.textContent = `${formatMonth(months[current])} · age ${ageOf(months[current])}`;
     tip.replaceChildren(title);
-    for (const line of [...lines].reverse()) {
+    const rows = [...lines].reverse().map((line) => [`plan-${line.key}`, line.values[current], line.label]);
+    rows.push(["goal", goal[current], "FI number"]);
+    for (const [kind, value, name] of rows) {
       const row = document.createElement("div");
       row.className = "tip-row";
       const key = document.createElement("span");
-      key.className = `key plan-${line.key}`;
+      key.className = `key ${kind}`;
       const strong = document.createElement("strong");
-      strong.textContent = format(line.values[current]);
+      strong.textContent = format(value);
       const label = document.createElement("span");
-      label.textContent = line.label;
+      label.textContent = name;
       row.append(key, strong, label);
       tip.append(row);
     }

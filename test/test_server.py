@@ -14,13 +14,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
 
 STORE = {
-    "version": 6,
+    "version": 7,
     "settings": {
         "withdrawalRate": 4,
         "bufferPercent": 10,
         "currency": "EUR",
         "numberFormat": "1.000.000,00",
-        "expectedReturn": 5,
+        "expectedReturn": 8,
+        "inflation": 3,
         "birthYear": None,
         "retirementAge": 67,
     },
@@ -92,7 +93,7 @@ class ServerTest(unittest.TestCase):
     def test_refuses_non_json_writes(self):
         response, _ = self.request("PUT", "/api/data", {"revision": "none", "data": STORE}, {"Content-Type": "text/plain"})
         self.assertEqual(response.status, 415)
-        for version in [5, 7]:
+        for version in [6, 8]:
             response, data = self.request("PUT", "/api/data", {"revision": "none", "data": {**STORE, "version": version}})
             self.assertEqual(response.status, 400)
             self.assertIn("reload the page", json.loads(data)["error"])

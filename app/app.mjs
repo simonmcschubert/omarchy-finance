@@ -494,7 +494,8 @@ function chartView(m) {
 }
 
 function projection(m) {
-  return F.fiProjection({ month: m.latestMonth, start: m.portfolio, payIn: m.payIn.average, goal: chartGoal(m), rate: state.store.settings.expectedReturn });
+  const { expectedReturn, inflation } = state.store.settings;
+  return F.fiProjection({ month: m.latestMonth, start: m.portfolio, payIn: m.payIn.average, goal: chartGoal(m), rate: expectedReturn, inflation });
 }
 
 function portfolioCard(m) {
@@ -539,13 +540,14 @@ function pathSummary(m, p) {
   if (p.reach.mid) {
     const months = F.monthIndex(p.reach.mid) - F.monthIndex(m.latestMonth);
     const low = p.reach.low ? `${year("low")} at ${rate("low")}` : `not ${limit} at ${rate("low")}`;
-    outcome = `the portfolio reaches the FI number around ${year("mid")}, in ${duration(months)} (${year("high")} at ${rate("high")}, ${low}).`;
+    outcome = `the portfolio reaches the FI number around ${year("mid")}, in ${duration(months)} (${year("high")} at ${rate("high")}, ${low}). ` +
+      `With ${percentUnit.format(state.store.settings.inflation)} inflation a year, the FI number is ${money(p.points[months - 1].goal)} by then.`;
   } else if (p.reach.high) {
     outcome = `the portfolio does not reach the FI number ${limit}; at ${rate("high")} it would around ${year("high")}.`;
   } else {
     outcome = `the portfolio does not reach the FI number ${limit}, not even at ${rate("high")}.`;
   }
-  return [`At ${rate("mid")} growth a year after inflation and ${money(m.payIn.average)} paid in a month, ${outcome} In today's money. The expected return is set in `,
+  return [`At ${rate("mid")} growth a year and ${money(m.payIn.average)} paid in a month, ${outcome} The expected return and inflation are set in `,
     h("a", { href: "#settings" }, "Settings"), "."];
 }
 
@@ -822,7 +824,7 @@ const listOf = (words) => (words.length < 2 ? words.join("") : `${words.slice(0,
 // What the forecast starts from, and what is paid in.
 function forecastBase(store) {
   const m = F.metrics(store);
-  const { birthYear, retirementAge } = store.settings;
+  const { birthYear, retirementAge, inflation } = store.settings;
   // The average pay-in, as the dashboard's time to FI uses it, in whole
   // cents and never a withdrawal.
   const average = m.payIn ? Math.max(0, Math.round(m.payIn.average)) : 0;
@@ -836,6 +838,7 @@ function forecastBase(store) {
       fiNumber: m.fiNumber,
       birthYear,
       retirementAge,
+      inflation,
       contribution: state.forecast.contribution ?? average,
       coastContribution: state.forecast.coastContribution,
     },
@@ -856,8 +859,13 @@ function viewForecast() {
 
   const { m, average, params } = forecastBase(store);
   const rates = F.growthRates(store.settings.expectedReturn);
+  const inflation = percentUnit.format(params.inflation);
   const retirementYear = birthYear + retirementAge;
   const retired = F.monthIndex(params.start) >= retirementYear * 12;
+  // Expenses and the FI number at the end of the month before retirement,
+  // as the forecast counts them.
+  const untilRetirement = retirementYear * 12 - 1 - F.monthIndex(params.start);
+  const then = (amount) => money(F.inflated(amount, params.inflation, untilRetirement));
   const read = (event) => {
     event.preventDefault();
     readForecastForm(event.currentTarget, average);
@@ -868,10 +876,11 @@ function viewForecast() {
     card("Forecast",
       retired
         ? h("p", null, `You have reached your retirement age, ${retirementAge}, so each plan lives off the portfolio from now on: `,
-            `it takes out your monthly expenses, ${money(params.expenses)} with buffer.`)
+            `it takes out your monthly expenses, ${money(params.expenses)} with buffer, rising by ${inflation} a year.`)
         : h("p", null, `Three plans for paying in until you retire, at ${listOf(F.GROWTHS.map((g) => percentUnit.format(rates[g])))} growth a year. `,
             `From January ${retirementYear}, the year you turn ${retirementAge}, each plan lives off the portfolio: `,
-            `it takes out your monthly expenses, ${money(params.expenses)} with buffer.`),
+            `it takes out your monthly expenses, ${money(params.expenses)} with buffer today. `,
+            `With ${inflation} inflation a year, they are ${then(params.expenses)} by then, and the FI number is ${then(params.fiNumber)} (${money(params.fiNumber)} today).`),
       h("form", { class: "forecast-form", onsubmit: read, onchange: read },
         h("label", null, "Paid in per month",
           h("input", { id: "forecast-contribution", name: "contribution", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.contribution) })),
@@ -978,8 +987,9 @@ function forecastResults() {
 
   const notes = card(null,
     h("ul", { class: "notes muted" },
-      h("li", null, "The growth rates are the expected return set in ", h("a", { href: "#settings" }, "Settings"), `, and ${F.RETURN_SPREAD} points less and more.`),
-      h("li", null, "Growth is after inflation, so every amount is in today's money: expenses and pay-ins stay as they are today."),
+      h("li", null, "The growth rates are the expected return set in ", h("a", { href: "#settings" }, "Settings"), `, and ${F.RETURN_SPREAD} points less and more, before inflation.`),
+      h("li", null, `Amounts are in the money of each year: expenses and the FI number rise by the inflation, ${percentUnit.format(store.settings.inflation)} a year. `,
+        "What is paid in stays the same; when your pay-ins rise, so does the average it starts from."),
       h("li", null, store.records.length
         ? `It starts from the portfolio in ${monthLabel(params.start)}, ${money(params.value)}.`
         : "It starts from 0, as there are no broker values yet."),
@@ -1003,7 +1013,7 @@ function drawForecast() {
       months: result.months,
       // Keep going last, on top: until the others turn off, they share its line.
       lines: ["fi", "coast", "keep"].map((plan) => ({ key: plan, label: PLAN_INFO[plan].label, values: result.plans[plan].values, mark: index(mark[plan]) })),
-      fiNumber: params.fiNumber,
+      goal: result.goal,
       target: result.target,
       retirementIndex: index(result.retirement),
       format: money,
@@ -1030,7 +1040,7 @@ function viewSettings() {
 }
 
 function settingsForm(store) {
-  const { withdrawalRate, bufferPercent, currency: code, numberFormat, expectedReturn, birthYear, retirementAge } = store.settings;
+  const { withdrawalRate, bufferPercent, currency: code, numberFormat, expectedReturn, inflation, birthYear, retirementAge } = store.settings;
   const codes = Intl.supportedValuesOf("currency");
   if (!codes.includes(code)) codes.push(code);
   return h("form", { class: "settings-form", onsubmit: (event) => {
@@ -1041,6 +1051,7 @@ function settingsForm(store) {
     const rate = F.parsePercent(data.get("withdrawalRate"), { decimals: RATE_DECIMALS });
     const buffer = F.parsePercent(data.get("bufferPercent"));
     const growth = F.parsePercent(data.get("expectedReturn"));
+    const prices = F.parsePercent(data.get("inflation"));
     const birthText = String(data.get("birthYear")).trim();
     const ageText = String(data.get("retirementAge")).trim();
     const born = birthText === "" ? null : Number(birthText);
@@ -1054,6 +1065,7 @@ function settingsForm(store) {
     else if (!rate.ok || !(rate.value > 0 && rate.value <= 100)) error = `Withdrawal rate: enter a percentage above 0 and at most 100, with up to ${RATE_DECIMALS} decimals.`;
     else if (!buffer.ok || !(buffer.value >= 0 && buffer.value <= 100)) error = "Buffer: enter a percentage from 0 to 100.";
     else if (!growth.ok || !(growth.value >= 0 && growth.value <= 100)) error = "Expected return: enter a percentage from 0 to 100.";
+    else if (!prices.ok || !(prices.value >= 0 && prices.value <= 100)) error = "Inflation: enter a percentage from 0 to 100.";
     else if (born !== null && !(/^[0-9]{4}$/.test(birthText) && born >= firstYear && born <= thisYear)) error = `Year of birth: enter a year from ${firstYear} to ${thisYear}, or leave it empty.`;
     else if (!/^[0-9]+$/.test(ageText) || age < ages.min || age > ages.max) error = `Retirement age: enter whole years from ${ages.min} to ${ages.max}.`;
     if (error) return showError(event.currentTarget, error);
@@ -1063,6 +1075,7 @@ function settingsForm(store) {
       withdrawalRate: rate.value,
       bufferPercent: buffer.value,
       expectedReturn: growth.value,
+      inflation: prices.value,
       birthYear: born,
       retirementAge: age,
     }), "Settings saved.");
@@ -1078,7 +1091,9 @@ function settingsForm(store) {
     h("label", null, "Buffer on expenses (%)", h("input", { name: "bufferPercent", inputmode: "decimal", value: plain.format(bufferPercent), required: true })),
     h("p", { class: "muted" }, "Added on top of regular expenses for irregular costs such as holidays and repairs."),
     h("label", null, "Expected return (%)", h("input", { name: "expectedReturn", inputmode: "decimal", value: plain.format(expectedReturn), required: true })),
-    h("p", { class: "muted" }, `The portfolio's yearly return after inflation, for Time to FI and the Path to FI chart on the dashboard, and the forecast; both also show ${F.RETURN_SPREAD} points less and more. After inflation, because the FI number is in today's money. World stocks have returned about 5 % a year after inflation over the long run, with many years far above or below that.`),
+    h("p", { class: "muted" }, `The portfolio's yearly return before inflation, for Time to FI and the Path to FI chart on the dashboard, and the forecast; both also show ${F.RETURN_SPREAD} points less and more. World stocks have returned about 8 % a year over the long run, about 5 % after inflation, with many years far above or below that.`),
+    h("label", null, "Inflation (%)", h("input", { name: "inflation", inputmode: "decimal", value: plain.format(inflation), required: true })),
+    h("p", { class: "muted" }, "How much prices rise a year. Time to FI, the Path to FI chart and the forecast raise your expenses and the FI number by it, so their amounts are in the money of each year. What is paid in stays the same: when your pay-ins rise, so does their average."),
     h("label", null, "Year of birth", h("input", { name: "birthYear", inputmode: "numeric", autocomplete: "off", value: birthYear === null ? "" : String(birthYear), placeholder: "1990" })),
     h("label", null, "Retirement age", h("input", { name: "retirementAge", inputmode: "numeric", autocomplete: "off", value: String(retirementAge), required: true })),
     h("p", { class: "muted" }, "For the ", h("a", { href: "#forecast" }, "forecast"), ": the official retirement age, 67 in Germany for everyone born in 1964 or later. ",

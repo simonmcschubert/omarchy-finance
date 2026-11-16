@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { goalVisible, niceTicks } from "../app/chart.mjs";
+import { forecastTop, goalVisible, niceTicks } from "../app/chart.mjs";
 
 test("niceTicks: even steps around the data, the top tick close above it", () => {
   assert.deepEqual(niceTicks(0, 5003500), [0, 2000000, 4000000, 6000000]);
@@ -21,4 +21,13 @@ test("goalVisible: the history view shows the FI number once the data reaches it
   assert.equal(goalVisible(series, 2000), false);
   assert.equal(goalVisible(series, 0), false);
   assert.equal(goalVisible([{ value: 900, invested: 1000 }], 1000), true);
+});
+
+test("forecastTop: room for the rising FI number until retirement, not after", () => {
+  const goal = [1000000, 1500000, 2000000, 9000000];
+  const lines = [{ values: [500000, 900000, 1300000, 50000000] }];
+  const target = [800000, 700000, null, null];
+  assert.equal(forecastTop(lines, goal, target, 2), 2400000, "1.2 × the FI number when retirement starts");
+  assert.equal(forecastTop([{ values: [500000, 3000000, 0, 0] }], goal, target, 2), 3000000, "a plan above it");
+  assert.equal(forecastTop(lines, goal, target, -1), 50000000, "retired already: everything counts");
 });
