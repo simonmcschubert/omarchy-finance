@@ -676,7 +676,7 @@ function pathSummary(m, p) {
     const low = p.reach.low ? `${year("low")} at ${rate("low")}` : `not ${limit} at ${rate("low")}`;
     outcome = `the portfolio reaches the FI number around ${year("mid")}, in ${duration(months)}: ${year("high")} at ${rate("high")}, ${low}. ` +
       (inTodaysMoney()
-        ? `The chart shows today's money: by then the FI number is ${money(p.points[months - 1].goal)} of today's euros, ${percentUnit.format(state.store.settings.inflation)} inflation a year taken out.`
+        ? `The chart shows today's money: by then the FI number is ${money(p.points[months - 1].goal)} in today's money, ${percentUnit.format(state.store.settings.inflation)} inflation a year taken out.`
         : `By then the FI number is ${money(p.points[months - 1].goal)}, as it rises with ${percentUnit.format(state.store.settings.inflation)} inflation a year.`);
   } else if (p.reach.high) {
     outcome = `the portfolio does not reach the FI number ${limit}; at ${rate("high")} it would around ${year("high")}.`;
