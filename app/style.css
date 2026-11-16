@@ -1290,3 +1290,11 @@ table.entry th {
 .tile-detail .short {
   color: var(--yellow);
 }
+
+/* Growth and money switches on the Forecast page, side by side. */
+.forecast-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: end;
+}

@@ -685,6 +685,12 @@ export function inflated(amount, inflation, months) {
 // one, or always the same amount.
 const goalFunction = (goal) => (typeof goal === "function" ? goal : () => goal);
 
+// An amount `months` after a start in the money of that start: what it
+// would buy then, with `inflation` percent a year taken out.
+export function deflated(amount, inflation, months) {
+  return amount / (1 + monthlyRate(inflation)) ** months;
+}
+
 // The portfolio at the end of each coming month, from `start`: it grows at
 // the yearly return (percent before inflation, compounded monthly) and gets
 // `payIn` each month. Ends with the first month at or above `goal`, which
@@ -1155,6 +1161,33 @@ export function forecast(params) {
     goal: goals,
     fiAtRetirement: first < retirement ? fiAtRetirement : null,
     plans: Object.fromEntries(PLANS.map((plan) => [plan, run(plan)])),
+  };
+}
+
+// A forecast with every amount in the money of its first month (today's
+// money): values, the FI number, and those when retirement starts.
+export function forecastInTodaysMoney(result, inflation) {
+  const first = monthIndex(result.months[0]);
+  const before = monthIndex(result.retirement) - 1 - first; // when retirement starts
+  const at = (value, months) => (value === null ? null : deflated(value, inflation, months));
+  return {
+    ...result,
+    goal: result.goal.map(at),
+    fiAtRetirement: at(result.fiAtRetirement, before),
+    plans: Object.fromEntries(Object.entries(result.plans).map(([name, plan]) =>
+      [name, { ...plan, values: plan.values.map(at), atRetirement: at(plan.atRetirement, before) }])),
+  };
+}
+
+// A fiProjection with every amount in the money of its month (today's).
+export function projectionInTodaysMoney(projection, inflation) {
+  if (!projection) return projection;
+  return {
+    ...projection,
+    points: projection.points.map((point, k) => {
+      const at = (value) => deflated(value, inflation, k + 1);
+      return { ...point, low: at(point.low), mid: at(point.mid), high: at(point.high), goal: at(point.goal) };
+    }),
   };
 }
 
