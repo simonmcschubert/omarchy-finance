@@ -143,6 +143,7 @@ const state = {
   store: null,
   revision: null,
   file: "",
+  backups: "", // the directory with the daily copies of the file
   blocked: null, // why nothing can be saved, e.g. an unreadable data file
   notice: null, // { kind: "error" | "info", text }
   view: "dashboard",
@@ -181,6 +182,7 @@ async function request(method, body) {
 function adopt(json) {
   state.revision = json.revision;
   if (json.file) state.file = json.file;
+  if (json.backups) state.backups = json.backups;
   if (json.error) {
     state.blocked = `${json.error}. Nothing is saved until the file at ${state.file} is fixed or moved away.`;
     state.store = null;
@@ -1060,7 +1062,10 @@ function viewSettings() {
     importCard(store),
     exportCard(store),
     card("Data file", h("p", null, "Everything is saved in one file on this computer:"), h("p", null, h("code", null, state.file)),
-      h("p", { class: "muted" }, "No account and no sync. Copy the file to back it up.")),
+      h("p", { class: "muted" }, "No account and no sync. Copy the file to back it up."),
+      h("p", null, "Before the first change of each day, Finance keeps a copy of the file as it was. The copies of the last 30 days with changes are in:"),
+      h("p", null, h("code", null, state.backups)),
+      h("p", { class: "muted" }, "To go back to a day, copy its file over the data file; open windows show it once they get focus.")),
     card("Updates", updates.channelSettings()));
 }
 

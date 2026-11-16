@@ -10,6 +10,7 @@ Python standard library only (3.11 or newer).
 """
 
 import argparse
+import datetime
 import hashlib
 import http.server
 import json
@@ -31,6 +32,9 @@ MAX_BODY = 10 * 1024 * 1024
 NO_FILE = "none"
 VERSION = 7  # data file version; matches VERSION in app/finance.mjs
 NO_BODY = object()  # read_json found none it accepts, and said so
+
+# Dated copies of the data file kept in backups/ next to it: one a day.
+BACKUPS_KEPT = 30
 
 # Seconds: the first check for a release after the server starts, and then.
 FIRST_CHECK = 15
@@ -134,6 +138,33 @@ def write_atomic(path, data):
         os.fsync(dir_fd)
     finally:
         os.close(dir_fd)
+
+
+def backup_dir(data_file):
+    return Path(data_file).parent / "backups"
+
+
+def today():
+    """The local date, as backups are named: 2026-11-16."""
+    return datetime.date.today().isoformat()
+
+
+def back_up(data_file, raw):
+    """Before the first save of a day, keeps the file as it was in
+    backups/<name>-<date>.json, and the BACKUPS_KEPT newest of those. A later
+    save that day keeps the copy from before the first one, so a bad import
+    or a slip can be undone with the file from that morning."""
+    if raw is None:
+        return
+    data_file = Path(data_file)
+    directory = backup_dir(data_file)
+    target = directory / f"{data_file.stem}-{today()}.json"
+    if target.exists():
+        return
+    write_atomic(target, raw)
+    copies = sorted(directory.glob(f"{data_file.stem}-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].json"))
+    for old in copies[:-BACKUPS_KEPT]:
+        old.unlink(missing_ok=True)
 
 
 def luminance_is_light(color):
@@ -433,7 +464,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def current(self):
         """The file as GET returns it: revision, data, and error if unreadable."""
         raw = read_file(self.server.data_file)
-        result = {"revision": revision_of(raw), "file": str(self.server.data_file), "data": None}
+        result = {
+            "revision": revision_of(raw),
+            "file": str(self.server.data_file),
+            "backups": str(backup_dir(self.server.data_file)),
+            "data": None,
+        }
         if raw is not None:
             try:
                 result["data"] = json.loads(raw)
@@ -519,6 +555,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # Same shape as GET, so the page can show the latest.
                 status, reply = 409, {**current, "conflict": True}
             else:
+                try:
+                    back_up(self.server.data_file, read_file(self.server.data_file))
+                except OSError as error:
+                    # A missing copy is no reason to lose the change.
+                    self.log_error("backup failed: %s", error)
                 try:
                     write_atomic(self.server.data_file, out)
                     status, reply = 200, {"revision": revision_of(out)}
