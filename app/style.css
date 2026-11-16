@@ -1169,6 +1169,15 @@ table.entry th {
   border-bottom: 1px solid var(--border);
 }
 
+.name-list li > .muted {
+  min-width: 6em;
+  text-align: right;
+}
+
+.name-list li > select {
+  width: 13em;
+}
+
 .name-list li form.inline {
   flex: 1;
   margin: 0;
@@ -1262,4 +1271,17 @@ table.entry th {
   .event-form {
     grid-template-columns: 1fr 1fr;
   }
+}
+
+/* ---- net worth */
+
+.big {
+  color: var(--fg-strong);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.bar-fill.debt {
+  background: var(--bad, var(--red));
 }

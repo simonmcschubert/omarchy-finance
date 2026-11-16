@@ -123,12 +123,14 @@ The data file stays.
     care insurance" from retirement until the age the pension starts.
 
   Both numbers can be changed; income tax is left out.
-- **Portfolio**: per month, each broker account's value at month end, what
+- **Portfolio**: per month, each invested account's value at month end, what
   was paid in that month (negative for withdrawals), and a one-off: a lump
   sum in or out, such as an inheritance or a house deposit. A one-off counts
   as paid in (so it is no gain), but not for the average pay-in that the
-  investment rate, Time to FI and the forecast go on with. An account
-  without a value in a month counts with its last value.
+  investment rate, Time to FI and the forecast go on with. Cash, property,
+  pension assets and debts have only a value: what they are worth, or still
+  owed, at month end; the history adds the net worth. An account without a
+  value in a month counts with its last value.
 - **Forecast**: how the portfolio could grow until retirement, and whether
   it lasts after, in three plans and at three growth rates (6, 8 and 10 % a
   year before inflation, by default). See [Forecast](#forecast).
@@ -155,7 +157,14 @@ The data file stays.
     starts with a few common ones. Renaming a category renames it on every
     expense or income that has it; deleting one leaves them without a
     category.
-  - Broker accounts. Deleting one deletes its monthly values too.
+  - Accounts, each with what it holds: **invested** (brokers, ETF savings
+    plans: the portfolio), **cash** (Tagesgeld, the emergency fund),
+    **property**, **pension assets** (Riester, Rürup, a company pension:
+    locked until retirement) or **debt** (what is still owed, such as a
+    mortgage). Only invested accounts are the portfolio that the FI number,
+    Time to FI and the forecast count; all of them, debts taken off, are the
+    net worth. Accounts from before this setting, and new ones from a CSV
+    import, are invested. Deleting one deletes its monthly values too.
   - Import past months from CSV, and export all monthly values as CSV.
 
 `Ctrl+1` to `Ctrl+6` open Dashboard, Expenses, Income, Portfolio, Forecast and
@@ -203,6 +212,11 @@ The **Portfolio** chart has two views; the one picked last stays picked.
   reaches the FI number, and what the FI number is by then.
 
 ![Path to FI](docs/path-to-fi.png)
+
+**Net worth**, once there is an account that is not invested, adds up the
+latest value of every account, debts taken off, with each kind on a bar,
+and its change since the month before (left out in a month an account is
+entered for the first time).
 
 **Where the income goes** splits the monthly income into expenses (with
 the buffer), the average monthly pay-in of the last 12 months, and what is
@@ -284,6 +298,9 @@ date;account;value;pay_in;one_off
 - Amounts like `1.234,56` or `1,234.56`. A separator followed by exactly three
   digits is a thousands separator: `1.234` is 1234.
 - `pay_in` and `one_off` are optional; empty means 0.
+- `kind` is optional: what a new account holds (`invested`, `cash`,
+  `property`, `pension` or `debt`; empty means invested). Accounts that
+  exist keep their own.
 - New account names become new accounts. A row for a month and account that
   already exist replaces the old values.
 

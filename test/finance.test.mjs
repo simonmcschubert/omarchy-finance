@@ -13,6 +13,7 @@ function store(parts = {}) {
   s.expenses = s.expenses.map((item) => ({ from: null, until: null, ...item }));
   s.income = s.income.map((item) => ({ from: null, until: { at: "retirement" }, ...item }));
   s.records = s.records.map((record) => ({ oneOff: 0, ...record }));
+  s.accounts = s.accounts.map((account) => ({ kind: "invested", ...account }));
   return s;
 }
 
@@ -25,6 +26,7 @@ function withoutLater({ events, ...s }) {
     expenses: s.expenses.map(({ essential, ...item }) => plain(item)),
     income: s.income.map(plain),
     records: s.records.map(({ oneOff, ...record }) => record),
+    accounts: s.accounts.map(({ kind, ...account }) => account),
   };
 }
 
@@ -441,7 +443,9 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
     [{ ...roundTrip, events: [{ id: "e", name: "Inheritance", month: "2031-01", amount: 0 }] }, /other than 0/],
     [{ ...roundTrip, events: [{ id: "e", name: "", month: "2031-01", amount: 100 }] }, /has no name/],
     [{ ...roundTrip, events: [{ id: "e", name: "A", month: "2031-01", amount: 1 }, { id: "e", name: "B", month: "2031-01", amount: 1 }] }, /repeated id/],
-    [{ ...roundTrip, accounts: [...roundTrip.accounts, { id: "x", name: "broker" }] }, /repeats the name/],
+    [{ ...roundTrip, accounts: [...roundTrip.accounts, { id: "x", name: "broker", kind: "cash" }] }, /repeats the name/],
+    [{ ...roundTrip, accounts: [{ ...roundTrip.accounts[0], kind: "crypto" }] }, /kind must be invested, cash, property, pension, debt/],
+    [{ ...roundTrip, accounts: [(({ kind, ...rest }) => rest)(roundTrip.accounts[0])] }, /missing "kind"/],
     [[], /not an object/],
   ];
   for (const [value, pattern] of broken) {
@@ -812,7 +816,9 @@ test("a version 9 file is upgraded: no one-offs", () => {
   };
   const result = F.parseStore(v9);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v9, version: F.VERSION, records: [{ ...v9.records[0], oneOff: 0 }], events: [] });
+  assert.deepEqual(withoutLater(result.store), { ...v9, version: F.VERSION });
+  assert.deepEqual(result.store.records[0].oneOff, 0);
+  assert.deepEqual(result.store.events, []);
   assert.equal("oneOff" in v9.records[0], false, "the parsed value is left alone");
 });
 
@@ -860,6 +866,50 @@ test("planned one-offs: saved, checked, and in the month they come", () => {
   assert.equal(F.projectToGoal(0, 1000, 0, 50000, 0, (n) => (n === 10 ? 20000 : 0)).length, 30);
   const p = F.fiProjection({ month: "2026-10", start: 0, payIn: 1000, goal: 50000, rate: 2, oneOffs: (n) => (n === 1 ? 49000 : 0) });
   assert.equal(p.points[0].mid, 50000);
+});
+
+test("a version 10 file is upgraded: every account is invested", () => {
+  const v10 = { ...F.emptyStore(), version: 10, accounts: [{ id: "a", name: "A" }] };
+  const result = F.parseStore(v10);
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.store, { ...v10, version: F.VERSION, accounts: [{ id: "a", name: "A", kind: "invested" }] });
+  assert.equal("kind" in v10.accounts[0], false, "the parsed value is left alone");
+});
+
+test("net worth: every kind of account, debts taken off; the portfolio is the invested ones", () => {
+  let s = F.emptyStore();
+  for (const [name, kind] of [["Broker", "invested"], ["Tagesgeld", "cash"], ["Flat", "property"], ["Rürup", "pension"], ["Mortgage", "debt"]]) {
+    s = F.saveAccount(s, null, name, kind).store;
+  }
+  const id = Object.fromEntries(s.accounts.map((a) => [a.name, a.id]));
+  s = F.saveMonth(s, "2026-09", [
+    { account: id.Broker, value: 50000, payIn: 0 },
+    { account: id.Tagesgeld, value: 10000, payIn: 0 },
+    { account: id.Flat, value: 300000, payIn: 0 },
+    { account: id.Mortgage, value: 200000, payIn: 0 },
+  ]);
+  s = F.saveMonth(s, "2026-10", [
+    { account: id.Broker, value: 52000, payIn: 1000 },
+    { account: id.Rürup, value: 8000, payIn: 0 },
+    { account: id.Mortgage, value: 199000, payIn: 1000 },
+  ]);
+  assert.deepEqual(F.netWorthSeries(s), [
+    { month: "2026-09", total: 160000, kinds: { invested: 50000, cash: 10000, property: 300000, pension: 0, debt: 200000 } },
+    { month: "2026-10", total: 171000, kinds: { invested: 52000, cash: 10000, property: 300000, pension: 8000, debt: 199000 } },
+  ]);
+  // The portfolio, its pay-ins and the FI progress are the broker's alone.
+  assert.deepEqual(F.portfolioSeries(s).map((m) => [m.value, m.payIn]), [[50000, 0], [52000, 1000]]);
+  const m = F.metrics({ ...s, settings: { ...F.DEFAULT_SETTINGS } });
+  assert.equal(m.portfolio, 52000);
+  assert.deepEqual(m.netWorth.map((n) => n.total), [160000, 171000]);
+  assert.equal(F.parseStore(JSON.parse(JSON.stringify(s))).ok, true);
+
+  // Changing the kind moves an account between portfolio and the rest.
+  const moved = F.saveAccount(s, id.Tagesgeld, "Tagesgeld", "invested").store;
+  assert.equal(F.metrics({ ...moved, settings: { ...F.DEFAULT_SETTINGS } }).portfolio, 62000);
+  assert.equal(F.saveAccount(s, id.Broker, "Broker").store.accounts[0].kind, "invested", "renaming keeps the kind");
+  assert.deepEqual(F.saveAccount(s, null, "X", "gold"), { ok: false, error: "Choose what the account holds" });
+  assert.equal(F.saveAccount(F.emptyStore(), null, "New").store.accounts[0].kind, "invested");
 });
 
 test("countsIn: from its first month until before its end", () => {
@@ -1051,20 +1101,20 @@ test("categories: add, rename with their items, delete", () => {
 test("exportCsv writes what planImport reads", () => {
   let s = F.emptyStore();
   s = F.saveAccount(s, null, "Trade Republic").store;
-  s = F.saveAccount(s, null, 'ING; "Extra"').store;
+  s = F.saveAccount(s, null, 'ING; "Extra"', "cash").store;
   const [tr, ing] = s.accounts.map((a) => a.id);
   s = F.saveMonth(s, "2026-02", [{ account: tr, value: 123456789, payIn: -5005, oneOff: 25000000 }]);
   s = F.saveMonth(s, "2026-01", [{ account: ing, value: 7, payIn: 0 }, { account: tr, value: 100000, payIn: 50000 }]);
 
   assert.equal(F.exportCsv(s), [
-    "date,account,value,pay_in,one_off",
-    "2026-01-31,Trade Republic,1000.00,500.00,0.00",
-    '2026-01-31,"ING; ""Extra""",0.07,0.00,0.00',
-    "2026-02-28,Trade Republic,1234567.89,-50.05,250000.00",
+    "date,account,value,pay_in,one_off,kind",
+    "2026-01-31,Trade Republic,1000.00,500.00,0.00,invested",
+    '2026-01-31,"ING; ""Extra""",0.07,0.00,0.00,cash',
+    "2026-02-28,Trade Republic,1234567.89,-50.05,250000.00,invested",
     "",
   ].join("\n"));
-  assert.equal(F.exportCsv(s, { decimal: "," }).split("\n")[3], "2026-02-28;Trade Republic;1234567,89;-50,05;250000,00");
-  assert.equal(F.exportCsv(F.emptyStore()), "date,account,value,pay_in,one_off\n");
+  assert.equal(F.exportCsv(s, { decimal: "," }).split("\n")[3], "2026-02-28;Trade Republic;1234567,89;-50,05;250000,00;invested");
+  assert.equal(F.exportCsv(F.emptyStore()), "date,account,value,pay_in,one_off,kind\n");
 
   for (const decimal of [".", ","]) {
     const plan = F.planImport(s, F.exportCsv(s, { decimal }));
@@ -1079,6 +1129,13 @@ test("exportCsv writes what planImport reads", () => {
   assert.equal(old.entries[0].oneOff, 0);
   const bad = F.planImport(F.emptyStore(), "date;account;value;pay_in;one_off\n31.01.2026;TR;100;10;x\n");
   assert.match(bad.errors[0].message, /One-off/);
+  // kind: what new accounts hold; accounts that exist keep theirs.
+  const kinds = F.planImport(s, "date;account;value;kind\n31.01.2026;Flat;300000;Property\n31.01.2026;Trade Republic;1;cash\n31.01.2026;New;1;\n");
+  assert.deepEqual(kinds.errors, []);
+  const imported = F.applyImport(s, kinds);
+  assert.deepEqual(imported.accounts.map((a) => [a.name, a.kind]), [["Trade Republic", "invested"], ['ING; "Extra"', "cash"], ["Flat", "property"], ["New", "invested"]]);
+  assert.match(F.planImport(s, "date;account;value;kind\n31.01.2026;X;1;gold\n").errors[0].message, /Kind: "gold"/);
+  assert.match(F.planImport(s, "date;account;value;kind\n31.01.2026;X;1;cash\n28.02.2026;X;1;debt\n").errors[0].message, /X is cash on an earlier line/);
 });
 
 // ---------------------------------------------------------------- forecast
