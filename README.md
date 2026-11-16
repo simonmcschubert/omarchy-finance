@@ -91,6 +91,9 @@ The data file stays.
   numbers change. **Deactivate** sets an expense inactive: it stays in the
   list, under Inactive, but counts nowhere (not in the totals, the FI number
   or the charts) until **Activate** counts it again. New expenses are active.
+  **Essential** marks an expense you would pay even on the leanest budget
+  (rent, food, insurance): those count for Lean FI as well. New expenses are
+  not essential.
 - **Portfolio**: per month, each broker account's value at month end and what
   was paid in that month (negative for withdrawals). An account without a
   value in a month counts with its last value.
@@ -143,6 +146,7 @@ Settings.
 | FI number | Monthly expenses × 12 ÷ withdrawal rate (× 25 at 4 %) |
 | FI reached | Portfolio ÷ FI number |
 | Time to FI | Months until the portfolio reaches the FI number of that month: from the latest month it grows by the expected return (compounded monthly) and gets the average monthly pay-in each month, while the FI number rises by the inflation. Years from two years on; nothing beyond 100 years |
+| Lean FI | The same three for the essential expenses only, with the buffer: the FI number for a lean budget, how much of it the portfolio reaches, and in how long. Shown under the FI numbers once an active expense is essential; the bar under FI reached marks it |
 
 With less than 12 months of history, the average uses the months there
 are, and so do the gains, from the first month on.

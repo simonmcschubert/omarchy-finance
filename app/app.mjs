@@ -415,9 +415,13 @@ function viewDashboard() {
     tile("Expenses covered", m.coveredMonths === null ? "–" : duration(m.coveredMonths),
       m.coveredMonths === null ? "needs expenses and a portfolio value" : `by the portfolio, at ${money(m.expenses)} a month`),
     tile("FI number", expenses.length ? money(m.fiNumber) : "–",
-      `${plain.format(m.multiple)} × yearly expenses (${percentUnit.format(withdrawalRate)} withdrawal rate)`),
+      [`${plain.format(m.multiple)} × yearly expenses (${percentUnit.format(withdrawalRate)} withdrawal rate)`,
+        m.lean ? h("div", null, `Lean FI: ${money(m.lean.fiNumber)}, for the essential expenses only`) : null]),
     tile("FI reached", m.fiProgress === null ? "–" : percent.format(m.fiProgress),
-      m.fiProgress === null ? "needs expenses and a portfolio value" : m.fiProgress >= 1 ? "Financially independent" : `${money(m.fiNumber - m.portfolio)} to go`,
+      [m.fiProgress === null ? "needs expenses and a portfolio value" : m.fiProgress >= 1 ? "Financially independent" : `${money(m.fiNumber - m.portfolio)} to go`,
+        m.lean?.progress != null && m.fiProgress < 1
+          ? h("div", null, m.lean.progress >= 1 ? "Lean FI reached" : `Lean FI ${percent.format(m.lean.progress)} reached, ${money(m.lean.fiNumber - m.portfolio)} to go`)
+          : null],
       progress),
     tile("Time to FI",
       m.fiProgress === null ? "–" : m.fiMonths === 0 ? "Now" : m.fiMonths === null ? "Over 100 years" : duration(m.fiMonths),
@@ -425,9 +429,20 @@ function viewDashboard() {
         ? "needs expenses and a portfolio value"
         : m.fiMonths === 0
           ? `as of ${monthLabel(m.latestMonth)}`
-          : `${m.fiMonths === null ? "" : `around ${monthLabel(m.projection.at(-1).month, m.fiMonths >= 24)}, `}at ${percentUnit.format(expectedReturn)} return and ${money(m.payIn.average)} a month`),
+          : [`${m.fiMonths === null ? "" : `around ${monthLabel(m.projection.at(-1).month, m.fiMonths >= 24)}, `}at ${percentUnit.format(expectedReturn)} return and ${money(m.payIn.average)} a month`,
+              m.lean?.progress != null && m.lean.progress < 1
+                ? h("div", null, `Lean FI: ${m.lean.months === null ? "over 100 years" : `in ${duration(m.lean.months)}`}`)
+                : null]),
   );
-  if (progress) progress.firstChild.style.width = `${Math.min(100, m.fiProgress * 100)}%`;
+  if (progress) {
+    progress.firstChild.style.width = `${Math.min(100, m.fiProgress * 100)}%`;
+    // Where Lean FI is on the way to FI.
+    if (m.lean && m.lean.fiNumber < m.fiNumber) {
+      const mark = h("div", { class: "meter-mark", title: `Lean FI, ${money(m.lean.fiNumber)}` });
+      mark.style.left = `${(m.lean.fiNumber / m.fiNumber) * 100}%`;
+      progress.append(mark);
+    }
+  }
 
   const parts = [tiles];
   if (empty) {
@@ -597,6 +612,7 @@ function viewItems(kind) {
   const items = store[kind];
   const active = F.counted(items);
   const inactive = items.filter((item) => item.active === false);
+  const essential = active.filter((item) => item.essential);
   const editing = items.find((item) => item.id === state.editing[kind]) ?? null;
   const monthly = (list) => list.reduce((t, item) => t + F.monthlyAmount(item), 0);
   const monthlyTotal = monthly(active);
@@ -608,6 +624,9 @@ function viewItems(kind) {
       h("div", null, h("dt", null, "Regular expenses"), h("dd", { class: "num" }, `${money(monthlyTotal)} / month`)),
       h("div", null, h("dt", null, `Buffer, ${percentUnit.format(store.settings.bufferPercent)}`), h("dd", { class: "num" }, `${money(buffer)} / month`)),
       h("div", null, h("dt", null, "Total"), h("dd", { class: "num strong" }, `${money(monthlyTotal + buffer)} / month · ${money((monthlyTotal + buffer) * 12)} / year`)),
+      essential.length
+        ? h("div", null, h("dt", null, "Essential, for Lean FI"), h("dd", { class: "num" }, `${money(monthly(essential))} / month · ${money(monthly(essential) * (1 + store.settings.bufferPercent / 100))} with buffer`))
+        : null,
       inactive.length
         ? h("div", null, h("dt", null, "Inactive, not counted"), h("dd", { class: "num muted" }, `${money(monthly(inactive))} / month`))
         : null);
@@ -634,7 +653,10 @@ function viewItems(kind) {
       else if (!Number.isInteger(everyMonths) || everyMonths < 1 || everyMonths > 120) error = "Paid every: enter whole months from 1 to 120.";
       if (error) return showError(event.currentTarget, error);
       const item = { id: editing?.id ?? F.newId(), name, category, amount: amount.cents, everyMonths };
-      if (kind === "expenses") item.active = editing?.active ?? true;
+      if (kind === "expenses") {
+        item.active = editing?.active ?? true;
+        item.essential = data.get("essential") === "on";
+      }
       state.editing[kind] = null;
       state.focus = "#item-name";
       commit(F.saveItem(store, kind, item), editing ? `Saved ${name}.` : `Added ${name}.`);
@@ -649,6 +671,10 @@ function viewItems(kind) {
     h("label", null, "Paid every … months",
       h("input", { name: "everyMonths", type: "number", min: 1, max: 120, step: 1, required: true, list: "intervals", value: String(editing?.everyMonths ?? 1) })),
     h("datalist", { id: "intervals" }, INTERVALS.map(([v, label]) => h("option", { value: String(v), label }))),
+    kind === "expenses"
+      ? h("label", { class: "check" }, h("input", { type: "checkbox", name: "essential", checked: editing?.essential ?? false }),
+          "Essential: needed even on the leanest budget, so it counts for Lean FI")
+      : null,
     h("div", { class: "form-actions" },
       h("button", { type: "submit", class: "primary" }, editing ? "Save" : "Add"),
       editing ? h("button", { type: "button", onclick: () => { state.editing[kind] = null; render(); } }, "Cancel") : null),
@@ -656,7 +682,8 @@ function viewItems(kind) {
 
   const row = (item) => h("tr", { class: [item.id === state.editing[kind] && "editing", item.active === false && "inactive"].filter(Boolean).join(" ") || null },
     // Inactive expenses are listed apart, so they show their category here.
-    h("td", null, item.name, item.active === false && item.category ? h("div", { class: "sub" }, item.category) : null),
+    h("td", null, item.name, item.essential ? h("span", { class: "badge", title: "Counts for Lean FI" }, "Essential") : null,
+      item.active === false && item.category ? h("div", { class: "sub" }, item.category) : null),
     h("td", { class: "num" }, moneyExact(item.amount)),
     h("td", null, intervalLabel(item.everyMonths)),
     h("td", { class: "num" }, money(F.monthlyAmount(item))),
