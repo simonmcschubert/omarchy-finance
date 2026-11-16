@@ -1270,6 +1270,7 @@ const COLUMN_NAMES = {
   value: ["value"],
   payIn: ["payin", "payins", "deposit", "deposits"],
   oneOff: ["oneoff", "oneoffs"],
+  kind: ["kind"],
 };
 
 // Splits CSV text into rows of fields. Handles quotes ("a ""b""") and
@@ -1325,9 +1326,11 @@ export function parseCsv(text) {
 }
 
 // Checks CSV text with the columns date, account, value and (optional)
-// pay_in and one_off. A row counts for the month of its date. Returns {
-// errors, entries, newAccounts, added, replaced }; import only when errors
-// is empty.
+// pay_in, one_off and kind. A row counts for the month of its date. kind
+// is what a new account holds (invested when empty); an account that
+// exists keeps its own. Returns { errors, entries, newAccounts, kinds (new
+// account name in lower case -> kind), added, replaced }; import only when
+// errors is empty.
 export function planImport(store, text) {
   const errors = [];
   const { rows, delimiter } = parseCsv(text);
@@ -1364,13 +1367,16 @@ export function planImport(store, text) {
     const payIn = payInText === "" ? { ok: true, cents: 0 } : parseMoney(payInText);
     const oneOffText = column.oneOff === undefined ? "" : fields[column.oneOff].trim();
     const oneOff = oneOffText === "" ? { ok: true, cents: 0 } : parseMoney(oneOffText);
+    const kind = column.kind === undefined ? "" : fields[column.kind].trim().toLowerCase();
     if (!month) errors.push({ line, message: `"${fields[column.date].trim()}" is not a date (use 2026-10-31, 2026.10.31 or 31.10.2026)` });
     if (accountName === "") errors.push({ line, message: "The account is empty" });
     if (!value.ok) errors.push({ line, message: `Value: ${value.error}` });
     else if (value.cents < 0) errors.push({ line, message: "Value: must not be negative" });
     if (!payIn.ok) errors.push({ line, message: `Pay-in: ${payIn.error}` });
     if (!oneOff.ok) errors.push({ line, message: `One-off: ${oneOff.error}` });
-    if (!month || accountName === "" || !value.ok || value.cents < 0 || !payIn.ok || !oneOff.ok) continue;
+    const kindOk = kind === "" || ACCOUNT_KINDS.includes(kind);
+    if (!kindOk) errors.push({ line, message: `Kind: "${kind}" is not ${ACCOUNT_KINDS.join(", ")}` });
+    if (!month || accountName === "" || !value.ok || value.cents < 0 || !payIn.ok || !oneOff.ok || !kindOk) continue;
 
     const key = `${month} ${accountName.toLowerCase()}`;
     if (seen.has(key)) {
@@ -1378,26 +1384,32 @@ export function planImport(store, text) {
       continue;
     }
     seen.set(key, line);
-    entries.push({ line, month, accountName, value: value.cents, payIn: payIn.cents, oneOff: oneOff.cents });
+    entries.push({ line, month, accountName, value: value.cents, payIn: payIn.cents, oneOff: oneOff.cents, kind });
   }
 
   const newAccounts = [];
+  const kinds = {};
   let replaced = 0;
   for (const entry of entries) {
     const account = findAccount(store, entry.accountName);
+    const key = entry.accountName.toLowerCase();
     if (!account) {
-      if (!newAccounts.some((n) => n.toLowerCase() === entry.accountName.toLowerCase())) newAccounts.push(entry.accountName);
+      if (!newAccounts.some((n) => n.toLowerCase() === key)) newAccounts.push(entry.accountName);
+      if (entry.kind !== "") {
+        if (kinds[key] !== undefined && kinds[key] !== entry.kind) errors.push({ line: entry.line, message: `${entry.accountName} is ${kinds[key]} on an earlier line` });
+        kinds[key] ??= entry.kind;
+      }
     } else if (store.records.some((r) => r.month === entry.month && r.account === account.id)) {
       replaced++;
     }
   }
-  return { errors, entries, newAccounts, added: entries.length - replaced, replaced };
+  return { errors, entries, newAccounts, kinds, added: entries.length - replaced, replaced };
 }
 
 export function applyImport(store, plan) {
   if (plan.errors.length > 0) throw new Error("Cannot import a file with errors");
   let next = store;
-  for (const name of plan.newAccounts) next = saveAccount(next, null, name).store;
+  for (const name of plan.newAccounts) next = saveAccount(next, null, name, plan.kinds?.[name.toLowerCase()] ?? "invested").store;
   const byMonth = new Map();
   for (const entry of plan.entries) {
     const account = findAccount(next, entry.accountName);
@@ -1422,9 +1434,10 @@ export function exportCsv(store, { decimal = "." } = {}) {
     return `${cents < 0 ? "-" : ""}${Math.floor(abs / 100)}${decimal}${String(abs % 100).padStart(2, "0")}`;
   };
   const field = (text) => (/[";,\t\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text);
-  const lines = [["date", "account", "value", "pay_in", "one_off"].join(delimiter)];
+  const kinds = new Map(store.accounts.map((a) => [a.id, a.kind]));
+  const lines = [["date", "account", "value", "pay_in", "one_off", "kind"].join(delimiter)];
   for (const r of sortRecords(store, [...store.records])) {
-    lines.push([`${r.month}-${daysInMonth(r.month)}`, field(names.get(r.account)), amount(r.value), amount(r.payIn), amount(r.oneOff)].join(delimiter));
+    lines.push([`${r.month}-${daysInMonth(r.month)}`, field(names.get(r.account)), amount(r.value), amount(r.payIn), amount(r.oneOff), kinds.get(r.account)].join(delimiter));
   }
   return lines.join("\n") + "\n";
 }

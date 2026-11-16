@@ -298,6 +298,9 @@ date;account;value;pay_in;one_off
 - Amounts like `1.234,56` or `1,234.56`. A separator followed by exactly three
   digits is a thousands separator: `1.234` is 1234.
 - `pay_in` and `one_off` are optional; empty means 0.
+- `kind` is optional: what a new account holds (`invested`, `cash`,
+  `property`, `pension` or `debt`; empty means invested). Accounts that
+  exist keep their own.
 - New account names become new accounts. A row for a month and account that
   already exist replaces the old values.
 

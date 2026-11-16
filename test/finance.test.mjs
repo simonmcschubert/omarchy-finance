@@ -1101,20 +1101,20 @@ test("categories: add, rename with their items, delete", () => {
 test("exportCsv writes what planImport reads", () => {
   let s = F.emptyStore();
   s = F.saveAccount(s, null, "Trade Republic").store;
-  s = F.saveAccount(s, null, 'ING; "Extra"').store;
+  s = F.saveAccount(s, null, 'ING; "Extra"', "cash").store;
   const [tr, ing] = s.accounts.map((a) => a.id);
   s = F.saveMonth(s, "2026-02", [{ account: tr, value: 123456789, payIn: -5005, oneOff: 25000000 }]);
   s = F.saveMonth(s, "2026-01", [{ account: ing, value: 7, payIn: 0 }, { account: tr, value: 100000, payIn: 50000 }]);
 
   assert.equal(F.exportCsv(s), [
-    "date,account,value,pay_in,one_off",
-    "2026-01-31,Trade Republic,1000.00,500.00,0.00",
-    '2026-01-31,"ING; ""Extra""",0.07,0.00,0.00',
-    "2026-02-28,Trade Republic,1234567.89,-50.05,250000.00",
+    "date,account,value,pay_in,one_off,kind",
+    "2026-01-31,Trade Republic,1000.00,500.00,0.00,invested",
+    '2026-01-31,"ING; ""Extra""",0.07,0.00,0.00,cash',
+    "2026-02-28,Trade Republic,1234567.89,-50.05,250000.00,invested",
     "",
   ].join("\n"));
-  assert.equal(F.exportCsv(s, { decimal: "," }).split("\n")[3], "2026-02-28;Trade Republic;1234567,89;-50,05;250000,00");
-  assert.equal(F.exportCsv(F.emptyStore()), "date,account,value,pay_in,one_off\n");
+  assert.equal(F.exportCsv(s, { decimal: "," }).split("\n")[3], "2026-02-28;Trade Republic;1234567,89;-50,05;250000,00;invested");
+  assert.equal(F.exportCsv(F.emptyStore()), "date,account,value,pay_in,one_off,kind\n");
 
   for (const decimal of [".", ","]) {
     const plan = F.planImport(s, F.exportCsv(s, { decimal }));
@@ -1129,6 +1129,13 @@ test("exportCsv writes what planImport reads", () => {
   assert.equal(old.entries[0].oneOff, 0);
   const bad = F.planImport(F.emptyStore(), "date;account;value;pay_in;one_off\n31.01.2026;TR;100;10;x\n");
   assert.match(bad.errors[0].message, /One-off/);
+  // kind: what new accounts hold; accounts that exist keep theirs.
+  const kinds = F.planImport(s, "date;account;value;kind\n31.01.2026;Flat;300000;Property\n31.01.2026;Trade Republic;1;cash\n31.01.2026;New;1;\n");
+  assert.deepEqual(kinds.errors, []);
+  const imported = F.applyImport(s, kinds);
+  assert.deepEqual(imported.accounts.map((a) => [a.name, a.kind]), [["Trade Republic", "invested"], ['ING; "Extra"', "cash"], ["Flat", "property"], ["New", "invested"]]);
+  assert.match(F.planImport(s, "date;account;value;kind\n31.01.2026;X;1;gold\n").errors[0].message, /Kind: "gold"/);
+  assert.match(F.planImport(s, "date;account;value;kind\n31.01.2026;X;1;cash\n28.02.2026;X;1;debt\n").errors[0].message, /X is cash on an earlier line/);
 });
 
 // ---------------------------------------------------------------- forecast

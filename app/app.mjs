@@ -557,7 +557,7 @@ function netWorthCard(m) {
     const fill = h("div", { class: `bar-fill${kind === "debt" ? " debt" : ""}` });
     fill.style.width = `${largest > 0 ? (now.kinds[kind] / largest) * 100 : 0}%`;
     return h("li", null,
-      h("div", { class: "bar-text" }, h("span", null, kindLabel(kind)), h("span", { class: "num" }, money(kind === "debt" ? -now.kinds[kind] : now.kinds[kind]))),
+      h("div", { class: "bar-text" }, h("span", null, kindLabel(kind)), h("span", { class: "num" }, money(kind === "debt" ? -now.kinds[kind] || 0 : now.kinds[kind]))),
       h("div", { class: "bar" }, fill));
   });
   return card("Net worth",
@@ -1114,7 +1114,7 @@ function viewPortfolio() {
           h("th", { scope: "row" }, h("button", { type: "button", class: "link", onclick: () => { state.month = m.month; render(); scrollTo(0, 0); } }, monthLabel(m.month))),
           store.accounts.map((a) => {
             const r = records?.get(a.id);
-            return h("td", { class: "num" }, r ? (a.kind === "debt" ? money(-r.value) : money(r.value)) : h("span", { class: "muted" }, "–"),
+            return h("td", { class: "num" }, r ? (a.kind === "debt" ? money(-r.value || 0) : money(r.value)) : h("span", { class: "muted" }, "–"),
               r && r.payIn !== 0 ? h("div", { class: "sub" }, signedMoney(r.payIn)) : null,
               r && r.oneOff !== 0 ? h("div", { class: "sub" }, `${signedMoney(r.oneOff)} one-off`) : null);
           }),
@@ -1613,7 +1613,8 @@ function importCard(store) {
     h("details", { open: state.importText !== "" || null },
       h("summary", null, h("h2", null, "Import past months from CSV")),
       h("p", null, "One row per account and month, with the columns ", h("code", null, "date"), ", ", h("code", null, "account"), ", ",
-        h("code", null, "value"), ", ", h("code", null, "pay_in"), " and ", h("code", null, "one_off"), " (both optional). Dates as 2025-01-31, 2025.01.31 or 31.01.2025: a row counts for the month of its date. ",
+        h("code", null, "value"), ", ", h("code", null, "pay_in"), ", ", h("code", null, "one_off"), " and ", h("code", null, "kind"),
+        " (the last three optional; kind is what a new account holds: invested, cash, property, pension or debt). Dates as 2025-01-31, 2025.01.31 or 31.01.2025: a row counts for the month of its date. ",
         "Semicolons, commas or tabs work, and so do amounts like 1.234,56 or 1,234.56. ",
         "Rows for a month and account that already exist replace the old values. New account names become new accounts."),
       h("div", { class: "form-actions" },
@@ -1653,7 +1654,7 @@ function exportCard(store) {
   const months = new Set(store.records.map((r) => r.month)).size;
   return card("Export portfolio to CSV",
     h("p", null, "Every monthly value with the columns ", h("code", null, "date"), " (the last day of the month), ", h("code", null, "account"), ", ",
-      h("code", null, "value"), ", ", h("code", null, "pay_in"), " and ", h("code", null, "one_off"), ": opens in a spreadsheet, and the import above reads it back."),
+      h("code", null, "value"), ", ", h("code", null, "pay_in"), ", ", h("code", null, "one_off"), " and ", h("code", null, "kind"), ": opens in a spreadsheet, and the import above reads it back."),
     h("div", { class: "form-actions" },
       h("button", { type: "button", disabled: rows === 0, onclick: () => {
         const d = new Date();
