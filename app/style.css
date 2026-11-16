@@ -188,6 +188,11 @@ main > div {
   gap: 16px;
 }
 
+.stack {
+  display: grid;
+  gap: 16px;
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -431,6 +436,22 @@ main > div {
   background: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
+.key.plan-keep {
+  border-top-color: var(--accent);
+}
+
+.key.plan-coast {
+  border-top-color: var(--yellow);
+}
+
+.key.plan-fi {
+  border-top-color: var(--fg-strong);
+}
+
+.key.target {
+  border-top: 1px dotted var(--yellow);
+}
+
 .chart-box {
   position: relative;
 }
@@ -542,6 +563,61 @@ main > div {
   fill: var(--fg-muted);
   stroke: var(--surface);
   stroke-width: 2;
+}
+
+.chart .axis.strong {
+  fill: var(--fg);
+}
+
+/* Forecast: one line per plan, the Coast FI target, and retirement. */
+.chart .line.plan-keep {
+  stroke: var(--accent);
+}
+
+.chart .line.plan-coast {
+  stroke: var(--yellow);
+}
+
+.chart .line.plan-fi {
+  stroke: var(--fg-strong);
+}
+
+.chart .line.target {
+  stroke: var(--yellow);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+
+.chart .mark,
+.chart .dot.plan-keep,
+.chart .dot.plan-coast,
+.chart .dot.plan-fi {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.chart .plan-keep:is(.mark, .dot) {
+  fill: var(--accent);
+}
+
+.chart .plan-coast:is(.mark, .dot) {
+  fill: var(--yellow);
+}
+
+.chart .plan-fi:is(.mark, .dot) {
+  fill: var(--fg-strong);
+}
+
+.chart .marker {
+  stroke: var(--fg-muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.chart .marker-label {
+  fill: var(--fg-muted);
+  font-size: 11px;
+  font-family: var(--font);
 }
 
 .chart .cross {
@@ -701,6 +777,9 @@ label {
 
 .seg:last-child {
   border-radius: 0 6px 6px 0;
+}
+
+.seg + .seg {
   border-left: none;
 }
 
@@ -763,6 +842,18 @@ form.inline input {
 
 .settings-form .form-actions {
   margin-top: 8px;
+}
+
+.forecast-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  margin: 12px 0 4px;
+}
+
+.forecast-form input {
+  width: 180px;
 }
 
 .month-form {
@@ -880,9 +971,44 @@ td.actions {
   white-space: nowrap;
 }
 
-td .sub {
+td .sub,
+th .sub {
   color: var(--fg-muted);
   font-size: 12px;
+}
+
+table.plans th,
+table.plans td {
+  padding: 8px 10px;
+}
+
+table.plans tbody th {
+  min-width: 160px;
+}
+
+table.plans td {
+  white-space: nowrap;
+}
+
+table.plans .key {
+  vertical-align: middle;
+}
+
+table.plans .chosen {
+  background: var(--selection);
+}
+
+.good {
+  color: var(--green);
+}
+
+.bad {
+  color: var(--red);
+}
+
+.notes {
+  margin: 0;
+  padding-left: 20px;
 }
 
 table.entry input {

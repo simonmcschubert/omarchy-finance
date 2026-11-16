@@ -331,3 +331,176 @@ export function renderChart(root, options) {
     show(current === -1 ? last : current + step);
   });
 }
+
+// ---------------------------------------------------------------- forecast
+
+const FORECAST_HEIGHT = 300;
+const FORECAST_MARGIN = { top: 20, right: 20, bottom: 44, left: 72 };
+
+// The y-axis reaches up to the highest value until retirement (and at least
+// a bit above the FI number). Lines that grow beyond it after retirement
+// leave the top of the chart; the tooltip still shows their values.
+export function forecastTop(lines, fiNumber, target, retirementIndex) {
+  const until = retirementIndex >= 0 ? retirementIndex : Infinity;
+  let top = fiNumber * 1.2;
+  for (const line of lines) line.values.forEach((v, i) => { if (i <= until && v > top) top = v; });
+  for (const v of target) if (v !== null && v > top) top = v;
+  return Math.max(top, 10000);
+}
+
+// options: { months, lines: [{ key, label, values, mark (index or -1) }],
+// fiNumber, target (one value or null per month), retirementIndex (or -1),
+// format, formatAxis, formatMonth, ageOf(month) }. Lines are drawn in
+// order, so the last one is on top where they overlap.
+export function renderForecastChart(root, options) {
+  const { months, lines, fiNumber, target, retirementIndex, format, formatAxis, formatMonth, ageOf } = options;
+  root.replaceChildren();
+  const width = Math.max(320, Math.round(root.clientWidth || 640));
+  const height = FORECAST_HEIGHT;
+  const margin = FORECAST_MARGIN;
+  const plotW = width - margin.left - margin.right;
+  const plotH = height - margin.top - margin.bottom;
+  const last = months.length - 1;
+
+  const ticks = niceTicks(0, forecastTop(lines, fiNumber, target, retirementIndex));
+  const yMax = ticks.at(-1);
+  const x = (i) => margin.left + (last === 0 ? plotW / 2 : (i * plotW) / last);
+  const y = (v) => margin.top + plotH - (v / yMax) * plotH;
+  // Dots stay on the chart; lines above the top leave it (clipped).
+  const yDot = (v) => y(Math.min(v, yMax));
+
+  const chart = svg("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    width,
+    height,
+    class: "chart",
+    role: "img",
+    tabindex: 0,
+    "aria-label": "Forecast of the portfolio for each plan, by year. Use the arrow keys to read each year.",
+  });
+  const clip = svg("clipPath", { id: "forecast-clip" });
+  clip.append(svg("rect", { x: margin.left - 4, y: margin.top - 4, width: plotW + 8, height: plotH + 8 }));
+  const defs = svg("defs");
+  defs.append(clip);
+  chart.append(defs);
+
+  for (const tick of ticks) {
+    chart.append(svg("line", { class: "grid", x1: margin.left, x2: width - margin.right, y1: y(tick), y2: y(tick) }));
+    const label = svg("text", { class: "axis", x: margin.left - 8, y: y(tick), "text-anchor": "end", "dominant-baseline": "middle" });
+    label.textContent = formatAxis(tick);
+    chart.append(label);
+  }
+
+  // A label every 1, 2, 5, 10 or 20 years, at January of years whose age
+  // divides by that, so that the labels have room.
+  const years = months.length / 12;
+  const room = Math.max(2, Math.floor(plotW / 64));
+  const every = [1, 2, 5, 10, 20].find((n) => years / n <= room) ?? 50;
+  months.forEach((month, i) => {
+    if (!month.endsWith("-01") || ageOf(month) % every !== 0) return;
+    const age = svg("text", { class: "axis strong", x: x(i), y: height - 22, "text-anchor": "middle" });
+    age.textContent = `${ageOf(month)}`;
+    const year = svg("text", { class: "axis", x: x(i), y: height - 8, "text-anchor": "middle" });
+    year.textContent = month.slice(0, 4);
+    chart.append(age, year);
+  });
+  const ageTitle = svg("text", { class: "axis", x: margin.left - 8, y: height - 22, "text-anchor": "end" });
+  ageTitle.textContent = "Age";
+  chart.append(ageTitle);
+
+  if (retirementIndex >= 0 && retirementIndex <= last) {
+    chart.append(svg("line", { class: "marker", x1: x(retirementIndex), x2: x(retirementIndex), y1: margin.top - 8, y2: margin.top + plotH }));
+    const label = svg("text", { class: "marker-label", x: x(retirementIndex) + 6, y: margin.top - 8 + 4, "dominant-baseline": "hanging" });
+    label.textContent = "Retirement";
+    chart.append(label);
+  }
+
+  chart.append(svg("line", { class: "goal", x1: margin.left, x2: width - margin.right, y1: y(fiNumber), y2: y(fiNumber) }));
+  const goalLabel = svg("text", { class: "goal-label", x: margin.left + 6, y: y(fiNumber) - 6 });
+  goalLabel.textContent = `FI number ${format(fiNumber)}`;
+  chart.append(goalLabel);
+
+  const targetPath = target
+    .map((v, i) => (v === null ? null : `${i === 0 || target[i - 1] === null ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`))
+    .filter(Boolean)
+    .join(" ");
+  if (targetPath) chart.append(svg("path", { class: "line target", d: targetPath, "clip-path": "url(#forecast-clip)" }));
+
+  for (const line of lines) {
+    const d = line.values.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    chart.append(svg("path", { class: `line plan-${line.key}`, d, "clip-path": "url(#forecast-clip)" }));
+  }
+  for (const line of lines) {
+    if (line.mark >= 0 && line.mark <= last) {
+      chart.append(svg("circle", { class: `mark plan-${line.key}`, cx: x(line.mark), cy: yDot(line.values[line.mark]), r: 4.5 }));
+    }
+  }
+
+  // Hover layer: a crosshair and one dot per line, a year at a time.
+  const cross = svg("line", { class: "cross", y1: margin.top, y2: margin.top + plotH, visibility: "hidden" });
+  const dots = lines.map((line) => svg("circle", { class: `dot plan-${line.key}`, r: 4, visibility: "hidden" }));
+  const hit = svg("rect", { class: "hit", x: margin.left - 12, y: 0, width: plotW + 24, height });
+  chart.append(cross, ...dots, hit);
+
+  const tip = document.createElement("div");
+  tip.className = "tip";
+  tip.hidden = true;
+  root.append(chart, tip);
+
+  let current = -1;
+  function show(i) {
+    current = Math.max(0, Math.min(last, i));
+    for (const el of [cross, ...dots]) el.setAttribute("visibility", "visible");
+    cross.setAttribute("x1", x(current));
+    cross.setAttribute("x2", x(current));
+    lines.forEach((line, n) => {
+      dots[n].setAttribute("cx", x(current));
+      dots[n].setAttribute("cy", yDot(line.values[current]));
+    });
+
+    const title = document.createElement("div");
+    title.className = "tip-title";
+    title.textContent = `${formatMonth(months[current])} · age ${ageOf(months[current])}`;
+    tip.replaceChildren(title);
+    for (const line of [...lines].reverse()) {
+      const row = document.createElement("div");
+      row.className = "tip-row";
+      const key = document.createElement("span");
+      key.className = `key plan-${line.key}`;
+      const strong = document.createElement("strong");
+      strong.textContent = format(line.values[current]);
+      const label = document.createElement("span");
+      label.textContent = line.label;
+      row.append(key, strong, label);
+      tip.append(row);
+    }
+    tip.hidden = false;
+    const px = (x(current) / width) * chart.getBoundingClientRect().width;
+    const flip = px > root.clientWidth / 2;
+    tip.style.left = flip ? "" : `${px + 12}px`;
+    tip.style.right = flip ? `${root.clientWidth - px + 12}px` : "";
+  }
+  function hide() {
+    for (const el of [cross, ...dots]) el.setAttribute("visibility", "hidden");
+    tip.hidden = true;
+    current = -1;
+  }
+  // Whole years from the start, and the last month.
+  const snap = (i) => Math.min(last, Math.round(i / 12) * 12);
+  function nearest(event) {
+    const box = chart.getBoundingClientRect();
+    const px = ((event.clientX - box.left) / box.width) * width;
+    return last === 0 ? 0 : snap(((px - margin.left) / plotW) * last);
+  }
+
+  hit.addEventListener("pointermove", (event) => show(nearest(event)));
+  hit.addEventListener("pointerleave", hide);
+  chart.addEventListener("focus", () => show(0));
+  chart.addEventListener("blur", hide);
+  chart.addEventListener("keydown", (event) => {
+    const step = { ArrowLeft: -12, ArrowRight: 12, Home: -Infinity, End: Infinity }[event.key];
+    if (step === undefined) return;
+    event.preventDefault();
+    show(current === -1 ? 0 : snap(current + step));
+  });
+}
