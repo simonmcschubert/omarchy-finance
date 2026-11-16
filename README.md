@@ -131,6 +131,15 @@ The data file stays.
   pension assets and debts have only a value: what they are worth, or still
   owed, at month end; the history adds the net worth. An account without a
   value in a month counts with its last value.
+  **Returns**, under the monthly values, for the portfolio and each
+  invested account: time-weighted this year, over the last 1, 3 and 5 years
+  (3 and 5 a year) and since the start (a year from 12 months on): each
+  month's return (the change in value less what went in, ÷ the value at
+  the start plus half of what went in) chained, so it says what the
+  investments did, whenever money went in or out, and compares with an
+  index. And money-weighted since the start, a year (the internal rate of
+  return): what your money earned, with when it went in. Pay-ins, one-offs
+  and an account's first value count from the middle of their month.
 - **Forecast**: how the portfolio could grow until retirement, and whether
   it lasts after, in three plans and at three growth rates (6, 8 and 10 % a
   year before inflation, by default). See [Forecast](#forecast).
@@ -170,7 +179,10 @@ The data file stays.
   - Import past months from CSV, and export all monthly values as CSV.
 
 `Ctrl+1` to `Ctrl+6` open Dashboard, Expenses, Income, Portfolio, Forecast and
-Settings.
+Settings. `Ctrl+Shift+H`, or the eye at the right end of the top bar, hides
+every amount (as `••• €`, in charts and fields too) and keeps the
+percentages, for sharing the screen; again shows them. The choice is kept in
+this browser.
 
 ![Expenses, two of them inactive](docs/expenses.png)
 

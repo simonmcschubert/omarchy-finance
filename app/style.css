@@ -1298,3 +1298,8 @@ table.entry th {
   gap: 16px;
   align-items: end;
 }
+
+/* Amounts hidden: what is typed into amount fields shows as dots too. */
+body.hide-amounts input[inputmode="decimal"] {
+  -webkit-text-security: disc;
+}

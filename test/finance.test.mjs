@@ -951,6 +951,74 @@ test("emergency fund: the cash accounts in months of expenses, and what is missi
   assert.equal(F.metrics({ ...s, settings: { ...s.settings, emergencyMonths: 3 } }).emergency.short, 0);
 });
 
+test("returns: time-weighted months chained, and money-weighted", () => {
+  // 10 % up, then 10 % down: -1 % time-weighted, whatever was paid in.
+  const series = [
+    { month: "2025-12", value: 1000, payIn: 0, oneOff: 0, invested: 1000 },
+    { month: "2026-01", value: 1100, payIn: 0, oneOff: 0, invested: 1000 },
+    { month: "2026-02", value: 990, payIn: 0, oneOff: 0, invested: 1000 },
+  ];
+  const r = F.monthlyReturns(series);
+  close(r[0].rate, 0.1, "January");
+  close(r[1].rate, -0.1, "February");
+  close(F.timeWeighted(r), -0.01, "chained");
+  close(F.yearToDate(r), -0.01, "this year");
+  assert.equal(F.timeWeighted(r, 12), null, "not 12 months yet");
+
+  // Paid in mid-month counts from the middle: 1000 + 100 in, worth 1155.
+  const flow = F.monthlyReturns([
+    { month: "2026-01", value: 1000, payIn: 0, oneOff: 0, invested: 1000 },
+    { month: "2026-02", value: 1155, payIn: 100, oneOff: 0, invested: 1100 },
+  ]);
+  close(flow[0].rate, 55 / 1050, "Modified Dietz");
+  // A new account's first value goes in, it is no gain.
+  const added = F.monthlyReturns([
+    { month: "2026-01", value: 1000, payIn: 0, oneOff: 0, invested: 1000 },
+    { month: "2026-02", value: 6000, payIn: 0, oneOff: 0, invested: 6000 },
+  ]);
+  close(added[0].rate, 0, "new account");
+
+  // 1 % a month for 24 months: 12,68 % a year, both ways when nothing is paid in.
+  const steady = Array.from({ length: 25 }, (_, i) => ({ month: F.addMonths("2024-10", i), value: 1000 * 1.01 ** i, payIn: 0, oneOff: 0, invested: 1000 }));
+  const all = F.returnsOf(steady);
+  close(all.all, 1.01 ** 12 - 1, "since the start, a year");
+  close(all.year, 1.01 ** 12 - 1, "last year");
+  close(all.moneyWeighted, 1.01 ** 12 - 1, "money-weighted");
+  close(all.ytd, 1.01 ** 10 - 1, "January to October");
+  assert.equal(all.three, null);
+  assert.equal(all.since, "2024-10");
+  assert.equal(F.moneyWeighted(steady.slice(0, 1)), null);
+
+  // Paying in before a fall weighs it more with money than with time.
+  const timing = [
+    { month: "2026-01", value: 1000, payIn: 0, oneOff: 0, invested: 1000 },
+    { month: "2026-02", value: 2200, payIn: 1000, oneOff: 0, invested: 2000 },
+    { month: "2026-03", value: 1100, payIn: 0, oneOff: 0, invested: 2000 },
+  ];
+  const t = F.returnsOf(timing);
+  close(t.all, (1 + 200 / 1500) * 0.5 - 1, "two months, time-weighted");
+  const perMonth = { time: (1 + t.all) ** (1 / 2) - 1, money: (1 + t.moneyWeighted) ** (1 / 12) - 1 };
+  assert.ok(perMonth.money < perMonth.time - 0.03, `money-weighted ${perMonth.money} is worse than time-weighted ${perMonth.time}`);
+});
+
+test("accountSeries: one account's values, pay-ins and one-offs", () => {
+  let s = F.emptyStore();
+  s = F.saveAccount(s, null, "A").store;
+  s = F.saveAccount(s, null, "B", "cash").store;
+  const [a, b] = s.accounts.map((x) => x.id);
+  s = F.saveMonth(s, "2026-01", [{ account: a, value: 1000, payIn: 0 }, { account: b, value: 500, payIn: 0 }]);
+  s = F.saveMonth(s, "2026-02", [{ account: a, value: 1200, payIn: 100, oneOff: 50 }]);
+  assert.deepEqual(F.accountSeries(s, a), [
+    { month: "2026-01", value: 1000, payIn: 0, oneOff: 0, invested: 1000 },
+    { month: "2026-02", value: 1200, payIn: 100, oneOff: 50, invested: 1150 },
+  ]);
+  assert.equal(F.accountSeries(s, b).length, 1, "any kind of account");
+  // Until a later month: its last value carries on, nothing paid in.
+  assert.deepEqual(F.accountSeries(s, b, "2026-03").map((m) => [m.month, m.value, m.payIn, m.invested]),
+    [["2026-01", 500, 0, 500], ["2026-02", 500, 0, 500], ["2026-03", 500, 0, 500]]);
+  assert.equal(F.accountSeries(s, a, "2026-02").length, 2, "already there");
+});
+
 test("countsIn: from its first month until before its end", () => {
   const birthYear = 1990;
   const retirement = (1990 + 67) * 12; // January 2057
