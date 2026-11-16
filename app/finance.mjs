@@ -4,7 +4,7 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 11;
+export const VERSION = 12;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
@@ -25,11 +25,14 @@ export const DEFAULT_SETTINGS = Object.freeze({
   inflation: 3,
   birthYear: null, // not set until entered; the forecast needs it
   retirementAge: 67,
+  emergencyMonths: 6, // the emergency fund to keep in cash, in months of expenses
 });
 
 // What the birth year and the retirement age may be.
 export const BIRTH_YEARS = Object.freeze({ min: 1900, max: 2100 });
 export const RETIREMENT_AGES = Object.freeze({ min: 30, max: 80 });
+// What the emergency fund target may be, in months of expenses.
+export const EMERGENCY_MONTHS = Object.freeze({ min: 0, max: 60 });
 // What the age an expense or income starts or ends at may be.
 export const AGES = Object.freeze({ min: 0, max: 120 });
 
@@ -55,7 +58,7 @@ export function emptyStore() {
 // ---------------------------------------------------------------- file format
 
 const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events"];
-const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge"];
+const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge", "emergencyMonths"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths", "from", "until"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active", "essential"];
 const ACCOUNT_KEYS = ["id", "name", "kind"];
@@ -165,7 +168,7 @@ function upgradeFromVersion5(value) {
 // much more expected return, so the return after inflation stays about the
 // same: 5 % becomes 8 %.
 function upgradeFromVersion6(value) {
-  checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "inflation"), "settings");
+  checkKeys(value.settings, ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "birthYear", "retirementAge"], "settings");
   const { expectedReturn } = value.settings;
   const inflation = DEFAULT_SETTINGS.inflation;
   const settings = { ...value.settings, inflation };
@@ -205,6 +208,16 @@ function upgradeFromVersion9(value) {
   return next;
 }
 
+// Version 11 had no emergency fund target: upgraded files get the default.
+function upgradeFromVersion11(value) {
+  const next = { ...value, version: 12 };
+  if (isObject(value.settings)) {
+    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "emergencyMonths"), "settings");
+    next.settings = { ...value.settings, emergencyMonths: DEFAULT_SETTINGS.emergencyMonths };
+  }
+  return next;
+}
+
 // Version 10 had broker accounts only: every account is invested.
 function upgradeFromVersion10(value) {
   const next = { ...value, version: 11 };
@@ -241,6 +254,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 8) value = upgradeFromVersion8(value);
     if (isObject(value) && value.version === 9) value = upgradeFromVersion9(value);
     if (isObject(value) && value.version === 10) value = upgradeFromVersion10(value);
+    if (isObject(value) && value.version === 11) value = upgradeFromVersion11(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -248,7 +262,7 @@ export function parseStore(value) {
     if (value.version !== VERSION) throw new Error(`unsupported version ${JSON.stringify(value.version)}`);
 
     checkKeys(value.settings, SETTINGS_KEYS, "settings");
-    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, inflation, birthYear, retirementAge } = value.settings;
+    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, inflation, birthYear, retirementAge, emergencyMonths } = value.settings;
     if (typeof withdrawalRate !== "number" || !(withdrawalRate > 0 && withdrawalRate <= 100)) {
       throw new Error("settings.withdrawalRate must be above 0 and at most 100");
     }
@@ -270,6 +284,9 @@ export function parseStore(value) {
     }
     if (!isWholeIn(retirementAge, RETIREMENT_AGES)) {
       throw new Error(`settings.retirementAge must be a whole number from ${RETIREMENT_AGES.min} to ${RETIREMENT_AGES.max}`);
+    }
+    if (!isWholeIn(emergencyMonths, EMERGENCY_MONTHS)) {
+      throw new Error(`settings.emergencyMonths must be a whole number from ${EMERGENCY_MONTHS.min} to ${EMERGENCY_MONTHS.max}`);
     }
 
     checkKeys(value.categories, KINDS, "categories");
@@ -633,6 +650,13 @@ export function netWorthSeries(store) {
   return series;
 }
 
+// How long `cash` pays `expenses` (a month): { cash, months (null without
+// expenses), target (months), short (what is missing to the target, 0 when
+// none) }.
+export function emergencyFund(cash, expenses, target) {
+  return { cash, months: expenses > 0 ? cash / expenses : null, target, short: Math.max(0, target * expenses - cash) };
+}
+
 // Average monthly pay-in over the last 12 months of the series (fewer when
 // the history is shorter). Returns { average, months } or null.
 export function averagePayIn(series, window = 12) {
@@ -882,6 +906,7 @@ export function metrics(store, now = currentMonth()) {
   const expenses = baseExpenses + buffer;
   const multiple = 100 / withdrawalRate;
   const series = portfolioSeries(store);
+  const worth = netWorthSeries(store);
   const last = series.at(-1) ?? null;
   const payIn = averagePayIn(series);
   // Retiring in a month after the latest one: the FI number of that month.
@@ -924,7 +949,13 @@ export function metrics(store, now = currentMonth()) {
     oneOffs,
     series,
     // Net worth in the latest month with any value, and the month before.
-    netWorth: netWorthSeries(store).slice(-2),
+    netWorth: worth.slice(-2),
+    // The emergency fund: the cash accounts' latest values, in months of
+    // this month's expenses, and how much is missing to the target. null
+    // without a cash account.
+    emergency: store.accounts.some((a) => a.kind === "cash")
+      ? emergencyFund(worth.at(-1)?.kinds.cash ?? 0, expenses, store.settings.emergencyMonths)
+      : null,
     latestMonth: last ? last.month : null,
     portfolio: last ? last.value : null,
     payIn,

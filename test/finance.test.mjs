@@ -17,12 +17,16 @@ function store(parts = {}) {
   return s;
 }
 
+// Settings as versions 7 to 11 had them: without the emergency fund.
+const SETTINGS_V11 = (({ emergencyMonths, ...rest }) => rest)(F.DEFAULT_SETTINGS);
+
 // An upgraded store without what versions after 7 added, to compare with
 // the file it came from.
 function withoutLater({ events, ...s }) {
   const plain = ({ from, until, ...item }) => item;
   return {
     ...s,
+    settings: (({ emergencyMonths, ...rest }) => rest)(s.settings),
     expenses: s.expenses.map(({ essential, ...item }) => plain(item)),
     income: s.income.map(plain),
     records: s.records.map(({ oneOff, ...record }) => record),
@@ -413,6 +417,8 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
     [{ ...roundTrip, settings: { ...roundTrip.settings, birthYear: 1899 } }, /birthYear must be null or a year from 1900 to 2100/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, retirementAge: 66.5 } }, /retirementAge must be a whole number from 30 to 80/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, retirementAge: null } }, /retirementAge/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, emergencyMonths: 2.5 } }, /emergencyMonths must be a whole number from 0 to 60/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, emergencyMonths: 61 } }, /emergencyMonths/],
     [{ ...roundTrip, settings: { ...F.DEFAULT_SETTINGS, retirementAge: undefined } }, /retirementAge/],
     [{ ...roundTrip, categories: { ...roundTrip.categories, expenses: ["Food", "food"] } }, /repeats the name/],
     [{ ...roundTrip, categories: { ...roundTrip.categories, income: [""] } }, /not a name/],
@@ -554,7 +560,7 @@ test("a version 1 file is upgraded: euros, and the categories its items use", ()
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67 });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6 });
   assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: ["Work"] });
   assert.deepEqual(s.expenses.map((e) => e.category), ["Housing", "Housing", "", "Car"]);
   assert.deepEqual(s.expenses.map((e) => e.active), [true, true, true, true], "every expense was active");
@@ -584,7 +590,7 @@ test("a version 2 file is upgraded: every expense is active", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67 });
+  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6 });
   assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true, essential: false, from: null, until: null })));
   assert.deepEqual(s.income, v2.income.map((i) => ({ ...i, from: null, until: { at: "retirement" } })));
   assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events"]);
@@ -609,7 +615,7 @@ test("a version 3 file is upgraded: the default number format", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67 });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6 });
   assert.deepEqual({ ...withoutLater(s), version: 3, settings: v3.settings }, v3, "nothing else changes");
   assert.equal("numberFormat" in v3.settings, false, "the parsed value is left alone");
 
@@ -632,7 +638,7 @@ test("a version 4 file is upgraded: the default expected return", () => {
   const s = result.store;
   assert.equal(s.version, F.VERSION);
   // 5 % after inflation then, so 8 % before 3 % inflation now.
-  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67 });
+  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6 });
   assert.deepEqual({ ...withoutLater(s), version: 4, settings: v4.settings }, v4, "nothing else changes");
   assert.equal("expectedReturn" in v4.settings, false, "the parsed value is left alone");
 
@@ -725,7 +731,7 @@ test("a version 5 file is upgraded: no birth year, retirement at 67", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v5.settings, expectedReturn: 9, inflation: 3, birthYear: null, retirementAge: 67 });
+  assert.deepEqual(s.settings, { ...v5.settings, expectedReturn: 9, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6 });
   assert.deepEqual({ ...withoutLater(s), version: 5, settings: v5.settings }, v5, "nothing else changes");
   assert.equal("birthYear" in v5.settings, false, "the parsed value is left alone");
 
@@ -747,7 +753,7 @@ test("a version 6 file is upgraded: the expected return before inflation, and 3 
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v6.settings, expectedReturn: 7.25, inflation: 3 });
+  assert.deepEqual(s.settings, { ...v6.settings, expectedReturn: 7.25, inflation: 3, emergencyMonths: 6 });
   assert.deepEqual({ ...withoutLater(s), version: 6, settings: v6.settings }, v6, "nothing else changes");
   assert.equal(v6.settings.expectedReturn, 4.25, "the parsed value is left alone");
 
@@ -760,7 +766,7 @@ test("a version 6 file is upgraded: the expected return before inflation, and 3 
 test("a version 7 file is upgraded: no expense is essential", () => {
   const v7 = {
     version: 7,
-    settings: { ...F.DEFAULT_SETTINGS },
+    settings: { ...SETTINGS_V11 },
     categories: { expenses: ["Housing"], income: [] },
     expenses: [
       { id: "e1", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, active: true },
@@ -781,7 +787,7 @@ test("a version 7 file is upgraded: no expense is essential", () => {
 test("a version 8 file is upgraded: expenses always count, income until retirement", () => {
   const v8 = {
     version: 8,
-    settings: { ...F.DEFAULT_SETTINGS, birthYear: 1990 },
+    settings: { ...SETTINGS_V11, birthYear: 1990 },
     categories: { expenses: [], income: [] },
     expenses: [{ id: "e1", name: "Rent", category: "", amount: 100, everyMonths: 1, active: true, essential: true }],
     income: [{ id: "i1", name: "Salary", category: "", amount: 300, everyMonths: 1 }],
@@ -793,8 +799,10 @@ test("a version 8 file is upgraded: expenses always count, income until retireme
   assert.deepEqual(result.store, {
     ...v8,
     version: F.VERSION,
+    settings: { ...v8.settings, emergencyMonths: 6 },
     expenses: [{ ...v8.expenses[0], from: null, until: null }],
     income: [{ ...v8.income[0], from: null, until: { at: "retirement" } }],
+    accounts: [],
     events: [],
   });
   assert.equal("from" in v8.expenses[0], false, "the parsed value is left alone");
@@ -807,7 +815,7 @@ test("a version 8 file is upgraded: expenses always count, income until retireme
 test("a version 9 file is upgraded: no one-offs", () => {
   const v9 = {
     version: 9,
-    settings: { ...F.DEFAULT_SETTINGS },
+    settings: { ...SETTINGS_V11 },
     categories: { expenses: [], income: [] },
     expenses: [],
     income: [],
@@ -869,10 +877,11 @@ test("planned one-offs: saved, checked, and in the month they come", () => {
 });
 
 test("a version 10 file is upgraded: every account is invested", () => {
-  const v10 = { ...F.emptyStore(), version: 10, accounts: [{ id: "a", name: "A" }] };
+  const v10 = { ...F.emptyStore(), version: 10, settings: { ...SETTINGS_V11 }, accounts: [{ id: "a", name: "A" }] };
   const result = F.parseStore(v10);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v10, version: F.VERSION, accounts: [{ id: "a", name: "A", kind: "invested" }] });
+  assert.deepEqual(withoutLater(result.store), { ...withoutLater(v10), version: F.VERSION });
+  assert.equal(result.store.accounts[0].kind, "invested");
   assert.equal("kind" in v10.accounts[0], false, "the parsed value is left alone");
 });
 
@@ -910,6 +919,36 @@ test("net worth: every kind of account, debts taken off; the portfolio is the in
   assert.equal(F.saveAccount(s, id.Broker, "Broker").store.accounts[0].kind, "invested", "renaming keeps the kind");
   assert.deepEqual(F.saveAccount(s, null, "X", "gold"), { ok: false, error: "Choose what the account holds" });
   assert.equal(F.saveAccount(F.emptyStore(), null, "New").store.accounts[0].kind, "invested");
+});
+
+test("a version 11 file is upgraded: an emergency fund of 6 months", () => {
+  const v11 = { ...F.emptyStore(), version: 11, settings: { ...SETTINGS_V11, bufferPercent: 5 } };
+  const result = F.parseStore(v11);
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.store, { ...v11, version: F.VERSION, settings: { ...v11.settings, emergencyMonths: 6 } });
+  assert.match(F.parseStore({ ...v11, settings: { ...v11.settings, emergencyMonths: 3 } }).error, /unknown field "emergencyMonths"/);
+});
+
+test("emergency fund: the cash accounts in months of expenses, and what is missing", () => {
+  assert.deepEqual(F.emergencyFund(6000, 2000, 6), { cash: 6000, months: 3, target: 6, short: 6000 });
+  assert.deepEqual(F.emergencyFund(15000, 2000, 6), { cash: 15000, months: 7.5, target: 6, short: 0 });
+  assert.equal(F.emergencyFund(5000, 0, 6).months, null);
+
+  let s = F.emptyStore();
+  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "", amount: 2000 * EUR, everyMonths: 1, from: null, until: null, active: true, essential: false });
+  s = F.saveAccount(s, null, "Broker", "invested").store;
+  assert.equal(F.metrics(s).emergency, null, "no cash account");
+  s = F.saveAccount(s, null, "Tagesgeld", "cash").store;
+  s = F.saveAccount(s, null, "Savings", "cash").store;
+  const [broker, tagesgeld, savings] = s.accounts.map((a) => a.id);
+  s = F.saveMonth(s, "2026-09", [{ account: broker, value: 50000 * EUR, payIn: 0 }, { account: tagesgeld, value: 4000 * EUR, payIn: 0 }]);
+  s = F.saveMonth(s, "2026-10", [{ account: savings, value: 7000 * EUR, payIn: 0 }]);
+  // 11,000 in cash, 2,200 a month with the buffer: 5 months of 6.
+  const e = F.metrics(s).emergency;
+  assert.equal(e.cash, 11000 * EUR);
+  close(e.months, 5, "months");
+  close(e.short, 2200 * EUR, "short");
+  assert.equal(F.metrics({ ...s, settings: { ...s.settings, emergencyMonths: 3 } }).emergency.short, 0);
 });
 
 test("countsIn: from its first month until before its end", () => {
