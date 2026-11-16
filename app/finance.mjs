@@ -4,7 +4,7 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 7;
+export const VERSION = 8;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
@@ -49,7 +49,7 @@ export function emptyStore() {
 const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records"];
 const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths"];
-const EXPENSE_KEYS = [...ITEM_KEYS, "active"];
+const EXPENSE_KEYS = [...ITEM_KEYS, "active", "essential"];
 const ACCOUNT_KEYS = ["id", "name"];
 const RECORD_KEYS = ["month", "account", "value", "payIn"];
 const MAX_CENTS = 1e13; // 100 billion; anything bigger is a typo
@@ -164,6 +164,16 @@ function upgradeFromVersion6(value) {
   return { ...value, version: 7, settings };
 }
 
+// Version 7 could not mark expenses as essential, for Lean FI: upgraded
+// expenses are not.
+function upgradeFromVersion7(value) {
+  const next = { ...value, version: 8 };
+  if (Array.isArray(value.expenses)) {
+    next.expenses = value.expenses.map((item) => (isObject(item) ? { ...item, essential: false } : item));
+  }
+  return next;
+}
+
 // Checks a parsed data file. Returns { ok: true, store } or { ok: false, error }.
 // `null` (no file yet) is an empty store. Older versions are upgraded.
 export function parseStore(value) {
@@ -175,6 +185,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 4) value = upgradeFromVersion4(value);
     if (isObject(value) && value.version === 5) value = upgradeFromVersion5(value);
     if (isObject(value) && value.version === 6) value = upgradeFromVersion6(value);
+    if (isObject(value) && value.version === 7) value = upgradeFromVersion7(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -236,6 +247,7 @@ export function parseStore(value) {
           throw new Error(`${where} everyMonths must be a whole number from 1 to 120`);
         }
         if (kind === "expenses" && typeof item.active !== "boolean") throw new Error(`${where} active must be true or false`);
+        if (kind === "expenses" && typeof item.essential !== "boolean") throw new Error(`${where} essential must be true or false`);
       });
     }
 
@@ -598,6 +610,20 @@ export function metrics(store) {
   const payIn = averagePayIn(series);
   // From the latest month on, with the average pay-in of the last 12 months.
   const ahead = last && fiNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, fiNumber, inflation) : null;
+  // Lean FI: the same for the essential expenses only, with the buffer.
+  const essential = counted(store.expenses).filter((item) => item.essential);
+  let lean = null;
+  if (essential.length > 0) {
+    const leanExpenses = sum(essential.map(monthlyAmount)) * (1 + bufferPercent / 100);
+    const leanNumber = leanExpenses * 12 * multiple;
+    const leanAhead = last && leanNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, leanNumber, inflation) : null;
+    lean = {
+      expenses: leanExpenses,
+      fiNumber: leanNumber,
+      progress: last && leanNumber > 0 ? last.value / leanNumber : null,
+      months: leanAhead ? leanAhead.length : null,
+    };
+  }
   return {
     income,
     baseExpenses,
@@ -619,6 +645,10 @@ export function metrics(store) {
     gains: gains(series),
     // Whole months of expenses the portfolio pays for.
     coveredMonths: last && expenses > 0 ? Math.floor(last.value / expenses) : null,
+    // null without essential expenses. Otherwise { expenses (a month, with
+    // the buffer), fiNumber, progress, months } as for FI: progress and
+    // months null without a portfolio, months null over 100 years.
+    lean,
   };
 }
 
