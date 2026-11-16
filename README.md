@@ -6,7 +6,8 @@ numbers that matter on the way to financial independence (FI). No account and
 no sync: everything stays in one file on this computer.
 
 It runs as an Omarchy web app: a small local server and a "Finance" window
-in the app launcher. Colors follow the current Omarchy theme.
+in the app launcher. Colors follow the current Omarchy theme; the charts
+keep colors of their own, so that their lines stay apart in every theme.
 
 ![Dashboard](docs/dashboard.png)
 
@@ -159,9 +160,9 @@ The **Portfolio** chart has two views; the one picked last stays picked.
   much of that month's change was paid in and how much came from the market.
   The FI number shows once the data reaches it.
 - **Path to FI** (needs active expenses): from the latest month, the value
-  goes on growing the way Time to FI counts, as a dotted line until it
+  goes on growing the way Time to FI counts, as a dashed line until it
   reaches the FI number, with a band from 2 points below to 2 points above
-  the expected return (6 % to 10 % at 8 %). From the latest month on, the
+  the expected return (6 % to 10 % at 8 %), also up to the FI number. From the latest month on, the
   FI number rises by the inflation. The line under the chart says when each
   reaches the FI number, and what the FI number is by then.
 
@@ -176,37 +177,41 @@ left over, or says how much more than the income those two take.
 
 ![Forecast](docs/forecast.png)
 
-Three plans, each paying in the same amount a month (it starts as the
-average pay-in of the last 12 months, and can be changed, to 0 too):
+Three plans, each investing the same amount a month until it changes
+course (the amount starts as the average pay-in of the last 12 months, and
+can be changed, to 0 too). A tile for each answers its question:
 
-| Plan | Pays in | Then |
+| Plan | Invests | Its tile says |
 | --- | --- | --- |
-| Keep going | until retirement | |
-| Coast | until Coast FI | only the smaller amount set on the page (default 0), until retirement |
-| Retire at FI | until the portfolio reaches the FI number | lives off the portfolio |
+| Keep investing | until retirement | what the portfolio is worth when retirement starts |
+| Coast | until Coast FI, then only the amount set for after it (default 0) | when Coast FI is |
+| Retire early | until the portfolio reaches the FI number, then lives off it | when that is |
 
 Retirement starts in January of the year you reach the retirement age. From
 then on every plan lives off the portfolio: each month it takes out the
 monthly expenses from the dashboard (with the buffer), risen by the
-inflation. Coast FI is the first month from which paying in only the
-smaller amount makes the portfolio reach the FI number when retirement
-starts; with 0, it gets there on its own. The page says what the expenses
-and the FI number are by then.
+inflation. Coast FI is the first month from which investing only the
+amount for after it makes the portfolio reach the FI number when
+retirement starts; with 0, it gets there on its own. The page says what the
+expenses are by then, and the tiles what the FI number is.
+
+Each tile also says whether the money lasts, that is whether some is still
+left at age 150, or at which age it runs out. When it lasts but would run
+out at the lowest growth rate, the tile says that too.
 
 The growth rates are the expected return from Settings and 2 points less
-and more, as on the Path to FI chart. The chart shows one at a time, up to
-age 95, with the FI number
-and the Coast FI target (the value Coast FI needs in each month). The table
-shows every plan at every growth rate: when it reaches Coast FI or FI, the
-value at the retirement age, and whether it lasts. A plan lasts when money
-is still left at age 150; otherwise the table says at which age it runs out.
+and more, as on the Path to FI chart; the buttons at the top switch the
+tiles and the chart between them. The chart shows the three plans up to age
+95, in the colors of their tiles, with the FI number and retirement. Coast
+and Retire early follow Keep investing's line until a dot where they change
+course.
 
 - It starts from the portfolio in the latest month, and grows it by the
   growth rate every month (8 % a year is about 0.64 % a month), as Time to
   FI on the dashboard does.
 - Every amount is in the money of its year: growth is before inflation, and
   the expenses and the FI number rise by the inflation from Settings (3 % a
-  year by default). What is paid in stays the same.
+  year by default). What is invested stays the same.
 - The growth is the same every year. Real markets are not, and bad years
   right after you start living off the portfolio hurt most.
 - Taxes and the state pension are left out.

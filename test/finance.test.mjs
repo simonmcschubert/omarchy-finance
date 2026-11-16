@@ -803,10 +803,10 @@ function plan(changes = {}) {
 test("forecast: the growth rates are the expected return and 2 points less and more", () => {
   assert.deepEqual(F.growthRates(5), { low: 3, mid: 5, high: 7 });
   assert.deepEqual(F.growthRates(1.5), { low: -0.5, mid: 1.5, high: 3.5 });
-  // Below 0 too: the portfolio then shrinks, and the target is above the FI number.
+  // Below 0 too: the portfolio then shrinks, and never coasts to the FI number.
   const f = F.forecast(plan({ growth: -0.5, contribution: 0 }));
   assert.ok(f.plans.keep.values[12] < 50000 * EUR);
-  assert.ok(f.target[0] > 600000 * EUR);
+  assert.equal(f.plans.coast.coastMonth, null);
 });
 
 test("forecast: months from the start to age 95, retirement in January of the year of the age", () => {
@@ -841,8 +841,6 @@ test("forecast: Coast FI is the first month from which the portfolio reaches the
   const left = (index) => F.monthIndex("2056-12") - (F.monthIndex("2026-10") + index);
   assert.ok(coast.values[i] * (1 + r) ** left(i) >= 600000 * EUR);
   assert.ok(coast.values[i - 1] * (1 + r) ** left(i - 1) < 600000 * EUR);
-  close(f.target[i], (600000 * EUR) / (1 + r) ** left(i), "target");
-  assert.equal(f.target[F.monthIndex("2057-01") - F.monthIndex("2026-10")], null, "no target from retirement on");
   // Then nothing is paid in, and the portfolio grows to the FI number.
   close(coast.values[i + 1], coast.values[i] * (1 + r), "after Coast FI");
   assert.ok(coast.atRetirement >= 600000 * EUR && coast.atRetirement < 600000 * EUR * 1.01);
@@ -910,7 +908,6 @@ test("forecast: past the retirement age every plan lives off the portfolio", () 
   const f = F.forecast(plan({ birthYear: 1950 }));
   assert.equal(f.retirement, "2017-01");
   assert.equal(f.months.at(-1), "2045-12", "until 95");
-  assert.ok(f.target.every((v) => v === null));
   for (const p of F.PLANS) {
     const { values, coastMonth, fiMonth, atRetirement } = f.plans[p];
     assert.deepEqual([coastMonth, fiMonth, atRetirement], [null, null, null]);
@@ -942,7 +939,8 @@ test("forecast: with inflation, expenses and the FI number rise and pay-ins stay
   const coast = f.plans.coast;
   assert.ok(coast.atRetirement >= f.fiAtRetirement && coast.atRetirement < f.fiAtRetirement * 1.01);
   const j = F.monthIndex(coast.coastMonth) - F.monthIndex("2026-10");
-  close(f.target[j], f.fiAtRetirement / (1 + r) ** (362 - j), "target");
+  assert.ok(coast.values[j] * (1 + r) ** (362 - j) >= f.fiAtRetirement, "grows to the FI number of then");
+  assert.ok(coast.values[j - 1] * (1 + r) ** (363 - j) < f.fiAtRetirement, "not a month earlier");
 
   // Retire at FI takes out the expenses of each month.
   const fi = f.plans.fi;

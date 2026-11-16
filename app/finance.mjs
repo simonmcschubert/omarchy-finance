@@ -697,9 +697,8 @@ export function ageIn(month, birthYear) {
 //
 // Returns { months: shown months from start on, retirement: its first
 // month, goal: the FI number of each shown month, fiAtRetirement: the FI
-// number when retirement starts (null if it has already), target: the
-// Coast FI target for each shown month before retirement (null after),
-// plans: { keep, coast, fi } } where each plan is { values: one per shown
+// number when retirement starts (null if it has already), plans: { keep,
+// coast, fi } } where each plan is { values: one per shown
 // month, coastMonth, fiMonth (when reached, or null), atRetirement (value
 // when retirement starts, or null if it has already), runsOut (the first
 // month with nothing left, or null if it lasts) }.
@@ -724,21 +723,12 @@ export function forecast(params) {
     const factor = (1 + rate) ** n;
     return v * factor + monthly * (rate === 0 ? n : (factor - 1) / rate);
   };
-  // The value from which paying in only coastContribution is enough.
-  const coastTarget = (index) => {
-    const n = retirement - 1 - index;
-    const factor = (1 + rate) ** n;
-    const paidIn = coastContribution * (rate === 0 ? n : (factor - 1) / rate);
-    return Math.max(0, (fiAtRetirement - paidIn) / factor);
-  };
 
   const months = [];
   const goal = [];
-  const target = [];
   for (let index = first; index <= lastShown; index++) {
     months.push(monthFromIndex(index));
     goal.push(goalAt(index));
-    target.push(index < retirement ? coastTarget(index) : null);
   }
 
   const run = (plan) => {
@@ -783,7 +773,6 @@ export function forecast(params) {
     retirement: monthFromIndex(retirement),
     goal,
     fiAtRetirement: first < retirement ? fiAtRetirement : null,
-    target,
     plans: Object.fromEntries(PLANS.map((plan) => [plan, run(plan)])),
   };
 }
