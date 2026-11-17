@@ -306,7 +306,7 @@ with your age then.
 | --- | --- |
 | FI | The FI number: what the portfolio would need when retiring now. What it pays a month: the expenses that count then, plus the buffer, less the income that does. Once nothing starts or ends any more, that amount × 12 ÷ withdrawal rate (× 25 at 4 %); until then, what it pays on top of that, month by month, such as bridging the years until a pension starts. Never more than the highest monthly amount × 12 ÷ withdrawal rate. Without starts and ends: monthly expenses × 12 ÷ withdrawal rate |
 | Lean FI | The same for the essential expenses only, with the buffer: the FI number for a lean budget. Shown once an active expense is essential |
-| Coast FI | What the portfolio needs now to grow to the FI number by the retirement age without another pay-in, at the expected return and with the planned one-offs: as the Coast plan on the Forecast page counts it. Shown with a year of birth, until retirement |
+| Coast FI | What the portfolio needs now to grow to the FI number by the retirement age without another pay-in, at the expected return, plus what planned one-offs take out before then: as the Coast plan on the Forecast page counts it. Planned pay-ins and one-offs that pay in don't lower it; they only make the portfolio get there sooner. Shown with a year of birth, until retirement |
 
 How much it has is the portfolio ÷ what it needs. When, for FI and Lean
 FI, is Time to FI, counted as the Forecast page's Retire early counts it.
@@ -414,8 +414,9 @@ not in the data file.
 **Planned one-offs**, in Settings › Data, are money that comes in
 or goes out once in a month to come: an inheritance, a house deposit, a
 car, a sabbatical (what you live on then, and the pay-ins you skip). Every
-plan gets them in their month, as do Time to FI and the Path to FI chart;
-Coast FI counts on those still to come before retirement. Amounts are in
+plan gets them in their month, as do Time to FI and the Path to FI chart.
+Coast FI sets aside those that take money out before retirement, but never
+counts on one that pays in before it comes. Amounts are in
 today's money and rise with inflation, like expenses. They are saved; a
 one-off that has happened goes under Portfolio.
 
