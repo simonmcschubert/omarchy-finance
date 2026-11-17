@@ -20,13 +20,14 @@ function store(parts = {}) {
 // A store for fiOutlook with an FI number of `goal` for good (one expense,
 // no buffer, 4 %) and a portfolio of `value` in October 2026, after
 // `payIn` a month for a year; `rate` is the expected return.
-function outlookStore({ value = 0, payIn = 0, goal = 0, rate = 0, inflation = 0, settings = {}, events = [] } = {}) {
+function outlookStore({ value = 0, payIn = 0, goal = 0, rate = 0, inflation = 0, settings = {}, events = [], changes = [] } = {}) {
   return store({
     settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, withdrawalRate: 4, expectedReturn: rate, inflation, ...settings },
     expenses: goal ? [{ id: "e", name: "E", category: "", amount: goal / 300, everyMonths: 1, active: true, essential: false }] : [],
     accounts: [{ id: "a", name: "A" }],
     records: Array.from({ length: 12 }, (_, k) => ({ month: F.addMonths("2025-11", k), account: "a", value, payIn })),
     events,
+    payInChanges: changes,
   });
 }
 // Its outlook in November 2026.
@@ -44,18 +45,32 @@ function monthsTo(start, payIn, rate, goal, inflation = 0) {
   return null;
 }
 
+// The same, with paid(n) paid in the nth month after `start`.
+function monthsWith(start, paid, rate, goal, inflation = 0) {
+  let value = start;
+  for (let n = 0; n <= F.MAX_PROJECTION_MONTHS; n++) {
+    if (n > 0) value = Math.max(0, value * (1 + monthly(rate)) + paid(n));
+    if (value >= F.inflated(goal, inflation, n)) return n;
+  }
+  return null;
+}
+
 // Settings as versions 7 to 11 had them: without the emergency fund and
-// the future pay-in; and as version 12 had them, without the future pay-in.
-const SETTINGS_V12 = (({ futurePayIn, ...rest }) => rest)(F.DEFAULT_SETTINGS);
+// the future pay-in; as version 12 had them, without the future pay-in;
+// and as version 13 had them, without the choice to raise pay-ins.
+const SETTINGS_V13 = (({ payInsRiseWithInflation, ...rest }) => rest)(F.DEFAULT_SETTINGS);
+const SETTINGS_V12 = (({ futurePayIn, ...rest }) => rest)(SETTINGS_V13);
 const SETTINGS_V11 = (({ emergencyMonths, ...rest }) => rest)(SETTINGS_V12);
+// An empty store as versions 10 to 13 had it: without planned pay-in changes.
+const EMPTY_V13 = (({ payInChanges, ...rest }) => rest)(F.emptyStore());
 
 // An upgraded store without what versions after 7 added, to compare with
 // the file it came from.
-function withoutLater({ events, ...s }) {
+function withoutLater({ events, payInChanges, ...s }) {
   const plain = ({ from, until, ...item }) => item;
   return {
     ...s,
-    settings: (({ emergencyMonths, futurePayIn, ...rest }) => rest)(s.settings),
+    settings: (({ emergencyMonths, futurePayIn, payInsRiseWithInflation, ...rest }) => rest)(s.settings),
     expenses: s.expenses.map(({ essential, ...item }) => plain(item)),
     income: s.income.map(plain),
     records: s.records.map(({ oneOff, ...record }) => record),
@@ -237,7 +252,7 @@ test("portfolio: what an account held in its first month counts as paid in", () 
   });
   const series = F.portfolioSeries(s);
   assert.deepEqual(series.map((m) => [m.value, m.payIn, m.invested]), [[1000, 1000, 1000], [3100, 350, 3050]]);
-  assert.deepEqual(F.metrics(s).payIn, { amount: 675, months: 2 }, "the pay-in average still counts only pay-ins");
+  assert.deepEqual(F.metrics(s).payIn, { amount: 675, months: 2, change: null }, "the pay-in average still counts only pay-ins");
 });
 
 test("investment rate uses the average pay-in of the last 12 months", () => {
@@ -257,7 +272,7 @@ test("investment rate uses the average pay-in of the last 12 months", () => {
     settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0 },
   });
   const m = F.metrics(s);
-  assert.deepEqual(m.payIn, { amount: 550 * EUR, months: 12 });
+  assert.deepEqual(m.payIn, { amount: 550 * EUR, months: 12, change: null });
   assert.equal(m.investmentRate, 550 / 2000);
   assert.equal(m.portfolio, 14000 * EUR);
   assert.equal(m.latestMonth, "2026-02");
@@ -274,7 +289,7 @@ test("with less than 12 months of history the average uses the months there are"
     ],
   });
   // Sep, Oct (nothing paid in), Nov
-  assert.deepEqual(F.metrics(s).payIn, { amount: 300, months: 3 });
+  assert.deepEqual(F.metrics(s).payIn, { amount: 300, months: 3, change: null });
 });
 
 test("incomeSplit: expenses with the buffer, the average pay-in, and the rest", () => {
@@ -417,16 +432,16 @@ test("FI outlook: no goal, at the goal already, out of reach, close by", () => {
 
 test("FI outlook: a withdrawal on average counts as nothing paid in", () => {
   const o = outlook({ value: 1000 * EUR, payIn: -500 * EUR, goal: 5000 * EUR, rate: 5 });
-  assert.deepEqual(o.payIn, { amount: -500 * EUR, months: 12, invested: 0, withdrawal: true });
+  assert.deepEqual(o.payIn, { amount: -500 * EUR, months: 12, change: null, invested: 0, withdrawal: true, changes: [], rises: false });
   const zero = outlook({ value: 1000 * EUR, payIn: 0, goal: 5000 * EUR, rate: 5 });
   assert.deepEqual(o.path(), zero.path(), "the chart");
   assert.deepEqual(o.milestones(), zero.milestones(), "the milestones");
   assert.deepEqual(o.forecast(), zero.forecast(), "the Forecast");
   assert.equal(outlook({ payIn: 1234.4 }).payIn.invested, 1234, "in whole cents");
-  assert.deepEqual(F.fiOutlook(store(), "2026-11").payIn, { amount: null, months: null, invested: 0, withdrawal: false });
+  assert.deepEqual(F.fiOutlook(store(), "2026-11").payIn, { amount: null, months: null, change: null, invested: 0, withdrawal: false, changes: [], rises: false });
   // An own future pay-in is never a withdrawal.
   const own = F.fiOutlook(F.saveSettings(outlookStore({ value: 1000 * EUR, payIn: -500 * EUR, goal: 5000 * EUR }), { futurePayIn: 200 * EUR }), "2026-11");
-  assert.deepEqual(own.payIn, { amount: 200 * EUR, months: null, invested: 200 * EUR, withdrawal: false });
+  assert.deepEqual(own.payIn, { amount: 200 * EUR, months: null, change: null, invested: 200 * EUR, withdrawal: false, changes: [], rises: false });
 });
 
 test("byCategory groups and sorts by monthly total", () => {
@@ -446,6 +461,8 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
   s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1, from: null, until: { at: "retirement" } }).store;
   s = F.saveAccount(s, null, "Broker").store;
   s = F.saveMonth(s, "2026-10", [{ account: s.accounts[0].id, value: 5, payIn: -2 }]);
+  s = F.savePayInChange(s, { id: null, from: { month: "2027-04" }, amount: 190000 }).store;
+  s = F.savePayInChange(s, { id: null, from: { age: 45 }, amount: null }).store;
   const roundTrip = JSON.parse(JSON.stringify(s));
   assert.deepEqual(F.parseStore(roundTrip), { ok: true, store: s });
   assert.deepEqual(F.parseStore(null), { ok: true, store: F.emptyStore() });
@@ -476,6 +493,18 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
     [{ ...roundTrip, settings: { ...roundTrip.settings, futurePayIn: -100 } }, /futurePayIn must be null or a number of cents, not negative/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, futurePayIn: 12.5 } }, /futurePayIn/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, futurePayIn: "1000" } }, /futurePayIn/],
+    [{ ...roundTrip, settings: (({ payInsRiseWithInflation, ...rest }) => rest)(roundTrip.settings) }, /missing "payInsRiseWithInflation"/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, payInsRiseWithInflation: "yes" } }, /payInsRiseWithInflation must be true or false/],
+    [(({ payInChanges, ...rest }) => rest)(roundTrip), /missing "payInChanges"/],
+    [{ ...roundTrip, payInChanges: {} }, /payInChanges is not a list/],
+    [{ ...roundTrip, payInChanges: [{ id: "c", from: { at: "retirement" }, amount: 100 }] }, /payInChanges\[0\] from must be a month or an age/],
+    [{ ...roundTrip, payInChanges: [{ id: "c", from: null, amount: 100 }] }, /from must be a month or an age/],
+    [{ ...roundTrip, payInChanges: [{ id: "c", from: { month: "2027-13" }, amount: 100 }] }, /from must be a month or an age/],
+    [{ ...roundTrip, payInChanges: [{ id: "c", from: { month: "2027-04" }, amount: -1 }] }, /amount must be null \(the average\) or a number of cents, not negative/],
+    [{ ...roundTrip, payInChanges: [{ id: "c", from: { month: "2027-04" }, amount: 1.5 }] }, /amount must be null/],
+    [{ ...roundTrip, payInChanges: [{ id: "c", from: { month: "2027-04" }, amount: 1 }, { id: "d", from: { month: "2027-04" }, amount: 2 }] }, /payInChanges\[1\] starts when another change does/],
+    [{ ...roundTrip, payInChanges: [{ id: "c", from: { month: "2027-04" }, amount: 1 }, { id: "c", from: { age: 40 }, amount: 2 }] }, /repeated id/],
+    [{ ...roundTrip, payInChanges: [{ id: "c", from: { month: "2027-04" }, amount: 1, name: "Raise" }] }, /unknown field "name"/],
     [{ ...roundTrip, categories: { ...roundTrip.categories, expenses: ["Food", "food"] } }, /repeats the name/],
     [{ ...roundTrip, categories: { ...roundTrip.categories, income: [""] } }, /not a name/],
     [{ ...roundTrip, expenses: [{ ...roundTrip.expenses[0], category: "Nope" }] }, /not in categories.expenses/],
@@ -617,13 +646,13 @@ test("a version 1 file is upgraded: euros, and the categories its items use", ()
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false });
   assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: ["Work"] });
   assert.deepEqual(s.expenses.map((e) => e.category), ["Housing", "Housing", "", "Car"]);
   assert.deepEqual(s.expenses.map((e) => e.active), [true, true, true, true], "every expense was active");
   assert.equal("active" in s.income[0], false);
   assert.deepEqual(s.records, v1.records.map((r) => ({ ...r, oneOff: 0 })));
-  assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events"]);
+  assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events", "payInChanges"]);
   assert.equal(v1.expenses[1].category, "housing", "the parsed value is left alone");
 
   assert.match(F.parseStore({ ...v1, extra: 1 }).error, /unknown field "extra"/);
@@ -647,10 +676,10 @@ test("a version 2 file is upgraded: every expense is active", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null });
+  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false });
   assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true, essential: false, from: null, until: null })));
   assert.deepEqual(s.income, v2.income.map((i) => ({ ...i, from: null, until: { at: "retirement" } })));
-  assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events"]);
+  assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events", "payInChanges"]);
   assert.equal("active" in v2.expenses[0], false, "the parsed value is left alone");
   assert.equal(F.metrics(s).baseExpenses, 100 + 30 / 12);
 
@@ -672,7 +701,7 @@ test("a version 3 file is upgraded: the default number format", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false });
   assert.deepEqual({ ...withoutLater(s), version: 3, settings: v3.settings }, v3, "nothing else changes");
   assert.equal("numberFormat" in v3.settings, false, "the parsed value is left alone");
 
@@ -695,7 +724,7 @@ test("a version 4 file is upgraded: the default expected return", () => {
   const s = result.store;
   assert.equal(s.version, F.VERSION);
   // 5 % after inflation then, so 8 % before 3 % inflation now.
-  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null });
+  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false });
   assert.deepEqual({ ...withoutLater(s), version: 4, settings: v4.settings }, v4, "nothing else changes");
   assert.equal("expectedReturn" in v4.settings, false, "the parsed value is left alone");
 
@@ -847,7 +876,7 @@ test("a version 5 file is upgraded: no birth year, retirement at 67", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v5.settings, expectedReturn: 9, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null });
+  assert.deepEqual(s.settings, { ...v5.settings, expectedReturn: 9, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false });
   assert.deepEqual({ ...withoutLater(s), version: 5, settings: v5.settings }, v5, "nothing else changes");
   assert.equal("birthYear" in v5.settings, false, "the parsed value is left alone");
 
@@ -869,7 +898,7 @@ test("a version 6 file is upgraded: the expected return before inflation, and 3 
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v6.settings, expectedReturn: 7.25, inflation: 3, emergencyMonths: 6, futurePayIn: null });
+  assert.deepEqual(s.settings, { ...v6.settings, expectedReturn: 7.25, inflation: 3, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false });
   assert.deepEqual({ ...withoutLater(s), version: 6, settings: v6.settings }, v6, "nothing else changes");
   assert.equal(v6.settings.expectedReturn, 4.25, "the parsed value is left alone");
 
@@ -915,11 +944,12 @@ test("a version 8 file is upgraded: expenses always count, income until retireme
   assert.deepEqual(result.store, {
     ...v8,
     version: F.VERSION,
-    settings: { ...v8.settings, emergencyMonths: 6, futurePayIn: null },
+    settings: { ...v8.settings, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false },
     expenses: [{ ...v8.expenses[0], from: null, until: null }],
     income: [{ ...v8.income[0], from: null, until: { at: "retirement" } }],
     accounts: [],
     events: [],
+    payInChanges: [],
   });
   assert.equal("from" in v8.expenses[0], false, "the parsed value is left alone");
   // As before: the salary does not lower the FI number.
@@ -1016,7 +1046,7 @@ test("planned one-offs: saved, checked, and in the month they come", () => {
 });
 
 test("a version 10 file is upgraded: every account is invested", () => {
-  const v10 = { ...F.emptyStore(), version: 10, settings: { ...SETTINGS_V11 }, accounts: [{ id: "a", name: "A" }] };
+  const v10 = { ...EMPTY_V13, version: 10, settings: { ...SETTINGS_V11 }, accounts: [{ id: "a", name: "A" }] };
   const result = F.parseStore(v10);
   assert.equal(result.ok, true, result.error);
   assert.deepEqual(withoutLater(result.store), { ...withoutLater(v10), version: F.VERSION });
@@ -1061,21 +1091,142 @@ test("net worth: every kind of account, debts taken off; the portfolio is the in
 });
 
 test("a version 11 file is upgraded: an emergency fund of 6 months", () => {
-  const v11 = { ...F.emptyStore(), version: 11, settings: { ...SETTINGS_V11, bufferPercent: 5 } };
+  const v11 = { ...EMPTY_V13, version: 11, settings: { ...SETTINGS_V11, bufferPercent: 5 } };
   const result = F.parseStore(v11);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v11, version: F.VERSION, settings: { ...v11.settings, emergencyMonths: 6, futurePayIn: null } });
+  assert.deepEqual(result.store, { ...v11, version: F.VERSION, settings: { ...v11.settings, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false }, payInChanges: [] });
   assert.match(F.parseStore({ ...v11, settings: { ...v11.settings, emergencyMonths: 3 } }).error, /unknown field "emergencyMonths"/);
 });
 
 test("a version 12 file is upgraded: projections go on with the average pay-in", () => {
-  const v12 = { ...F.emptyStore(), version: 12, settings: { ...SETTINGS_V12, bufferPercent: 5 } };
+  const v12 = { ...EMPTY_V13, version: 12, settings: { ...SETTINGS_V12, bufferPercent: 5 } };
   const result = F.parseStore(v12);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v12, version: F.VERSION, settings: { ...v12.settings, futurePayIn: null } });
+  assert.deepEqual(result.store, { ...v12, version: F.VERSION, settings: { ...v12.settings, futurePayIn: null, payInsRiseWithInflation: false }, payInChanges: [] });
   assert.match(F.parseStore({ ...v12, settings: { ...v12.settings, futurePayIn: 100 } }).error, /unknown field "futurePayIn"/);
   const own = F.saveSettings(result.store, { futurePayIn: 150000 });
   assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(own))), { ok: true, store: own });
+});
+
+test("a version 13 file is upgraded: no planned pay-in changes, and pay-ins stay the same", () => {
+  const v13 = { ...EMPTY_V13, version: 13, settings: { ...SETTINGS_V13, futurePayIn: 150000 } };
+  const result = F.parseStore(v13);
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.store, { ...v13, version: F.VERSION, settings: { ...v13.settings, payInsRiseWithInflation: false }, payInChanges: [] });
+  assert.match(F.parseStore({ ...v13, settings: { ...v13.settings, payInsRiseWithInflation: true } }).error, /unknown field "payInsRiseWithInflation"/);
+  assert.match(F.parseStore({ ...v13, payInChanges: [] }).error, /unknown field "payInChanges"/);
+});
+
+test("planned pay-in changes: each holds from its month or age until the next", () => {
+  // 1.000 a month on average; born 1990, so 40 is January 2030.
+  const changes = [
+    { id: "b", from: { age: 40 }, amount: 500 * EUR },
+    { id: "a", from: { month: "2027-04" }, amount: 1900 * EUR },
+    { id: "c", from: { month: "2032-01" }, amount: null },
+  ];
+  const s = outlookStore({ value: 10000 * EUR, payIn: 1000 * EUR, goal: 600000 * EUR, rate: 5, settings: { birthYear: 1990 }, changes });
+  const series = F.portfolioSeries(s);
+  const plan = F.payInPlan(s, series, "2026-10");
+  assert.deepEqual(plan.now, { amount: 1000 * EUR, months: 12, change: null });
+  assert.deepEqual(plan.changes.map((step) => [F.monthFromIndex(step.index), step.amount, step.change.id]),
+    [["2027-04", 1900 * EUR, "a"], ["2030-01", 500 * EUR, "b"], ["2032-01", 1000 * EUR, "c"]], "in order, the last one the average");
+  const at = (month) => plan.at(F.monthIndex(month));
+  assert.deepEqual(["2026-11", "2027-03", "2027-04", "2029-12", "2030-01", "2031-12", "2032-01", "2050-01"].map(at),
+    [1000, 1000, 1900, 1900, 500, 500, 1000, 1000].map((amount) => amount * EUR));
+
+  // Every FI date invests them.
+  const o = F.fiOutlook(s, "2026-11");
+  assert.deepEqual(o.payIn.changes, [
+    { month: "2027-04", amount: 1900 * EUR, average: false },
+    { month: "2030-01", amount: 500 * EUR, average: false },
+    { month: "2032-01", amount: 1000 * EUR, average: true },
+  ]);
+  assert.equal(o.payIn.invested, 1000 * EUR, "until the first change, the average");
+  const paid = (n) => at(F.addMonths("2026-10", n));
+  const { fi } = o.milestones();
+  assert.equal(fi.months, monthsWith(10000 * EUR, paid, 5, 600000 * EUR));
+  assert.notEqual(fi.months, monthsTo(10000 * EUR, 1000 * EUR, 5, 600000 * EUR), "the changes move FI");
+  const keep = o.forecast().plans.keep.values;
+  close(keep[6] - keep[5] * (1 + monthly(5)), 1900 * EUR, "April 2027 pays in the raise");
+  close(keep[5] - keep[4] * (1 + monthly(5)), 1000 * EUR, "March 2027 does not yet");
+  assert.equal(o.path().reach.mid, fi.month);
+
+  // Without a year of birth an age is never reached.
+  const unborn = F.payInPlan({ ...s, settings: { ...s.settings, birthYear: null } }, series, "2026-10");
+  assert.deepEqual(unborn.changes.map((step) => step.change.id), ["a", "c"]);
+  // The average without pay-ins yet is nothing.
+  const fresh = F.payInPlan({ ...s, records: [] }, [], "2026-10");
+  assert.equal(fresh.now, null);
+  assert.equal(fresh.at(F.monthIndex("2032-01")), 0);
+  assert.equal(fresh.at(F.monthIndex("2027-04")), 1900 * EUR);
+});
+
+test("a planned pay-in change that has started is what is paid in now", () => {
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, futurePayIn: 800 * EUR },
+    income: [{ id: "i", name: "Salary", category: "", amount: 4000 * EUR, everyMonths: 1 }],
+    accounts: [{ id: "a", name: "A" }],
+    records: [{ month: "2026-10", account: "a", value: 50000 * EUR, payIn: 1000 * EUR }],
+  });
+  const raise = { id: "r", from: { month: "2026-11" }, amount: 1500 * EUR };
+  const later = { ...s, payInChanges: [raise] };
+  const m = F.metrics(later, "2026-11");
+  assert.deepEqual(m.payIn, { amount: 1500 * EUR, months: null, change: raise }, "it replaces the own amount");
+  assert.equal(m.investmentRate, 1500 / 4000);
+  const o = F.fiOutlook(later, "2026-11");
+  assert.equal(o.payIn.invested, 1500 * EUR);
+  assert.equal(o.payIn.change, raise);
+  assert.deepEqual(o.payIn.changes, []);
+
+  // The latest one that has started counts; back to the average is the
+  // average.
+  const back = { id: "b", from: { month: "2026-06" }, amount: null };
+  const earlier = { id: "e", from: { month: "2026-01" }, amount: 300 * EUR };
+  const both = { ...s, payInChanges: [back, earlier] };
+  assert.deepEqual(F.metrics(both, "2026-11").payIn, { amount: 1000 * EUR, months: 1, change: back });
+  assert.deepEqual(F.metrics({ ...s, payInChanges: [earlier] }, "2026-11").payIn, { amount: 300 * EUR, months: null, change: earlier });
+});
+
+test("pay-ins rise with inflation only when the settings say so", () => {
+  const parts = { value: 10000 * EUR, payIn: 1000 * EUR, goal: 600000 * EUR, rate: 8, inflation: 3, changes: [{ id: "a", from: { month: "2028-01" }, amount: 1500 * EUR }] };
+  const flat = F.fiOutlook(outlookStore(parts), "2026-11");
+  assert.equal(flat.payIn.rises, false);
+  const flatPaid = (n) => (n < 15 ? 1000 * EUR : 1500 * EUR); // January 2028 is 15 months after October 2026
+  assert.equal(flat.milestones().fi.months, monthsWith(10000 * EUR, flatPaid, 8, 600000 * EUR, 3));
+  const flatValues = flat.forecast().plans.keep.values;
+  close(flatValues[20] - flatValues[19] * (1 + monthly(8)), 1500 * EUR, "the same amount of money for good");
+
+  const rising = F.fiOutlook(outlookStore({ ...parts, settings: { payInsRiseWithInflation: true } }), "2026-11");
+  assert.equal(rising.payIn.rises, true);
+  assert.equal(rising.payIn.invested, 1000 * EUR, "shown as typed, in today's money");
+  const risingPaid = (n) => F.inflated(flatPaid(n), 3, n);
+  assert.equal(rising.milestones().fi.months, monthsWith(10000 * EUR, risingPaid, 8, 600000 * EUR, 3));
+  assert.ok(rising.milestones().fi.months < flat.milestones().fi.months, "FI comes sooner");
+  const values = rising.forecast().plans.keep.values;
+  close(values[1] - values[0] * (1 + monthly(8)), F.inflated(1000 * EUR, 3, 1), "the first month");
+  close(values[20] - values[19] * (1 + monthly(8)), F.inflated(1500 * EUR, 3, 20), "the planned amount rises too");
+  // In today's money, what is paid in stays as typed.
+  const today = rising.forecast({ money: "today" }).plans.keep.values;
+  const real = (1 + monthly(8)) / (1 + monthly(3)) - 1;
+  close(today[20] - today[19] * (1 + real), 1500 * EUR, "today's money");
+});
+
+test("savePayInChange checks when it starts and its amount", () => {
+  const s = F.emptyStore();
+  const added = F.savePayInChange(s, { id: null, from: { month: "2027-04" }, amount: 1900 * EUR });
+  assert.equal(added.ok, true);
+  const [change] = added.store.payInChanges;
+  assert.deepEqual({ ...change, id: "x" }, { id: "x", from: { month: "2027-04" }, amount: 1900 * EUR });
+  assert.equal(s.payInChanges.length, 0, "the old store is left alone");
+  const edited = F.savePayInChange(added.store, { ...change, amount: null });
+  assert.deepEqual(edited.store.payInChanges, [{ ...change, amount: null }], "the same id changes it");
+  assert.deepEqual(F.savePayInChange(added.store, { id: null, from: { month: "2027-04" }, amount: 0 }), { ok: false, error: "Another change starts then: edit that one" });
+  assert.equal(F.savePayInChange(added.store, { id: null, from: { age: 40 }, amount: 0 }).ok, true, "an age may fall on the same month");
+  assert.deepEqual(F.savePayInChange(s, { id: null, from: { at: "retirement" }, amount: 0 }), { ok: false, error: "Choose a month or an age it starts at" });
+  assert.deepEqual(F.savePayInChange(s, { id: null, from: null, amount: 0 }), { ok: false, error: "Choose a month or an age it starts at" });
+  assert.deepEqual(F.savePayInChange(s, { id: null, from: { month: "2027-04" }, amount: -1 }), { ok: false, error: "Enter an amount of 0 or more" });
+  assert.deepEqual(F.deletePayInChange(edited.store, change.id).payInChanges, []);
+  assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(edited.store))), { ok: true, store: edited.store });
 });
 
 test("an own future pay-in replaces the average everywhere: investment rate, milestones, forecast", () => {
@@ -1090,19 +1241,19 @@ test("an own future pay-in replaces the average everywhere: investment rate, mil
     ],
   });
   const average = F.metrics(s, "2026-11");
-  assert.deepEqual(average.payIn, { amount: -1000 * EUR, months: 2 });
+  assert.deepEqual(average.payIn, { amount: -1000 * EUR, months: 2, change: null });
   assert.equal(F.fiOutlook(s, "2026-11").payIn.invested, 0, "a withdrawal on average invests nothing");
 
   const own = F.saveSettings(s, { futurePayIn: 1500 * EUR });
   const m = F.metrics(own, "2026-11");
-  assert.deepEqual(m.payIn, { amount: 1500 * EUR, months: null });
+  assert.deepEqual(m.payIn, { amount: 1500 * EUR, months: null, change: null });
   assert.deepEqual(F.averagePayIn(m.series), { average: -1000 * EUR, months: 2 }, "the history is left alone");
   assert.equal(m.investmentRate, 1500 / 4000);
   assert.deepEqual(F.incomeSplit(m), { expenses: 2000 * EUR, invested: 1500 * EUR, leftOver: 500 * EUR, over: 0 });
   // Time to FI and Lean FI: as projected with 1,500 a month, to an FI
   // number of 600,000 (the salary ends at retirement).
   const o = F.fiOutlook(own, "2026-11");
-  assert.deepEqual(o.payIn, { amount: 1500 * EUR, months: null, invested: 1500 * EUR, withdrawal: false });
+  assert.deepEqual(o.payIn, { amount: 1500 * EUR, months: null, change: null, invested: 1500 * EUR, withdrawal: false, changes: [], rises: false });
   const { coast, lean, fi } = o.milestones();
   assert.equal(fi.months, monthsTo(51000 * EUR, 1500 * EUR, 8, 600000 * EUR, 3));
   assert.equal(lean.months, fi.months, "every expense is essential");
@@ -1116,7 +1267,7 @@ test("an own future pay-in replaces the average everywhere: investment rate, mil
   // Without any pay-ins yet, the own amount still counts.
   const fresh = F.saveSettings(store({ income: s.income, expenses: s.expenses }), { futurePayIn: 800 * EUR });
   const none = F.metrics(fresh, "2026-11");
-  assert.deepEqual(none.payIn, { amount: 800 * EUR, months: null });
+  assert.deepEqual(none.payIn, { amount: 800 * EUR, months: null, change: null });
   assert.equal(none.investmentRate, 800 / 4000);
   assert.equal(F.fiOutlook(fresh, "2026-11").milestones().fi.months, null, "no portfolio to project from");
 });

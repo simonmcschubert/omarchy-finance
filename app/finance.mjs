@@ -4,7 +4,7 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 13;
+export const VERSION = 14;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
@@ -28,7 +28,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
   emergencyMonths: 6, // the emergency fund to keep in cash, in months of expenses
   // What is paid in a month from now on, in cents, for the investment rate
   // and every projection; null: the average pay-in of the last 12 months.
+  // Planned changes (store.payInChanges) take over from their month on.
   futurePayIn: null,
+  // Whether projections raise pay-ins by the inflation, like expenses: off,
+  // every pay-in stays the same amount of money for good.
+  payInsRiseWithInflation: false,
 });
 
 // What the birth year and the retirement age may be.
@@ -55,18 +59,20 @@ export function emptyStore() {
     accounts: [],
     records: [],
     events: [],
+    payInChanges: [],
   };
 }
 
 // ---------------------------------------------------------------- file format
 
-const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events"];
-const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge", "emergencyMonths", "futurePayIn"];
+const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events", "payInChanges"];
+const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge", "emergencyMonths", "futurePayIn", "payInsRiseWithInflation"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths", "from", "until"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active", "essential"];
 const ACCOUNT_KEYS = ["id", "name", "kind"];
 const RECORD_KEYS = ["month", "account", "value", "payIn", "oneOff"];
 const EVENT_KEYS = ["id", "name", "month", "amount"];
+const PAY_IN_CHANGE_KEYS = ["id", "from", "amount"];
 const MAX_CENTS = 1e13; // 100 billion; anything bigger is a typo
 
 function isObject(value) {
@@ -215,7 +221,7 @@ function upgradeFromVersion9(value) {
 function upgradeFromVersion11(value) {
   const next = { ...value, version: 12 };
   if (isObject(value.settings)) {
-    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "emergencyMonths" && key !== "futurePayIn"), "settings");
+    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => !["emergencyMonths", "futurePayIn", "payInsRiseWithInflation"].includes(key)), "settings");
     next.settings = { ...value.settings, emergencyMonths: DEFAULT_SETTINGS.emergencyMonths };
   }
   return next;
@@ -225,8 +231,20 @@ function upgradeFromVersion11(value) {
 function upgradeFromVersion12(value) {
   const next = { ...value, version: 13 };
   if (isObject(value.settings)) {
-    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "futurePayIn"), "settings");
+    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "futurePayIn" && key !== "payInsRiseWithInflation"), "settings");
     next.settings = { ...value.settings, futurePayIn: DEFAULT_SETTINGS.futurePayIn };
+  }
+  return next;
+}
+
+// Version 13 had one future pay-in for good, the same amount of money every
+// month: no changes are planned, and pay-ins don't rise with inflation.
+function upgradeFromVersion13(value) {
+  if (isObject(value) && "payInChanges" in value) throw new Error('The file has unknown field "payInChanges"');
+  const next = { ...value, version: 14, payInChanges: [] };
+  if (isObject(value.settings)) {
+    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "payInsRiseWithInflation"), "settings");
+    next.settings = { ...value.settings, payInsRiseWithInflation: DEFAULT_SETTINGS.payInsRiseWithInflation };
   }
   return next;
 }
@@ -252,6 +270,12 @@ function isBound(value) {
   return false;
 }
 
+// When a planned pay-in change starts: { month: "YYYY-MM" } or { age: whole
+// years } (January of the year of that age), as a start of an expense.
+function isPayInStart(value) {
+  return isBound(value) && value !== null && !("at" in value);
+}
+
 // Checks a parsed data file. Returns { ok: true, store } or { ok: false, error }.
 // `null` (no file yet) is an empty store. Older versions are upgraded.
 export function parseStore(value) {
@@ -269,6 +293,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 10) value = upgradeFromVersion10(value);
     if (isObject(value) && value.version === 11) value = upgradeFromVersion11(value);
     if (isObject(value) && value.version === 12) value = upgradeFromVersion12(value);
+    if (isObject(value) && value.version === 13) value = upgradeFromVersion13(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -276,7 +301,7 @@ export function parseStore(value) {
     if (value.version !== VERSION) throw new Error(`unsupported version ${JSON.stringify(value.version)}`);
 
     checkKeys(value.settings, SETTINGS_KEYS, "settings");
-    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, inflation, birthYear, retirementAge, emergencyMonths, futurePayIn } = value.settings;
+    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, inflation, birthYear, retirementAge, emergencyMonths, futurePayIn, payInsRiseWithInflation } = value.settings;
     if (typeof withdrawalRate !== "number" || !(withdrawalRate > 0 && withdrawalRate <= 100)) {
       throw new Error("settings.withdrawalRate must be above 0 and at most 100");
     }
@@ -305,6 +330,7 @@ export function parseStore(value) {
     if (futurePayIn !== null && !isCents(futurePayIn, { min: 0 })) {
       throw new Error("settings.futurePayIn must be null or a number of cents, not negative");
     }
+    if (typeof payInsRiseWithInflation !== "boolean") throw new Error("settings.payInsRiseWithInflation must be true or false");
 
     checkKeys(value.categories, KINDS, "categories");
     for (const kind of KINDS) {
@@ -382,6 +408,23 @@ export function parseStore(value) {
       if (!isText(event.name) || event.name === "") throw new Error(`${where} has no name`);
       if (!isMonth(event.month)) throw new Error(`${where} has an invalid month`);
       if (!isCents(event.amount) || event.amount === 0) throw new Error(`${where} amount must be a number of cents other than 0`);
+    });
+
+    if (!Array.isArray(value.payInChanges)) throw new Error("payInChanges is not a list");
+    const changeIds = new Set();
+    const starts = new Set();
+    value.payInChanges.forEach((change, i) => {
+      const where = `payInChanges[${i}]`;
+      checkKeys(change, PAY_IN_CHANGE_KEYS, where);
+      if (!isText(change.id) || change.id === "" || changeIds.has(change.id)) throw new Error(`${where} has a missing or repeated id`);
+      changeIds.add(change.id);
+      if (!isPayInStart(change.from)) throw new Error(`${where} from must be a month or an age`);
+      const start = JSON.stringify(change.from);
+      if (starts.has(start)) throw new Error(`${where} starts when another change does`);
+      starts.add(start);
+      if (change.amount !== null && !isCents(change.amount, { min: 0 })) {
+        throw new Error(`${where} amount must be null (the average) or a number of cents, not negative`);
+      }
     });
   } catch (error) {
     return { ok: false, error: error.message };
@@ -728,9 +771,63 @@ export function averagePayIn(series, window = 12) {
 // where months is how many months the average is of, null for the amount
 // set; null without either.
 export function futurePayIn(settings, series) {
-  if (settings.futurePayIn !== null) return { amount: settings.futurePayIn, months: null };
+  return payInAmount(settings.futurePayIn, series);
+}
+
+// An amount of cents, or null for the average pay-in of `series`, as
+// futurePayIn returns it.
+function payInAmount(amount, series) {
+  if (amount !== null) return { amount, months: null };
   const average = averagePayIn(series);
   return average && { amount: average.average, months: average.months };
+}
+
+// The month index a planned pay-in change starts in: its month, or January
+// of the year of its age (never without a year of birth).
+export function payInChangeIndex(change, birthYear) {
+  return boundIndex(change.from, false, birthYear, Infinity);
+}
+
+// What is paid in month by month after `start` (the latest month with
+// values): the future pay-in (futurePayIn) until the first planned change,
+// then each change's amount (the average pay-in for null) from its month
+// on, until the next one. A change from the month after `start` or before
+// is what is paid in from the start. Amounts are as typed, the same every
+// month; projections raise them by the inflation when the settings say.
+// Returns {
+//   now: what is paid in the month after `start`: { amount, months (of
+//     the average; null for an amount of your own), change (the planned
+//     change it comes from, or null) }, or null with no pay-ins yet;
+//   changes: the planned changes after that, in order, each { change,
+//     index (its first month), amount, months } as now, the amount null
+//     when it is the average and there are no pay-ins yet;
+//   at(index): what is paid in the month of `index` after `start`, in
+//     whole cents, never below 0: a withdrawal counts as nothing paid in.
+// }
+export function payInPlan(store, series, start) {
+  const next = monthIndex(start) + 1;
+  const steps = store.payInChanges
+    .map((change) => ({ change, index: payInChangeIndex(change, store.settings.birthYear), ...(payInAmount(change.amount, series) ?? { amount: null, months: null }) }))
+    .filter((step) => Number.isFinite(step.index))
+    .sort((a, b) => a.index - b.index);
+  const started = steps.filter((step) => step.index <= next).at(-1);
+  const base = futurePayIn(store.settings, series);
+  const now = started ? (started.amount === null ? null : { amount: started.amount, months: started.months, change: started.change }) : base && { ...base, change: null };
+  const changes = steps.filter((step) => step.index > next);
+  const paid = (amount) => Math.max(0, Math.round(amount ?? 0));
+  const first = paid(now?.amount);
+  return {
+    now,
+    changes,
+    at(index) {
+      let amount = first;
+      for (const step of changes) {
+        if (step.index > index) break;
+        amount = paid(step.amount);
+      }
+      return amount;
+    },
+  };
 }
 
 // The longest projection: 100 years.
@@ -1012,7 +1109,7 @@ export function metrics(store, now = currentMonth()) {
   const series = portfolioSeries(store);
   const worth = netWorthSeries(store);
   const last = series.at(-1) ?? null;
-  const payIn = futurePayIn(store.settings, series);
+  const payIn = payInPlan(store, series, last ? last.month : now).now;
   const fiNumber = fiNumberIn(store, nowIndex);
   return {
     // What counts this month (budget).
@@ -1038,7 +1135,7 @@ export function metrics(store, now = currentMonth()) {
       : null,
     latestMonth: last ? last.month : null,
     portfolio: last ? last.value : null,
-    // What is paid in a month from now on (futurePayIn).
+    // What is paid in a month from now on (payInPlan's now).
     payIn,
     investmentRate: payIn && income > 0 ? payIn.amount / income : null,
     fiProgress: last && fiNumber > 0 ? last.value / fiNumber : null,
@@ -1119,7 +1216,9 @@ export function ageIn(month, birthYear) {
 // params: { start (month), value, expenses (a month), fiNumber, birthYear,
 // retirementAge, growth (percent a year, before inflation), inflation
 // (percent a year), contribution (a month), coastContribution (a month),
-// need(index, retirement), goal(index) }. Amounts in cents; expenses and
+// need(index, retirement), goal(index) }. contribution may also be a
+// function of the month index: what is paid in that month, in the money of
+// then (payInPlan). Amounts in cents; expenses and
 // fiNumber in the money of `start`, and rising by the inflation from then
 // on. need and goal, when given, replace them month by month: need is what
 // the portfolio pays in the month of `index` when retirement starts in the
@@ -1142,6 +1241,7 @@ export function forecast(params) {
   const { start, value, expenses, fiNumber, birthYear, retirementAge, growth, inflation = 0, contribution, coastContribution } = params;
   const need = params.need ?? (() => expenses);
   const goal = params.goal ?? (() => fiNumber);
+  const paidIn = typeof contribution === "function" ? contribution : () => contribution;
   const oneOffs = params.oneOffs ?? (() => 0);
   const rate = monthlyRate(growth);
   const first = monthIndex(start);
@@ -1211,7 +1311,7 @@ export function forecast(params) {
     check(first);
     for (let index = first + 1; index <= lastChecked; index++) {
       const out = phase === "out" || index >= retirement;
-      v = v * (1 + rate) + (out ? -expensesAt(index, retiredFrom) : phase === "coast" ? coastContribution : contribution) + onceAt(index);
+      v = v * (1 + rate) + (out ? -expensesAt(index, retiredFrom) : phase === "coast" ? coastContribution : paidIn(index)) + onceAt(index);
       if (v <= 0) {
         v = 0;
         if (out) runsOut ??= monthFromIndex(index);
@@ -1259,8 +1359,9 @@ function inTodaysMoney(result, inflation) {
 // milestones, the Path to FI chart and the Forecast page's plans. Each is
 // forecast() from the latest month on (this month without one), with:
 // - the portfolio then, 0 without one;
-// - the future pay-in (futurePayIn) in whole cents, 0 when the average is
-//   a withdrawal;
+// - what is paid in each month (payInPlan) in whole cents, 0 when the
+//   average is a withdrawal, raised by the inflation from `start` on when
+//   payInsRiseWithInflation is set;
 // - the planned one-offs, and the FI number of retiring in each month
 //   (never one before `now`);
 // - FI at the end of the month in which the portfolio reaches the FI number
@@ -1270,9 +1371,12 @@ function inTodaysMoney(result, inflation) {
 //
 // Returns {
 //   start (month), value, known (whether there is a portfolio value),
-//   payIn: { amount, months: futurePayIn's (both null without pay-ins),
-//     invested: what is paid in a month, withdrawal: the average is
-//     below 0 },
+//   payIn: { amount, months, change: payInPlan's now (null without
+//     pay-ins), invested: what is paid in the month after `start`,
+//     withdrawal: that amount is below 0, changes: the planned changes
+//     after that, each { month, amount: what is paid in from then on
+//     (whole cents, never below 0), average: whether it is the average },
+//     rises: whether pay-ins rise with inflation },
 //   rates: growthRates, retirement: its first month (null without a year
 //     of birth), retired: whether it has started by `start`,
 //   fiNumber: for retiring the month after `start`, in today's money,
@@ -1283,12 +1387,15 @@ export function fiOutlook(store, now = currentMonth()) {
   const nowIndex = monthIndex(now);
   const series = portfolioSeries(store);
   const last = series.at(-1) ?? null;
-  const payIn = futurePayIn(store.settings, series);
   const start = last ? last.month : now;
   const first = monthIndex(start);
+  const plan = payInPlan(store, series, start);
+  const payIn = plan.now;
+  const rises = store.settings.payInsRiseWithInflation;
+  const paidIn = (index) => (rises ? inflated(plan.at(index), inflation, index - first) : plan.at(index));
   const value = last ? last.value : 0;
   const known = last !== null;
-  const invested = payIn ? Math.max(0, Math.round(payIn.amount)) : 0;
+  const invested = plan.at(first + 1);
   const rates = growthRates(expectedReturn);
   const retirement = retirementIndex(store.settings);
   const retired = first >= retirement;
@@ -1302,7 +1409,7 @@ export function fiOutlook(store, now = currentMonth()) {
     if (!runs.has(key)) {
       runs.set(key, forecast({
         start, value, birthYear, retirementAge, inflation, coastContribution,
-        contribution: invested,
+        contribution: paidIn,
         growth: rates[growth],
         need: (index, from) => needIn(store, index, from),
         goal: goal(essential),
@@ -1320,7 +1427,15 @@ export function fiOutlook(store, now = currentMonth()) {
     start,
     value,
     known,
-    payIn: { amount: payIn?.amount ?? null, months: payIn?.months ?? null, invested, withdrawal: (payIn?.amount ?? 0) < 0 },
+    payIn: {
+      amount: payIn?.amount ?? null,
+      months: payIn?.months ?? null,
+      change: payIn?.change ?? null,
+      invested,
+      withdrawal: (payIn?.amount ?? 0) < 0,
+      changes: plan.changes.map((step) => ({ month: monthFromIndex(step.index), amount: plan.at(step.index), average: step.change.amount === null })),
+      rises,
+    },
     rates,
     retirement: Number.isFinite(retirement) ? monthFromIndex(retirement) : null,
     retired,
@@ -1488,6 +1603,31 @@ export function saveMonth(store, month, entries) {
     records.push({ month, account: entry.account, value: entry.value, payIn: entry.payIn, oneOff: entry.oneOff ?? 0 });
   }
   next.records = sortRecords(next, records);
+  return next;
+}
+
+// Adds a planned pay-in change (id null) or changes one: { id, from: { month }
+// or { age }, amount: cents, or null for the average }. Returns { ok, store }
+// or { ok: false, error }.
+export function savePayInChange(store, change) {
+  if (!isPayInStart(change.from)) return { ok: false, error: "Choose a month or an age it starts at" };
+  if (change.amount !== null && !isCents(change.amount, { min: 0 })) return { ok: false, error: "Enter an amount of 0 or more" };
+  const id = change.id ?? newId();
+  const same = JSON.stringify(change.from);
+  if (store.payInChanges.some((other) => other.id !== id && JSON.stringify(other.from) === same)) {
+    return { ok: false, error: "Another change starts then: edit that one" };
+  }
+  const next = structuredClone(store);
+  const saved = { id, from: { ...change.from }, amount: change.amount };
+  const at = next.payInChanges.findIndex((c) => c.id === id);
+  if (at === -1) next.payInChanges.push(saved);
+  else next.payInChanges[at] = saved;
+  return { ok: true, store: next };
+}
+
+export function deletePayInChange(store, id) {
+  const next = structuredClone(store);
+  next.payInChanges = next.payInChanges.filter((c) => c.id !== id);
   return next;
 }
 

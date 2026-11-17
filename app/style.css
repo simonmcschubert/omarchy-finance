@@ -1407,6 +1407,44 @@ table.entry th {
   margin-top: 10px;
 }
 
+/* ---- future pay-ins in Settings */
+
+.payin-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 12px;
+}
+
+.payin-form .bound-row input {
+  width: 8em;
+  flex: none;
+}
+
+/* A month field is taller than a text field otherwise. */
+.payin-form input[type="month"] {
+  height: calc(1.5em + 14px);
+}
+
+/* What a field holds when it can't change, as tall as a text field. */
+.field-static {
+  color: var(--fg-strong);
+  padding: 7px 0;
+  line-height: 1.5;
+}
+
+.payins-rise {
+  gap: 4px;
+  margin-top: 16px;
+}
+
+@media (max-width: 720px) {
+  .payin-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ---- planned one-offs on the Forecast page */
 
 .event-form {
