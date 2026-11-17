@@ -275,7 +275,7 @@ const state = {
   file: "",
   backups: "", // the directory with the daily copies of the file
   blocked: null, // why nothing can be saved, e.g. an unreadable data file
-  notice: null, // { kind: "error" | "info", text }
+  notice: null, // { kind: "error" | "info", text, retry }; retry: goes once the server answers
   view: "dashboard",
   editing: { expenses: null, income: null }, // item id being edited
   editingEvent: null, // planned one-off being edited
@@ -292,7 +292,7 @@ const state = {
   focus: null, // selector to focus after the next render
 };
 
-let pending = null; // newest store waiting to be saved
+let pending = null; // newest store waiting to be saved, also after a save failed
 let inFlight = false;
 let saves = 0; // successful saves, so a slower reload cannot undo one
 
@@ -313,6 +313,7 @@ async function request(method, body) {
 
 // Takes what the server returned for GET (or a 409) as the current data.
 function adopt(json) {
+  if (state.notice?.retry) state.notice = null;
   state.revision = json.revision;
   if (json.file) state.file = json.file;
   if (json.backups) state.backups = json.backups;
@@ -337,7 +338,7 @@ async function load() {
     if (status !== 200 || !json) throw new Error(json?.error ?? `HTTP ${status}`);
     adopt(json);
   } catch (error) {
-    state.notice = { kind: "error", text: `Can't reach the Finance server (${error.message}). Is the omarchy-finance service running?` };
+    state.notice = { kind: "error", text: `Can't reach the Finance server (${error.message}). Is the omarchy-finance service running?`, retry: true };
   }
   render();
 }
@@ -363,11 +364,17 @@ async function pump() {
   inFlight = true;
   const store = pending;
   pending = null;
+  let retry = true; // no answer: the server is down or restarting
   try {
     const { status, json } = await request("PUT", { revision: state.revision, data: store });
+    retry = status >= 500;
     if (status === 200) {
       state.revision = json.revision;
       saves++;
+      if (state.notice?.retry) {
+        state.notice = null;
+        render();
+      }
     } else if (status === 409) {
       pending = null;
       adopt(json);
@@ -377,12 +384,23 @@ async function pump() {
       throw new Error(json?.error ?? `HTTP ${status}`);
     }
   } catch (error) {
-    pending = null;
-    state.notice = { kind: "error", text: `Not saved: ${error.message}. Reload to see what is stored.` };
-    render();
+    if (retry) {
+      // Keep it unsaved, unless a newer change came meanwhile: it goes on
+      // focus, with the next change, or before an update restart.
+      pending ??= store;
+      const text = `Not saved yet (${error.message}). Finance tries again.`;
+      if (state.notice?.text !== text) {
+        state.notice = { kind: "error", text, retry: true };
+        render();
+      }
+    } else {
+      pending = null;
+      state.notice = { kind: "error", text: `Not saved: ${error.message}. Reload to see what is stored.` };
+      render();
+    }
   } finally {
     inFlight = false;
-    if (pending) pump();
+    if (pending && !retry) pump(); // no loop on a server that is down
   }
 }
 
@@ -402,6 +420,7 @@ async function refresh() {
   theme.removeAttribute("id");
   old.after(theme);
 
+  if (pending) pump(); // a save that failed: try again
   if (inFlight || pending) return;
   const savesBefore = saves;
   try {
@@ -1989,5 +2008,7 @@ function importResult(plan) {
 // ---------------------------------------------------------------- start
 
 state.view = viewFromHash();
-const updates = startUpdates(document.getElementById("update"), { saving: () => inFlight || pending !== null });
+// A restart waits for saving(). The server answers by then, so this also
+// tries a failed save again.
+const updates = startUpdates(document.getElementById("update"), { saving: () => { pump(); return inFlight || pending !== null; } });
 load();
