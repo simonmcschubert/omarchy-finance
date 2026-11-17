@@ -235,7 +235,12 @@ Since the start, both are a year from 12 months of history on, and over the
 whole time before. Pay-ins, one-offs and an account's first value count
 from the middle of their month.
 
-![Portfolio: two invested accounts, cash and a car loan, a one-off column, and the returns](docs/portfolio.png)
+**Emergency fund**, under the returns: the latest values of the cash
+accounts ÷ this month's expenses with buffer, how much of the months set
+in Settings that is, and how much is missing. Without a cash account it
+says to add one.
+
+![Portfolio: two invested accounts, cash and a car loan, a one-off column, the returns and the emergency fund](docs/portfolio.png)
 
 ### Dashboard numbers
 
@@ -246,7 +251,7 @@ from the middle of their month.
 | Investment rate | Future pay-in ÷ monthly income: the average monthly pay-in over the last 12 months (one-offs left out), or your own amount from Settings |
 | Portfolio | Sum of the invested accounts in the latest month, and its change since the month before |
 | Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins and one-offs. The return is that gain ÷ (the value 12 months ago + each pay-in and one-off for the part of the 12 months it was invested, from the middle of its month) |
-| Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them. Under it, the emergency fund: the latest values of the cash accounts ÷ monthly expenses, and how much is missing to the months set in Settings |
+| Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them |
 
 With less than 12 months of history, the average uses the months there
 are, and so do the gains, from the first month on.
