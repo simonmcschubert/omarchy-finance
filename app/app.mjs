@@ -387,7 +387,7 @@ async function pump() {
     if (locks !== locksBefore) {
       // Finance locked while this was on its way: the page forgot the data,
       // so it never tries this again, and unlocking says it was not saved.
-      if (status !== 200) state.lock.lost = true;
+      if (status !== 200) changeLost();
     } else if (status === 200) {
       state.revision = json.revision;
       saves++;
@@ -409,7 +409,7 @@ async function pump() {
       throw new Error(json?.error ?? `HTTP ${status}`);
     }
   } catch (error) {
-    if (locks !== locksBefore) state.lock.lost = true;
+    if (locks !== locksBefore) changeLost();
     else if (retry) {
       // Keep it unsaved, unless a newer change came meanwhile: it goes on
       // focus, with the next change, or before an update restart.
@@ -529,13 +529,18 @@ async function unlock() {
 async function reopen() {
   Object.assign(state.lock, { locked: false, error: "" });
   await load();
-  // Said once the data is back: a load that failed, or a lock meanwhile,
-  // keeps it for the next unlock.
-  if (state.lock.lost && state.store) {
-    state.lock.lost = false;
-    state.notice = { kind: "error", text: "Finance locked before your last change was saved. Please make it again." };
-    render();
-  }
+  if (state.lock.lost) changeLost();
+}
+
+// A change the lock kept from being saved. Said once the data is back: now,
+// if it is, or after the next unlock (a load that failed, or a lock
+// meanwhile, keeps it until then).
+function changeLost() {
+  state.lock.lost = true;
+  if (state.lock.locked || !state.store) return;
+  state.lock.lost = false;
+  state.notice = { kind: "error", text: "Finance locked before your last change was saved. Please make it again." };
+  render();
 }
 
 async function lockNow() {
