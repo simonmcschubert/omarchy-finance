@@ -57,8 +57,10 @@ function monthsWith(start, paid, rate, goal, inflation = 0) {
 
 // Settings as versions 7 to 11 had them: without the emergency fund and
 // the future pay-in; as version 12 had them, without the future pay-in;
-// and as version 13 had them, without the choice to raise pay-ins.
-const SETTINGS_V13 = (({ payInsRiseWithInflation, ...rest }) => rest)(F.DEFAULT_SETTINGS);
+// as version 13 had them, without the choice to raise pay-ins; and as
+// version 14 had them, without the coast pay-in.
+const SETTINGS_V14 = (({ coastPayIn, ...rest }) => rest)(F.DEFAULT_SETTINGS);
+const SETTINGS_V13 = (({ payInsRiseWithInflation, ...rest }) => rest)(SETTINGS_V14);
 const SETTINGS_V12 = (({ futurePayIn, ...rest }) => rest)(SETTINGS_V13);
 const SETTINGS_V11 = (({ emergencyMonths, ...rest }) => rest)(SETTINGS_V12);
 // An empty store as versions 10 to 13 had it: without planned pay-in changes.
@@ -70,7 +72,7 @@ function withoutLater({ events, payInChanges, ...s }) {
   const plain = ({ from, until, ...item }) => item;
   return {
     ...s,
-    settings: (({ emergencyMonths, futurePayIn, payInsRiseWithInflation, ...rest }) => rest)(s.settings),
+    settings: (({ emergencyMonths, futurePayIn, payInsRiseWithInflation, coastPayIn, ...rest }) => rest)(s.settings),
     expenses: s.expenses.map(({ essential, ...item }) => plain(item)),
     income: s.income.map(plain),
     records: s.records.map(({ oneOff, ...record }) => record),
@@ -495,6 +497,10 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
     [{ ...roundTrip, settings: { ...roundTrip.settings, futurePayIn: "1000" } }, /futurePayIn/],
     [{ ...roundTrip, settings: (({ payInsRiseWithInflation, ...rest }) => rest)(roundTrip.settings) }, /missing "payInsRiseWithInflation"/],
     [{ ...roundTrip, settings: { ...roundTrip.settings, payInsRiseWithInflation: "yes" } }, /payInsRiseWithInflation must be true or false/],
+    [{ ...roundTrip, settings: (({ coastPayIn, ...rest }) => rest)(roundTrip.settings) }, /missing "coastPayIn"/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, coastPayIn: -100 } }, /coastPayIn must be a number of cents, not negative/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, coastPayIn: null } }, /coastPayIn/],
+    [{ ...roundTrip, settings: { ...roundTrip.settings, coastPayIn: 12.5 } }, /coastPayIn/],
     [(({ payInChanges, ...rest }) => rest)(roundTrip), /missing "payInChanges"/],
     [{ ...roundTrip, payInChanges: {} }, /payInChanges is not a list/],
     [{ ...roundTrip, payInChanges: [{ id: "c", from: { at: "retirement" }, amount: 100 }] }, /payInChanges\[0\] from must be a month or an age/],
@@ -646,7 +652,7 @@ test("a version 1 file is upgraded: euros, and the categories its items use", ()
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
   assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: ["Work"] });
   assert.deepEqual(s.expenses.map((e) => e.category), ["Housing", "Housing", "", "Car"]);
   assert.deepEqual(s.expenses.map((e) => e.active), [true, true, true, true], "every expense was active");
@@ -676,7 +682,7 @@ test("a version 2 file is upgraded: every expense is active", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false });
+  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
   assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true, essential: false, from: null, until: null })));
   assert.deepEqual(s.income, v2.income.map((i) => ({ ...i, from: null, until: { at: "retirement" } })));
   assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events", "payInChanges"]);
@@ -701,7 +707,7 @@ test("a version 3 file is upgraded: the default number format", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
   assert.deepEqual({ ...withoutLater(s), version: 3, settings: v3.settings }, v3, "nothing else changes");
   assert.equal("numberFormat" in v3.settings, false, "the parsed value is left alone");
 
@@ -724,7 +730,7 @@ test("a version 4 file is upgraded: the default expected return", () => {
   const s = result.store;
   assert.equal(s.version, F.VERSION);
   // 5 % after inflation then, so 8 % before 3 % inflation now.
-  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false });
+  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
   assert.deepEqual({ ...withoutLater(s), version: 4, settings: v4.settings }, v4, "nothing else changes");
   assert.equal("expectedReturn" in v4.settings, false, "the parsed value is left alone");
 
@@ -876,7 +882,7 @@ test("a version 5 file is upgraded: no birth year, retirement at 67", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v5.settings, expectedReturn: 9, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false });
+  assert.deepEqual(s.settings, { ...v5.settings, expectedReturn: 9, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
   assert.deepEqual({ ...withoutLater(s), version: 5, settings: v5.settings }, v5, "nothing else changes");
   assert.equal("birthYear" in v5.settings, false, "the parsed value is left alone");
 
@@ -898,7 +904,7 @@ test("a version 6 file is upgraded: the expected return before inflation, and 3 
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v6.settings, expectedReturn: 7.25, inflation: 3, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false });
+  assert.deepEqual(s.settings, { ...v6.settings, expectedReturn: 7.25, inflation: 3, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
   assert.deepEqual({ ...withoutLater(s), version: 6, settings: v6.settings }, v6, "nothing else changes");
   assert.equal(v6.settings.expectedReturn, 4.25, "the parsed value is left alone");
 
@@ -944,7 +950,7 @@ test("a version 8 file is upgraded: expenses always count, income until retireme
   assert.deepEqual(result.store, {
     ...v8,
     version: F.VERSION,
-    settings: { ...v8.settings, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false },
+    settings: { ...v8.settings, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 },
     expenses: [{ ...v8.expenses[0], from: null, until: null }],
     income: [{ ...v8.income[0], from: null, until: { at: "retirement" } }],
     accounts: [],
@@ -1094,7 +1100,7 @@ test("a version 11 file is upgraded: an emergency fund of 6 months", () => {
   const v11 = { ...EMPTY_V13, version: 11, settings: { ...SETTINGS_V11, bufferPercent: 5 } };
   const result = F.parseStore(v11);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v11, version: F.VERSION, settings: { ...v11.settings, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false }, payInChanges: [] });
+  assert.deepEqual(result.store, { ...v11, version: F.VERSION, settings: { ...v11.settings, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 }, payInChanges: [] });
   assert.match(F.parseStore({ ...v11, settings: { ...v11.settings, emergencyMonths: 3 } }).error, /unknown field "emergencyMonths"/);
 });
 
@@ -1102,7 +1108,7 @@ test("a version 12 file is upgraded: projections go on with the average pay-in",
   const v12 = { ...EMPTY_V13, version: 12, settings: { ...SETTINGS_V12, bufferPercent: 5 } };
   const result = F.parseStore(v12);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v12, version: F.VERSION, settings: { ...v12.settings, futurePayIn: null, payInsRiseWithInflation: false }, payInChanges: [] });
+  assert.deepEqual(result.store, { ...v12, version: F.VERSION, settings: { ...v12.settings, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 }, payInChanges: [] });
   assert.match(F.parseStore({ ...v12, settings: { ...v12.settings, futurePayIn: 100 } }).error, /unknown field "futurePayIn"/);
   const own = F.saveSettings(result.store, { futurePayIn: 150000 });
   assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(own))), { ok: true, store: own });
@@ -1112,9 +1118,30 @@ test("a version 13 file is upgraded: no planned pay-in changes, and pay-ins stay
   const v13 = { ...EMPTY_V13, version: 13, settings: { ...SETTINGS_V13, futurePayIn: 150000 } };
   const result = F.parseStore(v13);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v13, version: F.VERSION, settings: { ...v13.settings, payInsRiseWithInflation: false }, payInChanges: [] });
+  assert.deepEqual(result.store, { ...v13, version: F.VERSION, settings: { ...v13.settings, payInsRiseWithInflation: false, coastPayIn: 0 }, payInChanges: [] });
   assert.match(F.parseStore({ ...v13, settings: { ...v13.settings, payInsRiseWithInflation: true } }).error, /unknown field "payInsRiseWithInflation"/);
   assert.match(F.parseStore({ ...v13, payInChanges: [] }).error, /unknown field "payInChanges"/);
+});
+
+test("a version 14 file is upgraded: the Coast plan pays in nothing after Coast FI", () => {
+  const v14 = { ...F.emptyStore(), version: 14, settings: { ...SETTINGS_V14, futurePayIn: 150000, payInsRiseWithInflation: true } };
+  const result = F.parseStore(v14);
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.store, { ...v14, version: F.VERSION, settings: { ...v14.settings, coastPayIn: 0 } });
+  assert.match(F.parseStore({ ...v14, settings: { ...v14.settings, coastPayIn: 0 } }).error, /unknown field "coastPayIn"/);
+  const coast = F.saveSettings(result.store, { coastPayIn: 20000 });
+  assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(coast))), { ok: true, store: coast });
+});
+
+test("the coast pay-in from Settings is what the Forecast's Coast plan pays in after Coast FI", () => {
+  const parts = { value: 100000 * EUR, payIn: 1000 * EUR, goal: 600000 * EUR, rate: 6, settings: { birthYear: 1990 } };
+  const none = outlook(parts);
+  const some = outlook({ ...parts, settings: { birthYear: 1990, coastPayIn: 300 * EUR } });
+  assert.deepEqual(none.forecast(), none.forecast({ coastContribution: 0 }), "0 by default");
+  assert.deepEqual(some.forecast(), some.forecast({ coastContribution: 300 * EUR }), "the setting, unless given");
+  assert.ok(some.forecast().plans.coast.coastMonth < none.forecast().plans.coast.coastMonth, "paying in after Coast FI gets there sooner");
+  // The milestone stays Coast FI without another pay-in.
+  assert.deepEqual(some.milestones().coast, none.milestones().coast);
 });
 
 test("planned pay-in changes: each holds from its month or age until the next", () => {

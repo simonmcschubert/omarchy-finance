@@ -157,6 +157,15 @@ const VIEWS = [
   ["settings", "Settings"],
 ];
 
+// The tabs of Settings, each at #settings/<tab>; #settings opens the first.
+const SETTINGS_TABS = [
+  ["data", "Data"],
+  ["general", "General"],
+  ["export", "Export/Import"],
+];
+// A link to a tab of Settings, with its text.
+const settingsLink = (tab, text = "Settings") => h("a", { href: `#settings/${tab}` }, text);
+
 // ---------------------------------------------------------------- DOM helper
 
 function h(tag, props, ...children) {
@@ -314,9 +323,10 @@ const state = {
   chartView: savedChartView(), // "history" | "path"
   money: savedMoney(), // "nominal" (the money of each year) | "today"
   hideAmounts: savedHidden(), // amounts as dots, for sharing the screen
+  settingsTab: "data", // the tab of Settings on show: a key of SETTINGS_TABS
   // On the forecast page. growth: "low", "mid" or "high", the expected
   // return and RETURN_SPREAD around it.
-  forecast: { coastContribution: 0, growth: "mid" },
+  forecast: { growth: "mid" },
   focus: null, // selector to focus after the next render
   // The lock (server.py, Lock). asking: what waits for the server, "unlock",
   // "on" or "off". lost: a change was refused because Finance had locked.
@@ -647,8 +657,10 @@ addEventListener("keydown", (event) => {
   location.hash = view[0];
 });
 
+// The view and, in Settings, the tab the address names.
 function viewFromHash() {
-  const name = location.hash.slice(1);
+  const [name, tab] = location.hash.slice(1).split("/");
+  state.settingsTab = SETTINGS_TABS.some(([t]) => t === tab) ? tab : SETTINGS_TABS[0][0];
   return VIEWS.some(([v]) => v === name) ? name : "dashboard";
 }
 
@@ -829,7 +841,7 @@ function viewDashboard() {
     parts.push(card("Get started",
       h("p", null, "Add your regular ", h("a", { href: "#income" }, "income"), " and ", h("a", { href: "#expenses" }, "expenses"),
         ", then your ", h("a", { href: "#settings" }, "broker accounts"), " and their ", h("a", { href: "#portfolio" }, "monthly values and pay-ins"), "."),
-      h("p", { class: "muted" }, "Currency and categories are in ", h("a", { href: "#settings" }, "Settings"), ".")));
+      h("p", { class: "muted" }, "The ", settingsLink("general", "currency"), " and the ", settingsLink("data", "categories"), " are in Settings.")));
   } else {
     parts.push(milestonesCard(m));
   }
@@ -880,7 +892,9 @@ function milestonesCard(m) {
   const rows = [
     coast && { name: "Coast FI", what: `stop investing, FI at ${retirementAge}`, number: coast.fiNumber, progress: coast.progress, months: coast.months, never,
       about: [`Once the portfolio has this much, you can stop investing: it still grows to the FI number by ${retirementAge}, ${money(coast.fiAtRetirement)} by then.`,
-        ["As in the Coast plan of the ", h("a", { href: "#forecast" }, "Forecast"), "."]] },
+        store.settings.coastPayIn > 0
+          ? ["The Coast plan of the ", h("a", { href: "#forecast" }, "Forecast"), ` pays in ${money(store.settings.coastPayIn)} a month after it, as set in `, settingsLink("data"), "."]
+          : ["As in the Coast plan of the ", h("a", { href: "#forecast" }, "Forecast"), "."]] },
     lean && { name: "Lean FI", what: "essential expenses only", number: lean.fiNumber, progress: lean.progress, months: lean.months, never,
       about: ["FI on the leanest budget: the FI number, worked out the same way, with only the expenses marked Essential.",
         ["Mark them on the ", h("a", { href: "#expenses" }, "Expenses"), " page."]] },
@@ -917,7 +931,7 @@ function milestonesCard(m) {
 
   // Only what is missing, with where to add it.
   const notes = [
-    coast === null && birthYear === null ? h("li", null, "Coast FI needs your year of birth, in ", h("a", { href: "#settings" }, "Settings"), ".") : null,
+    coast === null && birthYear === null ? h("li", null, "Coast FI needs your year of birth, in ", settingsLink("general"), ".") : null,
     known ? null : h("li", null, h("a", { href: "#portfolio" }, "Add broker values"), " to see how far the portfolio is."),
     known && o.payIn.withdrawal ? h("li", null, `Your average pay-in is a withdrawal of ${money(-o.payIn.amount)} a month, so these count 0.`) : null,
   ].filter(Boolean);
@@ -1500,7 +1514,7 @@ function viewPortfolio() {
         }
       } })),
     store.accounts.length === 0
-      ? h("p", { class: "muted" }, "Add your accounts in ", h("a", { href: "#settings" }, "Settings"), " first, or import past months from a CSV file there.")
+      ? h("p", { class: "muted" }, "Add your ", settingsLink("data", "accounts"), " in Settings first, or ", settingsLink("export", "import past months"), " from a CSV file.")
       : h("div", { class: "table-wrap" }, h("table", { class: "entry" },
           h("thead", null, h("tr", null, h("th", null, "Account"),
             h("th", null, "Value at month end",
@@ -1511,7 +1525,7 @@ function viewPortfolio() {
                 ["Their average of the last 12 months is what the milestones and the forecast go on with, unless you plan your own under Future pay-ins in ", h("a", { href: "#settings" }, "Settings"), "."])),
             h("th", null, "One-off this month",
               info("one-offs", "A lump sum in or out, such as an inheritance or a house deposit. It counts as paid in, but not for the average pay-in.",
-                ["Plan future ones on the ", h("a", { href: "#forecast" }, "Forecast"), " page."])))),
+                ["Plan future ones in ", settingsLink("data"), "."])))),
           h("tbody", null, store.accounts.map((account) => {
             const record = monthRecords.get(account.id);
             const before = lastValueBefore(store, account.id, month);
@@ -1581,7 +1595,9 @@ function viewPortfolio() {
   return h("div", null,
     h("section", { class: "card" },
       h("div", { class: "card-head" }, h("h2", null, "Monthly values"),
-        store.accounts.length ? h("a", { class: "label-link", href: "#settings" }, "Accounts and CSV import") : null),
+        store.accounts.length
+          ? h("span", null, h("a", { class: "label-link", href: "#settings/data" }, "Accounts"), h("a", { class: "label-link", href: "#settings/export" }, "CSV import"))
+          : null),
       monthForm),
     returnsCard(store),
     emergencyCard(store),
@@ -1663,8 +1679,8 @@ function emergencyCard(store) {
 const PLAN_LABELS = { keep: "Keep investing", coast: "Coast", fi: "Retire early" };
 
 // What the forecast starts from, and what is paid in: the FI outlook's, with
-// the future pay-in in whole cents and never a withdrawal, and the amount
-// after Coast FI from the page.
+// the future pay-in in whole cents and never a withdrawal, and the coast
+// pay-in from Settings.
 function forecastBase(store) {
   const o = outlook(store);
   const params = {
@@ -1673,7 +1689,7 @@ function forecastBase(store) {
     fiNumber: o.fiNumber,
     inflation: store.settings.inflation,
     contribution: o.payIn.invested,
-    coastContribution: state.forecast.coastContribution,
+    coastContribution: store.settings.coastPayIn,
   };
   // The plans at a growth ("low", "mid" or "high"), in the money the
   // switch says or in "nominal" money.
@@ -1688,7 +1704,7 @@ function viewForecast() {
   const store = state.store;
   const { birthYear, retirementAge } = store.settings;
   const missing = [];
-  if (birthYear === null) missing.push(h("li", null, "your year of birth, in ", h("a", { href: "#settings" }, "Settings")));
+  if (birthYear === null) missing.push(h("li", null, "your year of birth, in ", settingsLink("general")));
   if (F.counted(store.expenses).length === 0) missing.push(h("li", null, "your ", h("a", { href: "#expenses" }, "expenses"), ", for the FI number"));
   if (missing.length) {
     return h("div", null, card("Forecast",
@@ -1706,10 +1722,6 @@ function viewForecast() {
   const paysThen = F.budget(store, retirementIndex, retirementIndex).need;
   const paysNow = F.budget(store, thisMonth(), Math.min(retirementIndex, thisMonth())).need;
   const then = (amount) => money(F.inflated(amount, params.inflation, retirementIndex - 1 - F.monthIndex(params.start)));
-  const read = (event) => {
-    event.preventDefault();
-    readForecastForm(event.currentTarget);
-  };
 
   // The growth buttons stay when the results redraw, and change in place: a
   // click on one that starts while a field's change redraws the results
@@ -1732,76 +1744,9 @@ function viewForecast() {
         : h("p", null, `Retirement in ${retirementYear}, at ${retirementAge}: then the portfolio pays ${money(paysThen)} a month in today's money, ${then(paysThen)} by then.`,
             info("retirement", "From retirement on, the portfolio pays your expenses with buffer, less the income that goes on, such as a pension.",
               `With ${inflation} inflation a year, ${money(paysThen)} today is ${then(paysThen)} by ${retirementYear}.`,
-              ["Retirement starts in January of the year you reach the retirement age set in ", h("a", { href: "#settings" }, "Settings"), "."])),
-      retired
-        ? h("div", { class: "forecast-controls" }, growthField)
-        : h("form", { class: "forecast-controls", onsubmit: read, onchange: read },
-            h("div", { class: "forecast-form" },
-              field("After Coast FI, per month",
-                h("input", { id: "forecast-coast", name: "coastContribution", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.coastContribution) }),
-                "What the Coast plan still invests once Coast FI is reached: 0 stops investing."),
-              h("button", { type: "submit" }, "Show")),
-            growthField)),
-    h("div", { id: "forecast-results", class: "stack" }, forecastResults()),
-    eventsCard(params.start));
-}
-
-// Planned one-offs: an inheritance, a house deposit, a sabbatical. Saved,
-// unlike the amounts at the top.
-function eventsCard(start) {
-  const store = state.store;
-  const editing = store.events.find((e) => e.id === state.editingEvent) ?? null;
-  const form = h("form", { class: "event-form", onsubmit: (event) => {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const amount = F.parseMoney(data.get("amount"));
-    if (!amount.ok) return showError(event.currentTarget, `Amount: ${amount.error}.`);
-    const result = F.saveEvent(store, { id: editing?.id ?? null, name: data.get("name"), month: String(data.get("month")), amount: amount.cents });
-    if (!result.ok) return showError(event.currentTarget, `${result.error}.`);
-    state.editingEvent = null;
-    state.focus = "#event-name";
-    commit(result.store, `${editing ? "Saved" : "Added"} ${String(data.get("name")).trim()}.`);
-  } },
-    h("label", null, "Name", h("input", { id: "event-name", name: "name", autocomplete: "off", required: true, value: editing?.name ?? "", placeholder: "Inheritance" })),
-    h("label", null, "Month", h("input", { name: "month", type: "month", required: true, value: editing?.month ?? "" })),
-    h("label", null, "Amount (negative: taken out)", h("input", { name: "amount", class: "amount", inputmode: "decimal", autocomplete: "off", required: true,
-      value: editing ? inputMoney(editing.amount) : "", placeholder: inputMoney(-2000000) })),
-    h("div", { class: "form-actions" },
-      h("button", { type: "submit", class: "primary" }, editing ? "Save" : "Add"),
-      editing ? h("button", { type: "button", onclick: () => { state.editingEvent = null; render(); } }, "Cancel") : null));
-  const rows = store.events.map((event) => {
-    const past = event.month <= start;
-    return h("tr", { class: event.id === state.editingEvent ? "editing" : null },
-      h("td", null, monthLabel(event.month)),
-      h("td", null, event.name, past ? h("div", { class: "sub" }, "Before the forecast starts: enter it under Portfolio as a one-off") : null),
-      h("td", { class: "num" }, signedMoney(event.amount)),
-      h("td", { class: "actions" },
-        h("button", { type: "button", class: "link", onclick: () => { state.editingEvent = event.id; state.focus = "#event-name"; render(); } }, "Edit"),
-        h("button", { type: "button", class: "link danger", onclick: () => {
-          if (!confirm(`Delete ${event.name}?`)) return;
-          if (state.editingEvent === event.id) state.editingEvent = null;
-          commit(F.deleteEvent(store, event.id), `Deleted ${event.name}.`);
-        } }, "Delete")));
-  });
-  return card(["Planned one-offs", info("planned one-offs",
-      "Money that comes in or goes out once: an inheritance, a house deposit, a car, a sabbatical (what you live on, and the pay-ins you skip).",
-      "Every plan gets it in its month, as do the milestones and the Path to FI chart. Amounts are in today's money and rise with inflation, like expenses.")],
-    rows.length ? h("div", { class: "table-wrap" }, h("table", null,
-      h("thead", null, h("tr", null, h("th", null, "Month"), h("th", null, "Name"), h("th", { class: "num" }, "Amount"), h("th"))),
-      h("tbody", null, rows))) : null,
-    form);
-}
-
-function readForecastForm(form) {
-  const data = new FormData(form);
-  const coast = F.parseMoney(data.get("coastContribution"));
-  let error = null;
-  if (!coast.ok) error = `After Coast FI: ${coast.error}.`;
-  else if (coast.cents < 0) error = "After Coast FI: must not be negative.";
-  if (error) return showError(form, error);
-  if (form.nextElementSibling?.classList.contains("form-error")) form.nextElementSibling.remove();
-  state.forecast.coastContribution = coast.cents;
-  updateForecast();
+              ["Retirement starts in January of the year you reach the retirement age set in ", settingsLink("general"), "."])),
+      h("div", { class: "forecast-controls" }, growthField)),
+    h("div", { id: "forecast-results", class: "stack" }, forecastResults()));
 }
 
 // What every plan invests a month until it changes course, and where that
@@ -1819,7 +1764,7 @@ function investedNote(payIn, contribution) {
   return [invests, `${average}.${then} You can plan your pay-ins in `, settings, "."];
 }
 
-// Redraws the results only, so the form keeps what is typed and its focus.
+// Redraws the results only, so the switches keep their focus.
 function updateForecast() {
   const box = document.getElementById("forecast-results");
   if (!box) return render();
@@ -1894,7 +1839,7 @@ function forecastResults() {
   // its ⓘ.
   const assumptions = info("the forecast",
     h("ul", null,
-      h("li", null, "Growth is before inflation: the expected return set in ", h("a", { href: "#settings" }, "Settings"),
+      h("li", null, "Growth is before inflation: the expected return set in ", settingsLink("data"),
         `, or ${F.RETURN_SPREAD} points less or more. Real markets do not grow the same every year, and bad years right after you start living off the portfolio hurt most.`),
       h("li", null, inTodaysMoney()
         ? `Amounts are in today's money: what they would buy now, with ${percentUnit.format(inflation)} inflation a year taken out. So the FI number stays about the same, and what is invested ${o.payIn.rises ? "does too" : "shrinks a little each year"}.`
@@ -1905,6 +1850,8 @@ function forecastResults() {
         ? `It starts from the portfolio in ${monthLabel(params.start)}, ${money(params.value)}.`
         : "It starts from 0, as there are no broker values yet."),
       retired ? null : h("li", null, investedNote(o.payIn, params.contribution)),
+      retired ? null : h("li", null, `After Coast FI, Coast pays in ${params.coastContribution > 0 ? `${money(params.coastContribution)} a month` : "nothing"}, as set in `, settingsLink("data"), "."),
+      h("li", null, "Planned one-offs, set in ", settingsLink("data"), ", count in their month."),
       h("li", null, "Expenses and income with a start or an end count only in their months; for Retire early, retirement starts the month after FI. ",
         "Income that goes on after retirement, such as a pension, lowers what the portfolio pays: the FI number is what it pays for good once nothing changes any more, ",
         `× ${plain.format(100 / withdrawalRate)}, plus what it pays on top until then, such as bridging the years until the pension.`),
@@ -1961,28 +1908,38 @@ function drawForecast() {
 
 function viewSettings() {
   const store = state.store;
-  return h("div", null,
-    card("General", settingsForm(store)),
-    payInsCard(store),
-    card("Categories",
-      h("div", { class: "columns" }, F.KINDS.map((kind) => h("div", null, h("h3", null, KINDS[kind].title), categoryList(store, kind))))),
-    card(["Accounts", info("accounts",
-        "Invested accounts (brokers, ETF savings plans) are the portfolio: the milestones and the forecast count them alone.",
-        "Cash (Tagesgeld, the emergency fund), property, pension assets (Riester, Rürup, company pension: locked until retirement) and debts (what is still owed, such as a mortgage) count for the net worth.")],
-      accountList(store)),
-    importCard(store),
-    exportCard(store),
-    lockCard(),
-    card(["Data file", info("the data file",
-        "Everything is saved in one file on this computer. No account and no sync: copy the file to back it up.",
-        "Before the first change of each day, Finance keeps a copy of the file as it was, for the last 30 days with changes. To go back to a day, copy its file over the data file; open windows show it once they get focus.")],
-      h("dl", { class: "paths" },
-        h("dt", null, "Your data"), h("dd", null, h("code", null, state.file)),
-        h("dt", null, "Daily copies"), h("dd", null, h("code", null, state.backups)))),
-    card(["Updates", info("updates",
-        "Stable offers releases, with release notes on GitHub. Preview offers every change as soon as its tests pass, before it is released: new features first, and now and then a new bug.",
-        "Back on Stable, Finance keeps the version it has until a release is newer, so it never goes back to an older one.")],
-      updates.channelSettings()));
+  const tab = state.settingsTab;
+  const tabs = h("nav", { class: "tabs", "aria-label": "Settings" },
+    SETTINGS_TABS.map(([key, label]) => h("a", { href: `#settings/${key}`, class: key === tab ? "active" : null, "aria-current": key === tab ? "page" : null }, label)));
+  const pages = {
+    data: () => [
+      card("Assumptions", assumptionsForm(store)),
+      payInsCard(store),
+      eventsCard(store),
+      card("Categories",
+        h("div", { class: "columns" }, F.KINDS.map((kind) => h("div", null, h("h3", null, KINDS[kind].title), categoryList(store, kind))))),
+      card(["Accounts", info("accounts",
+          "Invested accounts (brokers, ETF savings plans) are the portfolio: the milestones and the forecast count them alone.",
+          "Cash (Tagesgeld, the emergency fund), property, pension assets (Riester, Rürup, company pension: locked until retirement) and debts (what is still owed, such as a mortgage) count for the net worth.")],
+        accountList(store)),
+    ],
+    general: () => [
+      card("General", generalForm(store)),
+      lockCard(),
+      card(["Data file", info("the data file",
+          "Everything is saved in one file on this computer. No account and no sync: copy the file to back it up.",
+          "Before the first change of each day, Finance keeps a copy of the file as it was, for the last 30 days with changes. To go back to a day, copy its file over the data file; open windows show it once they get focus.")],
+        h("dl", { class: "paths" },
+          h("dt", null, "Your data"), h("dd", null, h("code", null, state.file)),
+          h("dt", null, "Daily copies"), h("dd", null, h("code", null, state.backups)))),
+      card(["Updates", info("updates",
+          "Stable offers releases, with release notes on GitHub. Preview offers every change as soon as its tests pass, before it is released: new features first, and now and then a new bug.",
+          "Back on Stable, Finance keeps the version it has until a release is newer, so it never goes back to an older one.")],
+        updates.channelSettings()),
+    ],
+    export: () => [importCard(store), exportCard(store)],
+  };
+  return h("div", null, tabs, ...pages[tab]());
 }
 
 // The lock's switch, updated in place so the rest of Settings stays as typed.
@@ -2012,8 +1969,10 @@ function renderLockChoice() {
     : "";
 }
 
-function settingsForm(store) {
-  const { withdrawalRate, bufferPercent, currency: code, numberFormat, expectedReturn, inflation, birthYear, retirementAge, emergencyMonths } = store.settings;
+// What seldom changes: how amounts are shown, and the year of birth and the
+// retirement age.
+function generalForm(store) {
+  const { currency: code, numberFormat, birthYear, retirementAge } = store.settings;
   const codes = Intl.supportedValuesOf("currency");
   if (!codes.includes(code)) codes.push(code);
   return h("form", { class: "settings-form", onsubmit: (event) => {
@@ -2021,12 +1980,6 @@ function settingsForm(store) {
     const data = new FormData(event.currentTarget);
     const chosen = String(data.get("currency"));
     const format = String(data.get("numberFormat"));
-    const rate = F.parsePercent(data.get("withdrawalRate"), { decimals: RATE_DECIMALS });
-    const buffer = F.parsePercent(data.get("bufferPercent"));
-    const growth = F.parsePercent(data.get("expectedReturn"));
-    const prices = F.parsePercent(data.get("inflation"));
-    const emergencyText = String(data.get("emergencyMonths")).trim();
-    const emergency = Number(emergencyText);
     const birthText = String(data.get("birthYear")).trim();
     const ageText = String(data.get("retirementAge")).trim();
     const born = birthText === "" ? null : Number(birthText);
@@ -2037,25 +1990,10 @@ function settingsForm(store) {
     let error = null;
     if (!F.isCurrency(chosen)) error = "Currency: choose one from the list.";
     else if (!F.NUMBER_FORMATS.includes(format)) error = "Number format: choose one from the list.";
-    else if (!rate.ok || !(rate.value > 0 && rate.value <= 100)) error = `Withdrawal rate: enter a percentage above 0 and at most 100, with up to ${RATE_DECIMALS} decimals.`;
-    else if (!buffer.ok || !(buffer.value >= 0 && buffer.value <= 100)) error = "Buffer: enter a percentage from 0 to 100.";
-    else if (!growth.ok || !(growth.value >= 0 && growth.value <= 100)) error = "Expected return: enter a percentage from 0 to 100.";
-    else if (!prices.ok || !(prices.value >= 0 && prices.value <= 100)) error = "Inflation: enter a percentage from 0 to 100.";
     else if (born !== null && !(/^[0-9]{4}$/.test(birthText) && born >= firstYear && born <= thisYear)) error = `Year of birth: enter a year from ${firstYear} to ${thisYear}, or leave it empty.`;
     else if (!/^[0-9]+$/.test(ageText) || age < ages.min || age > ages.max) error = `Retirement age: enter whole years from ${ages.min} to ${ages.max}.`;
-    else if (!/^[0-9]+$/.test(emergencyText) || emergency < F.EMERGENCY_MONTHS.min || emergency > F.EMERGENCY_MONTHS.max) error = `Emergency fund: enter whole months from ${F.EMERGENCY_MONTHS.min} to ${F.EMERGENCY_MONTHS.max}.`;
     if (error) return showError(event.currentTarget, error);
-    commit(F.saveSettings(store, {
-      currency: chosen,
-      numberFormat: format,
-      withdrawalRate: rate.value,
-      bufferPercent: buffer.value,
-      expectedReturn: growth.value,
-      inflation: prices.value,
-      birthYear: born,
-      retirementAge: age,
-      emergencyMonths: emergency,
-    }), "Settings saved.");
+    commit(F.saveSettings(store, { currency: chosen, numberFormat: format, birthYear: born, retirementAge: age }), "Settings saved.");
   } },
     field("Currency",
       h("select", { name: "currency", value: code }, codes.sort().map((c) => h("option", { value: c }, `${c} – ${currencyName(c)}`))),
@@ -2063,6 +2001,41 @@ function settingsForm(store) {
     field("Number format",
       h("select", { name: "numberFormat", value: numberFormat }, F.NUMBER_FORMATS.map((f) => h("option", { value: f }, f))),
       "How amounts and percentages are shown. Amounts can be typed either way."),
+    field("Year of birth", h("input", { name: "birthYear", inputmode: "numeric", autocomplete: "off", value: birthYear === null ? "" : String(birthYear), placeholder: "1990" })),
+    field("Official retirement age", h("input", { name: "retirementAge", inputmode: "numeric", autocomplete: "off", value: String(retirementAge), required: true }),
+      "When the state pension starts without deductions: 67 in Germany for everyone born in 1964 or later. Not when you plan to stop working: the forecast works that out.",
+      "Retirement starts in January of the year you reach it."),
+    h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, "Save")));
+}
+
+// What the FI number and the projections assume, and the emergency fund
+// to aim for.
+function assumptionsForm(store) {
+  const { withdrawalRate, bufferPercent, expectedReturn, inflation, emergencyMonths } = store.settings;
+  return h("form", { class: "settings-form", onsubmit: (event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const rate = F.parsePercent(data.get("withdrawalRate"), { decimals: RATE_DECIMALS });
+    const buffer = F.parsePercent(data.get("bufferPercent"));
+    const growth = F.parsePercent(data.get("expectedReturn"));
+    const prices = F.parsePercent(data.get("inflation"));
+    const emergencyText = String(data.get("emergencyMonths")).trim();
+    const emergency = Number(emergencyText);
+    let error = null;
+    if (!rate.ok || !(rate.value > 0 && rate.value <= 100)) error = `Withdrawal rate: enter a percentage above 0 and at most 100, with up to ${RATE_DECIMALS} decimals.`;
+    else if (!buffer.ok || !(buffer.value >= 0 && buffer.value <= 100)) error = "Buffer: enter a percentage from 0 to 100.";
+    else if (!growth.ok || !(growth.value >= 0 && growth.value <= 100)) error = "Expected return: enter a percentage from 0 to 100.";
+    else if (!prices.ok || !(prices.value >= 0 && prices.value <= 100)) error = "Inflation: enter a percentage from 0 to 100.";
+    else if (!/^[0-9]+$/.test(emergencyText) || emergency < F.EMERGENCY_MONTHS.min || emergency > F.EMERGENCY_MONTHS.max) error = `Emergency fund: enter whole months from ${F.EMERGENCY_MONTHS.min} to ${F.EMERGENCY_MONTHS.max}.`;
+    if (error) return showError(event.currentTarget, error);
+    commit(F.saveSettings(store, {
+      withdrawalRate: rate.value,
+      bufferPercent: buffer.value,
+      expectedReturn: growth.value,
+      inflation: prices.value,
+      emergencyMonths: emergency,
+    }), "Settings saved.");
+  } },
     field("Safe withdrawal rate (%)", h("input", { name: "withdrawalRate", inputmode: "decimal", value: plainRate.format(withdrawalRate), required: true }),
       "The share of the portfolio you plan to spend each year once financially independent.",
       "FI number = yearly expenses ÷ this rate: at 4 % that is 25 × yearly expenses. Many use 3 to 3.5 % for longer retirements or to allow for taxes."),
@@ -2074,10 +2047,6 @@ function settingsForm(store) {
     field("Inflation (%)", h("input", { name: "inflation", inputmode: "decimal", value: plain.format(inflation), required: true }),
       "How much prices rise a year. The milestones, the Path to FI chart and the forecast raise your expenses and the FI number by it.",
       "Pay-ins rise by it only if you choose so under Future pay-ins."),
-    field("Year of birth", h("input", { name: "birthYear", inputmode: "numeric", autocomplete: "off", value: birthYear === null ? "" : String(birthYear), placeholder: "1990" })),
-    field("Official retirement age", h("input", { name: "retirementAge", inputmode: "numeric", autocomplete: "off", value: String(retirementAge), required: true }),
-      "When the state pension starts without deductions: 67 in Germany for everyone born in 1964 or later. Not when you plan to stop working: the forecast works that out.",
-      "Retirement starts in January of the year you reach it."),
     field("Emergency fund (months of expenses)", h("input", { name: "emergencyMonths", inputmode: "numeric", value: String(emergencyMonths), required: true }),
       "How many months of expenses you want to keep in cash accounts, apart from the portfolio: 3 to 6 are common. 0 sets no target.",
       "The dashboard says how far your cash goes, under Expenses covered."),
@@ -2117,7 +2086,7 @@ function readPayInAmount(data, name, label) {
 // the next, in the order they start; and whether the projections raise
 // pay-ins by the inflation.
 function payInsCard(store) {
-  const { birthYear, futurePayIn, payInsRiseWithInflation } = store.settings;
+  const { birthYear, futurePayIn, payInsRiseWithInflation, coastPayIn } = store.settings;
   const series = F.portfolioSeries(store);
   const average = F.averagePayIn(series);
   const now = thisMonth(); // as the dashboard counts it
@@ -2188,6 +2157,20 @@ function payInsCard(store) {
     keepingDrafts(() => commit(F.saveSettings(state.store, { payInsRiseWithInflation: on }), on ? "Pay-ins now rise with inflation." : "Pay-ins now stay the same."));
   } });
 
+  // What the Coast plan still pays in after Coast FI: the Forecast shows it.
+  const coastForm = h("form", { class: "coast-form", onsubmit: (event) => {
+    event.preventDefault();
+    const amount = F.parseMoney(new FormData(event.currentTarget).get("coastPayIn"));
+    if (!amount.ok) return showError(event.currentTarget, `After Coast FI: ${amount.error}.`);
+    if (amount.cents < 0) return showError(event.currentTarget, "After Coast FI: enter an amount of 0 or more.");
+    commit(F.saveSettings(state.store, { coastPayIn: amount.cents }), "Saved what the Coast plan pays in after Coast FI.");
+  } },
+    field("After Coast FI, per month",
+      h("input", { id: "coast-payin", name: "coastPayIn", class: "amount", inputmode: "decimal", autocomplete: "off", required: true, value: inputMoney(coastPayIn) }),
+      ["What the Coast plan of the ", h("a", { href: "#forecast" }, "Forecast"), " still pays in a month once Coast FI is reached: 0 stops paying in."],
+      "It stays the same amount of money, also when pay-ins rise with inflation."),
+    h("button", { type: "submit" }, "Save"));
+
   return card(["Future pay-ins", info("future pay-ins",
       "What you pay in a month from now on, for the investment rate, the milestones, the Path to FI chart and the forecast.",
       "Now is the average of your pay-ins under Portfolio, or an amount of your own. Add the changes you know of, such as a raise, a sabbatical or part-time: each holds until the next one. Pay-ins stop at retirement, and for Retire early at FI.",
@@ -2200,7 +2183,54 @@ function payInsCard(store) {
       h("label", { class: "check" }, rise, "Rise with inflation"),
       info("rising pay-ins",
         "Off, every pay-in stays the same amount of money for good, as typed.",
-        "On, the amounts are in today's money, like your expenses: the projections raise them by the inflation set under General, as if you raised your savings plan with prices.")));
+        "On, the amounts are in today's money, like your expenses: the projections raise them by the inflation set under Assumptions, as if you raised your savings plan with prices.")),
+    coastForm);
+}
+
+// Planned one-offs: an inheritance, a house deposit, a sabbatical. Each
+// counts in its month from where the forecast starts on.
+function eventsCard(store) {
+  const { start } = outlook(store);
+  const editing = store.events.find((e) => e.id === state.editingEvent) ?? null;
+  const form = h("form", { class: "event-form", onsubmit: (event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const amount = F.parseMoney(data.get("amount"));
+    if (!amount.ok) return showError(event.currentTarget, `Amount: ${amount.error}.`);
+    const result = F.saveEvent(store, { id: editing?.id ?? null, name: data.get("name"), month: String(data.get("month")), amount: amount.cents });
+    if (!result.ok) return showError(event.currentTarget, `${result.error}.`);
+    state.editingEvent = null;
+    state.focus = "#event-name";
+    commit(result.store, `${editing ? "Saved" : "Added"} ${String(data.get("name")).trim()}.`);
+  } },
+    h("label", null, "Name", h("input", { id: "event-name", name: "name", autocomplete: "off", required: true, value: editing?.name ?? "", placeholder: "Inheritance" })),
+    h("label", null, "Month", h("input", { name: "month", type: "month", required: true, value: editing?.month ?? "" })),
+    h("label", null, "Amount (negative: taken out)", h("input", { name: "amount", class: "amount", inputmode: "decimal", autocomplete: "off", required: true,
+      value: editing ? inputMoney(editing.amount) : "", placeholder: inputMoney(-2000000) })),
+    h("div", { class: "form-actions" },
+      h("button", { type: "submit", class: "primary" }, editing ? "Save" : "Add"),
+      editing ? h("button", { type: "button", onclick: () => { state.editingEvent = null; render(); } }, "Cancel") : null));
+  const rows = store.events.map((event) => {
+    const past = event.month <= start;
+    return h("tr", { class: event.id === state.editingEvent ? "editing" : null },
+      h("td", null, monthLabel(event.month)),
+      h("td", null, event.name, past ? h("div", { class: "sub" }, "Before the forecast starts: enter it under Portfolio as a one-off") : null),
+      h("td", { class: "num" }, signedMoney(event.amount)),
+      h("td", { class: "actions" },
+        h("button", { type: "button", class: "link", onclick: () => { state.editingEvent = event.id; state.focus = "#event-name"; render(); } }, "Edit"),
+        h("button", { type: "button", class: "link danger", onclick: () => {
+          if (!confirm(`Delete ${event.name}?`)) return;
+          if (state.editingEvent === event.id) state.editingEvent = null;
+          commit(F.deleteEvent(store, event.id), `Deleted ${event.name}.`);
+        } }, "Delete")));
+  });
+  return card(["Planned one-offs", info("planned one-offs",
+      "Money that comes in or goes out once: an inheritance, a house deposit, a car, a sabbatical (what you live on, and the pay-ins you skip).",
+      "Every plan gets it in its month, as do the milestones and the Path to FI chart. Amounts are in today's money and rise with inflation, like expenses.")],
+    rows.length ? h("div", { class: "table-wrap" }, h("table", null,
+      h("thead", null, h("tr", null, h("th", null, "Month"), h("th", null, "Name"), h("th", { class: "num" }, "Amount"), h("th"))),
+      h("tbody", null, rows))) : null,
+    form);
 }
 
 // A list of names, each with Rename and Delete, and a field to add one.

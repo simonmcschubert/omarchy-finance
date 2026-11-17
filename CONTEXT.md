@@ -59,6 +59,10 @@ the investment rate and every projection.
 in today's money and rise with inflation in the projections, like expenses.
 Off, they stay the same amount of money for good.
 
+**Coast pay-in** (`coastPayIn`, 0 by default): what the Coast plan still
+pays in a month once Coast FI is reached. It stays the same amount of money,
+also with rising pay-ins.
+
 **One-off**: money paid in or out once, such as an inheritance or a house
 deposit. It is either recorded with a month's values or planned for a
 coming month. One-offs count as paid in, but never for the average pay-in.
@@ -83,12 +87,12 @@ then.
 **Lean FI**: FI for the essential expenses only.
 
 **Coast FI**: from then on, the portfolio reaches the FI number by the
-retirement month without any more pay-ins (or with only the coast amount
-the Forecast takes). The **Coast FI number** is what the portfolio needs
+retirement month without any more pay-ins (or, in the Forecast, with only
+the coast pay-in). The **Coast FI number** is what the portfolio needs
 for that today.
 
 **Milestones**: Coast FI, Lean FI and FI on the dashboard, in the order the
-portfolio reaches them.
+portfolio reaches them. Coast FI here never counts the coast pay-in.
 
 **FI outlook** (`fiOutlook()`): where the portfolio goes from the latest
 month on. Every FI date the app shows comes from it: the milestones, the
@@ -107,6 +111,6 @@ rise. **Today's money**: the same amounts with inflation taken out again.
 
 **Plans** (the Forecast page):
 - _Keep investing_ pays in until retirement.
-- _Coast_ pays in until Coast FI, then only the coast amount.
+- _Coast_ pays in until Coast FI, then only the coast pay-in.
 - _Retire early_ pays in until FI and lives off the portfolio from the month
   after.

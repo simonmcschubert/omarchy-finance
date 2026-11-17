@@ -4,7 +4,7 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 14;
+export const VERSION = 15;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
@@ -33,6 +33,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // Whether projections raise pay-ins by the inflation, like expenses: off,
   // every pay-in stays the same amount of money for good.
   payInsRiseWithInflation: false,
+  // What the Forecast's Coast plan still pays in a month once Coast FI is
+  // reached, in cents: 0 stops paying in. It stays the same amount of
+  // money, also with rising pay-ins.
+  coastPayIn: 0,
 });
 
 // What the birth year and the retirement age may be.
@@ -66,7 +70,7 @@ export function emptyStore() {
 // ---------------------------------------------------------------- file format
 
 const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events", "payInChanges"];
-const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge", "emergencyMonths", "futurePayIn", "payInsRiseWithInflation"];
+const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge", "emergencyMonths", "futurePayIn", "payInsRiseWithInflation", "coastPayIn"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths", "from", "until"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active", "essential"];
 const ACCOUNT_KEYS = ["id", "name", "kind"];
@@ -221,7 +225,7 @@ function upgradeFromVersion9(value) {
 function upgradeFromVersion11(value) {
   const next = { ...value, version: 12 };
   if (isObject(value.settings)) {
-    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => !["emergencyMonths", "futurePayIn", "payInsRiseWithInflation"].includes(key)), "settings");
+    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => !["emergencyMonths", "futurePayIn", "payInsRiseWithInflation", "coastPayIn"].includes(key)), "settings");
     next.settings = { ...value.settings, emergencyMonths: DEFAULT_SETTINGS.emergencyMonths };
   }
   return next;
@@ -231,7 +235,7 @@ function upgradeFromVersion11(value) {
 function upgradeFromVersion12(value) {
   const next = { ...value, version: 13 };
   if (isObject(value.settings)) {
-    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "futurePayIn" && key !== "payInsRiseWithInflation"), "settings");
+    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => !["futurePayIn", "payInsRiseWithInflation", "coastPayIn"].includes(key)), "settings");
     next.settings = { ...value.settings, futurePayIn: DEFAULT_SETTINGS.futurePayIn };
   }
   return next;
@@ -243,8 +247,19 @@ function upgradeFromVersion13(value) {
   if (isObject(value) && "payInChanges" in value) throw new Error('The file has unknown field "payInChanges"');
   const next = { ...value, version: 14, payInChanges: [] };
   if (isObject(value.settings)) {
-    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "payInsRiseWithInflation"), "settings");
+    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "payInsRiseWithInflation" && key !== "coastPayIn"), "settings");
     next.settings = { ...value.settings, payInsRiseWithInflation: DEFAULT_SETTINGS.payInsRiseWithInflation };
+  }
+  return next;
+}
+
+// Version 14 kept the amount the Coast plan pays in after Coast FI on the
+// Forecast page only, for as long as the page was open: it starts at 0.
+function upgradeFromVersion14(value) {
+  const next = { ...value, version: 15 };
+  if (isObject(value.settings)) {
+    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "coastPayIn"), "settings");
+    next.settings = { ...value.settings, coastPayIn: DEFAULT_SETTINGS.coastPayIn };
   }
   return next;
 }
@@ -294,6 +309,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 11) value = upgradeFromVersion11(value);
     if (isObject(value) && value.version === 12) value = upgradeFromVersion12(value);
     if (isObject(value) && value.version === 13) value = upgradeFromVersion13(value);
+    if (isObject(value) && value.version === 14) value = upgradeFromVersion14(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -301,7 +317,7 @@ export function parseStore(value) {
     if (value.version !== VERSION) throw new Error(`unsupported version ${JSON.stringify(value.version)}`);
 
     checkKeys(value.settings, SETTINGS_KEYS, "settings");
-    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, inflation, birthYear, retirementAge, emergencyMonths, futurePayIn, payInsRiseWithInflation } = value.settings;
+    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, inflation, birthYear, retirementAge, emergencyMonths, futurePayIn, payInsRiseWithInflation, coastPayIn } = value.settings;
     if (typeof withdrawalRate !== "number" || !(withdrawalRate > 0 && withdrawalRate <= 100)) {
       throw new Error("settings.withdrawalRate must be above 0 and at most 100");
     }
@@ -331,6 +347,7 @@ export function parseStore(value) {
       throw new Error("settings.futurePayIn must be null or a number of cents, not negative");
     }
     if (typeof payInsRiseWithInflation !== "boolean") throw new Error("settings.payInsRiseWithInflation must be true or false");
+    if (!isCents(coastPayIn, { min: 0 })) throw new Error("settings.coastPayIn must be a number of cents, not negative");
 
     checkKeys(value.categories, KINDS, "categories");
     for (const kind of KINDS) {
@@ -1511,9 +1528,10 @@ export function fiOutlook(store, now = currentMonth()) {
     },
 
     // The Forecast page's plans: forecast() at `growth` ("low", "mid" or
-    // "high"), investing `coastContribution` a month after Coast FI, in
-    // "nominal" money or "today"'s.
-    forecast({ growth = "mid", coastContribution = 0, money: kind = "nominal" } = {}) {
+    // "high"), investing `coastContribution` a month after Coast FI (the
+    // coast pay-in from Settings unless given), in "nominal" money or
+    // "today"'s.
+    forecast({ growth = "mid", coastContribution = store.settings.coastPayIn, money: kind = "nominal" } = {}) {
       return inMoney(run({ growth, coastContribution }), kind);
     },
   };
