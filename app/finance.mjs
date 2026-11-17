@@ -1397,12 +1397,29 @@ function sortRecords(store, records) {
   return records.sort((a, b) => a.month.localeCompare(b.month) || order.get(a.account) - order.get(b.account));
 }
 
+// Adds an expense or income item, or changes the one with its id. Checks the
+// item as parseStore does, and that it does not start and end at retirement.
+// Returns { ok: true, store } or { ok: false, error }.
 export function saveItem(store, kind, item) {
+  const error = itemError(store, kind, item);
+  if (error) return { ok: false, error };
   const next = structuredClone(store);
   const at = next[kind].findIndex((existing) => existing.id === item.id);
   if (at === -1) next[kind].push({ ...item });
   else next[kind][at] = { ...item };
-  return next;
+  return { ok: true, store: next };
+}
+
+function itemError(store, kind, item) {
+  if (!isText(item.name) || item.name === "") return "Enter a name";
+  if (item.category !== "" && !store.categories[kind].includes(item.category)) return `Category "${item.category}" no longer exists`;
+  if (!isCents(item.amount, { min: 1 })) return item.amount >= MAX_CENTS ? "Amount is too large" : "Amount must be more than 0";
+  if (!Number.isInteger(item.everyMonths) || item.everyMonths < 1 || item.everyMonths > 120) return "Paid every must be whole months from 1 to 120";
+  if (!isBound(item.from)) return "Choose when it starts";
+  if (!isBound(item.until)) return "Choose when it ends";
+  if (item.from?.at === "retirement" && item.until?.at === "retirement") return "It cannot start and end at retirement";
+  if (kind === "expenses" && (typeof item.active !== "boolean" || typeof item.essential !== "boolean")) return "Active and essential must be true or false";
+  return null;
 }
 
 export function deleteItem(store, kind, id) {
