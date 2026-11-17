@@ -372,8 +372,10 @@ async function pump() {
       state.revision = json.revision;
       saves++;
       if (state.notice?.retry) {
+        // Only the notice goes: a render would rebuild the forms and lose
+        // what is being typed.
         state.notice = null;
-        render();
+        document.querySelector("#main > .notice")?.remove();
       }
     } else if (status === 409) {
       pending = null;
@@ -2008,7 +2010,16 @@ function importResult(plan) {
 // ---------------------------------------------------------------- start
 
 state.view = viewFromHash();
-// A restart waits for saving(). The server answers by then, so this also
-// tries a failed save again.
-const updates = startUpdates(document.getElementById("update"), { saving: () => { pump(); return inFlight || pending !== null; } });
+// A restart waits for saving(), which it asks every 100 ms. The server
+// answers by then, so this also tries a failed save again, at most every
+// few seconds, so a server that keeps failing is not flooded.
+let retried = 0;
+function saving() {
+  if (pending && !inFlight && Date.now() - retried >= 5000) {
+    retried = Date.now();
+    pump();
+  }
+  return inFlight || pending !== null;
+}
+const updates = startUpdates(document.getElementById("update"), { saving });
 load();
