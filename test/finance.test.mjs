@@ -17,6 +17,33 @@ function store(parts = {}) {
   return s;
 }
 
+// A store for fiOutlook with an FI number of `goal` for good (one expense,
+// no buffer, 4 %) and a portfolio of `value` in October 2026, after
+// `payIn` a month for a year; `rate` is the expected return.
+function outlookStore({ value = 0, payIn = 0, goal = 0, rate = 0, inflation = 0, settings = {}, events = [] } = {}) {
+  return store({
+    settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, withdrawalRate: 4, expectedReturn: rate, inflation, ...settings },
+    expenses: goal ? [{ id: "e", name: "E", category: "", amount: goal / 300, everyMonths: 1, active: true, essential: false }] : [],
+    accounts: [{ id: "a", name: "A" }],
+    records: Array.from({ length: 12 }, (_, k) => ({ month: F.addMonths("2025-11", k), account: "a", value, payIn })),
+    events,
+  });
+}
+// Its outlook in November 2026.
+const outlook = (parts) => F.fiOutlook(outlookStore(parts), "2026-11");
+
+// The months until `start`, with `payIn` a month at `rate` % a year,
+// reaches `goal`, which rises by `inflation` % a year; null after
+// MAX_PROJECTION_MONTHS. Worked out by hand, to check the outlook with.
+function monthsTo(start, payIn, rate, goal, inflation = 0) {
+  let value = start;
+  for (let n = 0; n <= F.MAX_PROJECTION_MONTHS; n++) {
+    if (n > 0) value = Math.max(0, value * (1 + monthly(rate)) + payIn);
+    if (value >= F.inflated(goal, inflation, n)) return n;
+  }
+  return null;
+}
+
 // Settings as versions 7 to 11 had them: without the emergency fund and
 // the future pay-in; and as version 12 had them, without the future pay-in.
 const SETTINGS_V12 = (({ futurePayIn, ...rest }) => rest)(F.DEFAULT_SETTINGS);
@@ -318,73 +345,88 @@ test("missingMonths: after the latest month up to last month", () => {
   assert.deepEqual(F.missingMonths("2025-11", "2026-02"), { from: "2025-12", to: "2026-01", count: 2 });
 });
 
-test("fiProjection: growth at the expected return plus the average pay-in", () => {
+test("FI outlook: the Path to FI chart at the expected return and 2 points less and more", () => {
   // At 0 % a year, 100 a month reaches 1,200 after 12 months.
-  const flat = F.fiProjection({ month: "2026-10", start: 0, payIn: 100, goal: 1200, rate: 0 });
+  const flat = outlook({ value: 0, payIn: 100, goal: 1200 }).path();
   assert.deepEqual(flat.rates, { low: -2, mid: 0, high: 2 });
   assert.equal(flat.reach.mid, "2027-10");
   assert.equal(flat.reach.high, "2027-10", "in the 12th month at 2 % too, a bit above 1,200");
   assert.equal(flat.reach.low, "2027-11");
   assert.deepEqual(flat.points[0], { month: "2026-11", low: 100, mid: 100, high: flat.points[0].high, goal: 1200 });
 
-  // The mid projection counts as Time to FI does.
   const start = 50000 * EUR;
   const payIn = 1250 * EUR;
   const goal = 675000 * EUR;
-  const p = F.fiProjection({ month: "2026-10", start, payIn, goal, rate: 5 });
-  const months = F.projectToGoal(start, payIn, 5, goal).length;
+  const p = outlook({ value: start, payIn, goal, rate: 5 }).path();
+  const months = monthsTo(start, payIn, 5, goal);
   assert.equal(p.reach.mid, F.addMonths("2026-10", months));
   assert.ok(months > 20 * 12 && months < 22 * 12, `${months} months`);
-  assert.equal(p.reach.high, F.addMonths("2026-10", F.projectToGoal(start, payIn, 7, goal).length));
-  assert.equal(p.reach.low, F.addMonths("2026-10", F.projectToGoal(start, payIn, 3, goal).length));
+  assert.equal(p.reach.high, F.addMonths("2026-10", monthsTo(start, payIn, 7, goal)));
+  assert.equal(p.reach.low, F.addMonths("2026-10", monthsTo(start, payIn, 3, goal)));
   const shown = F.monthIndex(p.reach.low) - F.monthIndex("2026-10");
   assert.equal(p.points.length, Math.ceil(shown * 1.1), "until a little after the low projection gets there");
   assert.equal(p.points.at(-1).month, F.addMonths("2026-10", p.points.length));
   for (const point of p.points) assert.ok(point.low <= point.mid && point.mid <= point.high);
 });
 
-test("fiProjection: the FI number rises by the inflation", () => {
+test("FI outlook: the FI number rises by the inflation", () => {
   const start = 50000 * EUR;
   const payIn = 1250 * EUR;
   const goal = 675000 * EUR;
-  const p = F.fiProjection({ month: "2026-10", start, payIn, goal, rate: 8, inflation: 3 });
+  const p = outlook({ value: start, payIn, goal, rate: 8, inflation: 3 }).path();
   assert.deepEqual(p.rates, { low: 6, mid: 8, high: 10 });
   close(p.points[11].goal, goal * 1.03, "a year on");
   for (const k of ["low", "mid", "high"]) {
-    assert.equal(p.reach[k], F.addMonths("2026-10", F.projectToGoal(start, payIn, p.rates[k], goal, 3).length), k);
+    assert.equal(p.reach[k], F.addMonths("2026-10", monthsTo(start, payIn, p.rates[k], goal, 3)), k);
   }
   const n = F.monthIndex(p.reach.mid) - F.monthIndex("2026-10");
   assert.ok(p.points[n - 1].mid >= p.points[n - 1].goal && p.points[n - 2].mid < p.points[n - 2].goal);
   // Later than without inflation, with the same pay-ins.
-  assert.ok(p.reach.mid > F.fiProjection({ month: "2026-10", start, payIn, goal, rate: 8 }).reach.mid);
+  assert.ok(p.reach.mid > outlook({ value: start, payIn, goal, rate: 8 }).path().reach.mid);
+  // With nothing paid in, it comes in the same month as today's FI number
+  // at the return after inflation.
+  const real = (1.08 / 1.03 - 1) * 100;
+  const months = monthsTo(100000 * EUR, 0, 8, 675000 * EUR, 3);
+  assert.equal(months, monthsTo(100000 * EUR, 0, real, 675000 * EUR));
+  assert.equal(outlook({ value: 100000 * EUR, goal: 675000 * EUR, rate: 8, inflation: 3 }).milestones().fi.months, months);
 });
 
-test("fiProjection: no goal, at the goal already, out of reach, close by", () => {
-  assert.equal(F.fiProjection({ month: "2026-10", start: 100, payIn: 10, goal: 0, rate: 5 }), null);
+test("FI outlook: no goal, at the goal already, out of reach, close by", () => {
+  assert.equal(outlook({ value: 100, payIn: 10, rate: 5 }).path(), null, "no expenses, no FI number");
 
-  const there = F.fiProjection({ month: "2026-10", start: 1000, payIn: 10, goal: 1000, rate: 5 });
+  const there = outlook({ value: 1200, payIn: 10, goal: 1200, rate: 5 }).path();
   assert.deepEqual(there.reach, { low: "2026-10", mid: "2026-10", high: "2026-10" });
   assert.deepEqual(there.points, []);
 
-  const never = F.fiProjection({ month: "2026-10", start: 100, payIn: 0, goal: 1e9, rate: 1 });
+  const never = outlook({ value: 100, payIn: 0, goal: 999999900, rate: 1 }).path();
   assert.deepEqual(never.reach, { low: null, mid: null, high: null });
   assert.equal(never.points.length, F.MAX_PROJECTION_MONTHS);
 
   // Only the high return gets there: 1.02^35 is 2.0, so in 35 years; the
   // mid one at 0 % never does. The chart runs to 1.5 times that, and a bit.
-  const high = F.fiProjection({ month: "2026-10", start: 1000, payIn: 0, goal: 2000, rate: 0 });
+  const high = outlook({ value: 1200, payIn: 0, goal: 2400, rate: 0 }).path();
   assert.equal(high.reach.mid, null);
   assert.equal(high.reach.high, "2061-11");
   assert.equal(high.points.length, Math.ceil(421 * 1.5 * 1.1));
 
   // A month away: the chart still shows a year.
-  const soon = F.fiProjection({ month: "2026-10", start: 990, payIn: 10, goal: 1000, rate: 5 });
+  const soon = outlook({ value: 1190, payIn: 10, goal: 1200, rate: 5 }).path();
   assert.equal(soon.reach.mid, "2026-11");
   assert.equal(soon.points.length, 12);
+});
 
-  // Withdrawals: the value does not go below zero.
-  const down = F.fiProjection({ month: "2026-10", start: 1000, payIn: -500, goal: 5000, rate: 5 });
-  assert.equal(down.points.at(-1).mid, 0);
+test("FI outlook: a withdrawal on average counts as nothing paid in", () => {
+  const o = outlook({ value: 1000 * EUR, payIn: -500 * EUR, goal: 5000 * EUR, rate: 5 });
+  assert.deepEqual(o.payIn, { amount: -500 * EUR, months: 12, invested: 0, withdrawal: true });
+  const zero = outlook({ value: 1000 * EUR, payIn: 0, goal: 5000 * EUR, rate: 5 });
+  assert.deepEqual(o.path(), zero.path(), "the chart");
+  assert.deepEqual(o.milestones(), zero.milestones(), "the milestones");
+  assert.deepEqual(o.forecast(), zero.forecast(), "the Forecast");
+  assert.equal(outlook({ payIn: 1234.4 }).payIn.invested, 1234, "in whole cents");
+  assert.deepEqual(F.fiOutlook(store(), "2026-11").payIn, { amount: null, months: null, invested: 0, withdrawal: false });
+  // An own future pay-in is never a withdrawal.
+  const own = F.fiOutlook(F.saveSettings(outlookStore({ value: 1000 * EUR, payIn: -500 * EUR, goal: 5000 * EUR }), { futurePayIn: 200 * EUR }), "2026-11");
+  assert.deepEqual(own.payIn, { amount: 200 * EUR, months: null, invested: 200 * EUR, withdrawal: false });
 });
 
 test("byCategory groups and sorts by monthly total", () => {
@@ -661,36 +703,7 @@ test("a version 4 file is upgraded: the default expected return", () => {
   assert.match(F.parseStore({ ...v4, settings: { ...v4.settings, expectedReturn: 5 } }).error, /unknown field "expectedReturn"/);
 });
 
-test("projectToGoal: the goal rises by the inflation", () => {
-  // 1,000 at 12 % a year is 1,078 after 8 months and 1,089 after 9.
-  assert.deepEqual(F.projectToGoal(250, 100, 0, 1000, 12), [350, 450, 550, 650, 750, 850, 950, 1050, 1150]);
-  assert.equal(F.projectToGoal(0, 100, 0, 1000, 200), null, "prices rise faster than the pay-ins");
-  close(F.inflated(1000, 12, 12), 1120, "a year");
-  close(F.inflated(1000, 3, 0), 1000, "now");
-
-  // With nothing paid in, the FI number is reached in the same month as
-  // when today's FI number is reached at the return after inflation.
-  const real = (1.08 / 1.03 - 1) * 100;
-  const months = F.projectToGoal(100000 * EUR, 0, 8, 675000 * EUR, 3).length;
-  assert.equal(months, F.projectToGoal(100000 * EUR, 0, real, 675000 * EUR).length);
-  assert.ok(months > 39 * 12 && months < 41 * 12, `${months} months`);
-});
-
-test("projectToGoal: monthly values until the goal", () => {
-  // No return: only pay-ins, 100 a month from 250 to 1000 takes 8 months.
-  assert.deepEqual(F.projectToGoal(250, 100, 0, 1000), [350, 450, 550, 650, 750, 850, 950, 1050]);
-  assert.deepEqual(F.projectToGoal(1000, 100, 0, 1000), [], "already there");
-  assert.equal(F.projectToGoal(0, 0, 0, 1000), null, "never");
-  assert.equal(F.projectToGoal(1000, -100, 5, 2000), null, "withdrawals faster than growth");
-  assert.equal(F.projectToGoal(1, 0, 1, 1e6), null, "more than 100 years");
-
-  // 12 % a year compounds monthly to 12 % a year, not 12.68 %.
-  const year = F.projectToGoal(100000, 0, 12, 112001);
-  assert.equal(year.length, 13);
-  assert.ok(Math.abs(year[11] - 112000) < 0.001, String(year[11]));
-});
-
-test("metrics: time to FI from the latest month with the average pay-in", () => {
+test("FI outlook: time to FI from the latest month with the average pay-in", () => {
   const s = store({
     settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, expectedReturn: 0, inflation: 0 },
     expenses: [{ id: "e", name: "Rent", category: "", amount: 100 * EUR, everyMonths: 1, active: true }],
@@ -701,35 +714,120 @@ test("metrics: time to FI from the latest month with the average pay-in", () => 
     ],
   });
   // FI number 100 × 12 × 25 = 30,000: 2,000 to go at 1,000 a month.
-  const m = F.metrics(s);
-  assert.equal(m.fiNumber, 30000 * EUR);
-  assert.equal(m.fiMonths, 2);
-  assert.deepEqual(m.projection, [
-    { month: "2026-11", value: 29000 * EUR },
-    { month: "2026-12", value: 30000 * EUR },
-  ]);
+  const o = F.fiOutlook(s, "2026-11");
+  assert.equal(o.fiNumber, 30000 * EUR);
+  assert.equal(o.start, "2026-10");
+  assert.deepEqual(o.milestones().fi, { fiNumber: 30000 * EUR, progress: 28 / 30, month: "2026-12", months: 2 });
+  assert.deepEqual(o.path().points.slice(0, 2).map((p) => [p.month, p.mid]), [["2026-11", 29000 * EUR], ["2026-12", 30000 * EUR]]);
 
-  const grown = F.metrics(F.saveSettings(s, { expectedReturn: 5 }));
-  assert.equal(grown.fiMonths, 2, "the return makes it no later");
-  assert.ok(grown.projection[0].value > 29000 * EUR);
+  const grown = F.fiOutlook(F.saveSettings(s, { expectedReturn: 5 }), "2026-11");
+  assert.equal(grown.milestones().fi.months, 2, "the return makes it no later");
+  assert.ok(grown.path().points[0].mid > 29000 * EUR);
 
   // At 12 % inflation the FI number is 30,000 × 1.12^(1/6) ≈ 30,573 two
   // months on, so it takes a third month.
-  const pricier = F.metrics(F.saveSettings(s, { inflation: 12 }));
+  const pricier = F.fiOutlook(F.saveSettings(s, { inflation: 12 }), "2026-11");
   assert.equal(pricier.fiNumber, 30000 * EUR, "today's FI number stays");
-  assert.equal(pricier.fiMonths, 3);
+  assert.equal(pricier.milestones().fi.months, 3);
 
-  const reached = F.metrics(F.saveMonth(s, "2026-11", [{ account: "a", value: 30000 * EUR, payIn: 0 }]));
-  assert.equal(reached.fiMonths, 0);
-  assert.deepEqual(reached.projection, []);
+  const reached = F.fiOutlook(F.saveMonth(s, "2026-11", [{ account: "a", value: 30000 * EUR, payIn: 0 }]), "2026-11");
+  assert.equal(reached.milestones().fi.months, 0);
+  assert.equal(reached.path().reach.mid, "2026-11");
+  assert.deepEqual(reached.path().points, []);
 
-  const never = F.metrics(F.saveMonth(s, "2026-11", [{ account: "a", value: 28000 * EUR, payIn: -2000 * EUR }]));
-  assert.equal(never.fiMonths, null, "the average pay-in is 0");
-  assert.equal(never.projection, null);
+  const never = F.fiOutlook(F.saveMonth(s, "2026-11", [{ account: "a", value: 28000 * EUR, payIn: -2000 * EUR }]), "2026-11");
+  assert.equal(never.payIn.invested, 0, "the average pay-in is 0");
+  assert.equal(never.milestones().fi.month, null, "not within 100 years");
+  assert.equal(never.milestones().fi.months, null);
 
-  const none = F.metrics(store());
-  assert.equal(none.fiMonths, null);
-  assert.equal(none.projection, null);
+  const none = F.fiOutlook(store(), "2026-11").milestones();
+  assert.deepEqual(none.fi, { fiNumber: 0, progress: null, month: null, months: null });
+  assert.equal(none.coast, null);
+  assert.equal(none.lean, null);
+});
+
+test("FI outlook: FI counts at a month's end against the FI number of retiring the month after", () => {
+  // A Kita until February 2030 is a bridge: the FI number for retiring in
+  // a month before is 30,000 for the rent for good, plus 100 for each
+  // month of Kita left. 900 a month without growth, from nothing.
+  const item = (name, until) => ({ id: name, name, category: "", amount: 100 * EUR, everyMonths: 1, from: null, until, active: true, essential: false });
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, expectedReturn: 0, inflation: 0 },
+    expenses: [item("Rent", null), item("Kita", { month: "2030-02" })],
+    accounts: [{ id: "a", name: "A" }],
+    records: [{ month: "2026-10", account: "a", value: 0, payIn: 900 * EUR }],
+  });
+  const first = F.monthIndex("2026-10");
+  // At the end of August 2029, 34 months on, the portfolio has 30,600:
+  // the FI number for retiring in September, though not yet August's.
+  assert.equal(F.fiNumberIn(s, first + 35), 30600 * EUR);
+  assert.equal(F.fiNumberIn(s, first + 34), 30700 * EUR);
+  const o = F.fiOutlook(s, "2026-11");
+  assert.equal(o.milestones().fi.month, "2029-08");
+  assert.equal(o.path().reach.mid, "2029-08");
+  assert.equal(o.forecast().plans.fi.fiMonth, "2029-08");
+  // The chart's FI number is that of retiring in each month.
+  const points = o.path().points;
+  for (const k of [0, 12, 33, 34, points.length - 1]) assert.equal(points[k].goal, F.fiNumberIn(s, first + k + 1), `month ${k + 1}`);
+});
+
+test("FI outlook: FI only counts before retirement", () => {
+  // 1,000 a month without growth to 300,000 takes 300 months: October 2051.
+  const parts = { value: 0, payIn: 1000 * EUR, goal: 300000 * EUR };
+  const unborn = outlook(parts);
+  assert.equal(unborn.retirement, null);
+  assert.equal(unborn.milestones().fi.month, "2051-10");
+  assert.equal(unborn.milestones().coast, null, "Coast FI needs a year of birth");
+
+  // Born in 1980, retiring at 67 in January 2047: not before then, as the
+  // Forecast says, and the chart stops there.
+  const born = outlook({ ...parts, settings: { birthYear: 1980 } });
+  assert.equal(born.retirement, "2047-01");
+  assert.deepEqual([born.milestones().fi.month, born.milestones().fi.months], [null, null]);
+  assert.equal(born.forecast().plans.fi.fiMonth, null);
+  assert.equal(born.path().reach.mid, null);
+  assert.equal(born.path().points.at(-1).month, "2046-12");
+  assert.equal(born.milestones().coast.month, null, "no Coast FI either");
+
+  // Retired already: FI now, if the portfolio is there.
+  const retired = outlook({ value: 400000 * EUR, goal: 300000 * EUR, settings: { birthYear: 1950 } });
+  assert.equal(retired.retired, true);
+  assert.equal(retired.milestones().fi.months, 0);
+  assert.equal(retired.milestones().coast, null);
+  assert.equal(outlook({ value: 200000 * EUR, goal: 300000 * EUR, settings: { birthYear: 1950 } }).milestones().fi.months, null);
+});
+
+test("FI outlook: the milestones, the chart and the Forecast agree", () => {
+  // Retirement in 2057; health insurance from retirement until 67, a Kita
+  // until 2031, a pension from 67, an inheritance and a house deposit.
+  const item = (name, amount, from, until, extra = {}) => ({ id: name, name, category: "", amount: amount * EUR, everyMonths: 1, from, until, ...extra });
+  const s = (payIn) => store({
+    settings: { ...F.DEFAULT_SETTINGS, birthYear: 1990, expectedReturn: 7, inflation: 2.5 },
+    expenses: [
+      item("Rent", 1200, null, null, { active: true, essential: true }),
+      item("Kita", 400, null, { month: "2031-07" }, { active: true, essential: false }),
+      item("Health insurance", 300, { at: "retirement" }, { age: 67 }, { active: true, essential: true }),
+      item("Travel", 300, null, null, { active: true, essential: false }),
+    ],
+    income: [item("Salary", 4000, null, { at: "retirement" }), item("State pension", 1100, { age: 67 }, null)],
+    accounts: [{ id: "a", name: "A" }],
+    records: [
+      { month: "2026-09", account: "a", value: 80000 * EUR, payIn },
+      { month: "2026-10", account: "a", value: 82000 * EUR, payIn },
+    ],
+    events: [{ id: "i", name: "Inheritance", month: "2034-03", amount: 50000 * EUR }, { id: "d", name: "Deposit", month: "2029-05", amount: -30000 * EUR }],
+  });
+  for (const payIn of [1500 * EUR, -800 * EUR]) {
+    const o = F.fiOutlook(s(payIn), "2026-11");
+    const { coast, lean, fi } = o.milestones();
+    const plans = o.forecast().plans;
+    assert.ok(fi.month && lean.month && coast.month, `all reached, paying in ${payIn}`);
+    assert.equal(fi.month, plans.fi.fiMonth, "FI: the milestone and Retire early");
+    assert.equal(o.path().reach.mid, fi.month, "FI: the milestone and the chart");
+    assert.equal(coast.month, plans.coast.coastMonth, "Coast FI: the milestone and the Coast plan");
+    close(coast.fiNumber, o.forecast().coastNumber, "the Coast FI number");
+    assert.ok(coast.month <= lean.month && lean.month <= fi.month, "in that order");
+  }
 });
 
 test("a version 5 file is upgraded: no birth year, retirement at 67", () => {
@@ -796,7 +894,7 @@ test("a version 7 file is upgraded: no expense is essential", () => {
   assert.deepEqual(withoutLater(result.store), { ...v7, version: F.VERSION });
   assert.deepEqual(result.store.expenses.map((e) => e.essential), [false, false]);
   assert.equal("essential" in v7.expenses[0], false, "the parsed value is left alone");
-  assert.equal(F.metrics(result.store).lean, null);
+  assert.equal(F.fiOutlook(result.store).milestones().lean, null);
 });
 
 test("a version 8 file is upgraded: expenses always count, income until retirement", () => {
@@ -905,12 +1003,13 @@ test("planned one-offs: saved, checked, and in the month they come", () => {
   assert.equal(F.parseStore(JSON.parse(JSON.stringify(changed))).ok, true);
   assert.equal(s.events[1].amount, -6000000, "the original is untouched");
 
-  // 1,000 a month without growth to 50,000: an inheritance of 20,000 after
+  // 1,000 a month without growth to 60,000: an inheritance of 20,000 after
   // 10 months saves 20 months.
-  assert.equal(F.projectToGoal(0, 1000, 0, 50000).length, 50);
-  assert.equal(F.projectToGoal(0, 1000, 0, 50000, 0, (n) => (n === 10 ? 20000 : 0)).length, 30);
-  const p = F.fiProjection({ month: "2026-10", start: 0, payIn: 1000, goal: 50000, rate: 2, oneOffs: (n) => (n === 1 ? 49000 : 0) });
-  assert.equal(p.points[0].mid, 50000);
+  const once = (month, amount) => [{ id: "x", name: "X", month, amount }];
+  assert.equal(outlook({ payIn: 1000, goal: 60000 }).milestones().fi.months, 60);
+  assert.equal(outlook({ payIn: 1000, goal: 60000, events: once("2027-08", 20000) }).milestones().fi.months, 40);
+  const p = outlook({ payIn: 1000, goal: 60000, rate: 2, events: once("2026-11", 59000) }).path();
+  assert.equal(p.points[0].mid, 60000);
 });
 
 test("a version 10 file is upgraded: every account is invested", () => {
@@ -989,7 +1088,7 @@ test("an own future pay-in replaces the average everywhere: investment rate, mil
   });
   const average = F.metrics(s, "2026-11");
   assert.deepEqual(average.payIn, { amount: -1000 * EUR, months: 2 });
-  assert.equal(F.forecastPayIn(average), 0, "a withdrawal on average invests nothing in the forecast");
+  assert.equal(F.fiOutlook(s, "2026-11").payIn.invested, 0, "a withdrawal on average invests nothing");
 
   const own = F.saveSettings(s, { futurePayIn: 1500 * EUR });
   const m = F.metrics(own, "2026-11");
@@ -997,16 +1096,18 @@ test("an own future pay-in replaces the average everywhere: investment rate, mil
   assert.deepEqual(F.averagePayIn(m.series), { average: -1000 * EUR, months: 2 }, "the history is left alone");
   assert.equal(m.investmentRate, 1500 / 4000);
   assert.deepEqual(F.incomeSplit(m), { expenses: 2000 * EUR, invested: 1500 * EUR, leftOver: 500 * EUR, over: 0 });
-  // Time to FI and Lean FI: as projected with 1,500 a month.
-  const goal = (n) => F.fiNumberIn(own, Math.max(F.monthIndex("2026-10") + n, F.monthIndex("2026-11")));
-  assert.equal(m.fiMonths, F.projectToGoal(51000 * EUR, 1500 * EUR, 8, goal, 3).length);
-  assert.equal(m.lean.months, m.fiMonths, "every expense is essential");
-  assert.ok(m.fiMonths < F.metrics({ ...own, settings: { ...own.settings, futurePayIn: 500 * EUR } }, "2026-11").fiMonths, "paying in more reaches FI sooner");
+  // Time to FI and Lean FI: as projected with 1,500 a month, to an FI
+  // number of 600,000 (the salary ends at retirement).
+  const o = F.fiOutlook(own, "2026-11");
+  assert.deepEqual(o.payIn, { amount: 1500 * EUR, months: null, invested: 1500 * EUR, withdrawal: false });
+  const { coast, lean, fi } = o.milestones();
+  assert.equal(fi.months, monthsTo(51000 * EUR, 1500 * EUR, 8, 600000 * EUR, 3));
+  assert.equal(lean.months, fi.months, "every expense is essential");
+  assert.ok(fi.months < F.fiOutlook({ ...own, settings: { ...own.settings, futurePayIn: 1000 * EUR } }, "2026-11").milestones().fi.months, "paying in more reaches FI sooner");
   // The forecast and Coast FI invest it too.
-  const params = F.forecastParams(own, m, "2026-11");
-  assert.equal(params.contribution, 1500 * EUR);
-  const coast = F.coastFi(own, m, "2026-11");
-  const f = F.forecast({ ...params, growth: 8 });
+  const f = o.forecast();
+  close(f.plans.keep.values[1], 51000 * EUR * (1 + monthly(8)) + 1500 * EUR, "a month of growth and the pay-in");
+  assert.equal(f.plans.fi.fiMonth, fi.month);
   assert.equal(coast.month, f.plans.coast.coastMonth);
 
   // Without any pay-ins yet, the own amount still counts.
@@ -1014,7 +1115,7 @@ test("an own future pay-in replaces the average everywhere: investment rate, mil
   const none = F.metrics(fresh, "2026-11");
   assert.deepEqual(none.payIn, { amount: 800 * EUR, months: null });
   assert.equal(none.investmentRate, 800 / 4000);
-  assert.equal(none.fiMonths, null, "no portfolio to project from");
+  assert.equal(F.fiOutlook(fresh, "2026-11").milestones().fi.months, null, "no portfolio to project from");
 });
 
 test("emergency fund: the cash accounts in months of expenses, and what is missing", () => {
@@ -1242,13 +1343,12 @@ test("metrics: what counts now, and the FI number for retiring now", () => {
   // Retiring now: rent and health insurance, less the flat's rent.
   assert.equal(m.retiredNeed, 1100 * EUR);
   assert.equal(m.fiNumber, 1100 * 12 * 25 * EUR);
-  assert.equal(m.lean.fiNumber, 1100 * 12 * 25 * EUR, "both essential expenses, less the income");
+  assert.equal(F.fiNumberIn(s, F.monthIndex("2026-11"), { essential: true }), 1100 * 12 * 25 * EUR, "Lean FI: both essential expenses, less the income");
   // From 2057 the pension pays the health insurance's part and more.
   assert.equal(F.fiNumberIn(s, F.monthIndex("2057-01")), 0);
   assert.equal(F.needIn(s, F.monthIndex("2056-12"), F.monthIndex("2056-12")), 1100 * EUR);
-  // The goal of each month is the FI number for retiring then.
-  assert.equal(m.goal(0), m.fiNumber);
-  assert.equal(m.goal(F.monthIndex("2057-01") - F.monthIndex("2026-10")), 0);
+  // The outlook's is the FI number for retiring the month after the latest.
+  assert.equal(F.fiOutlook(s, "2026-11").fiNumber, m.fiNumber);
 });
 
 test("fiNumberParts: a bridge until income starts or expenses end, then the multiple", () => {
@@ -1303,17 +1403,6 @@ test("healthInsurance: the minimum base × the rates", () => {
   close(F.healthInsurance({ base: g.minimumBase, rates: [g.generalRate, g.extraRate, g.careRate] }), 131833 * 0.205, "with children");
 });
 
-test("projectToGoal and fiProjection take a goal that changes", () => {
-  // 1,000 a month without growth; the goal drops from 50,000 to 20,000
-  // after 12 months.
-  const goal = (n) => (n < 12 ? 50000 : 20000);
-  assert.equal(F.projectToGoal(0, 1000, 0, goal).length, 20);
-  const p = F.fiProjection({ month: "2026-10", start: 0, payIn: 1000, goal, rate: 2 });
-  assert.equal(p.points[0].goal, 50000);
-  assert.equal(p.points[12].goal, 20000);
-  assert.equal(F.fiProjection({ month: "2026-10", start: 0, payIn: 1000, goal: () => 0, rate: 2 }), null);
-});
-
 test("Lean FI: the FI number and time to FI for the essential expenses only", () => {
   const item = (id, amount, essential, active = true) => ({ id, name: id, category: "", amount: amount * EUR, everyMonths: 1, active, essential });
   const s = store({
@@ -1322,21 +1411,22 @@ test("Lean FI: the FI number and time to FI for the essential expenses only", ()
     accounts: [{ id: "a", name: "A" }],
     records: [{ month: "2026-10", account: "a", value: 154000 * EUR, payIn: 1000 * EUR }],
   });
-  const m = F.metrics(s);
+  const now = F.monthIndex("2026-11");
+  const { lean, fi } = F.fiOutlook(s, "2026-11").milestones();
   // Essential and active: 1,400 a month, plus the 10 % buffer.
-  close(m.lean.expenses, 1540 * EUR, "lean expenses");
-  close(m.lean.fiNumber, 1540 * 12 * 25 * EUR, "Lean FI number");
-  close(m.fiNumber, 2200 * 12 * 25 * EUR, "the FI number counts every active expense");
-  close(m.lean.progress, 154000 / 462000, "progress");
+  close(F.budget(s, now, now).essentialNeed, 1540 * EUR, "lean expenses");
+  close(lean.fiNumber, 1540 * 12 * 25 * EUR, "Lean FI number");
+  close(fi.fiNumber, 2200 * 12 * 25 * EUR, "the FI number counts every active expense");
+  close(lean.progress, 154000 / 462000, "progress");
   // 308,000 to go at 1,000 a month without growth.
-  assert.equal(m.lean.months, 308);
-  assert.equal(m.fiMonths, 506);
+  assert.equal(lean.months, 308);
+  assert.equal(fi.months, 506);
 
-  const reached = F.metrics({ ...s, records: [{ ...s.records[0], value: 500000 * EUR }] });
+  const reached = F.fiOutlook({ ...s, records: [{ ...s.records[0], value: 500000 * EUR }] }, "2026-11").milestones();
   assert.equal(reached.lean.months, 0);
   assert.ok(reached.lean.progress > 1);
-  assert.equal(F.metrics({ ...s, records: [] }).lean.progress, null, "no portfolio, no progress");
-  assert.equal(F.metrics({ ...s, expenses: s.expenses.map((e) => ({ ...e, essential: false })) }).lean, null);
+  assert.equal(F.fiOutlook({ ...s, records: [] }, "2026-11").milestones().lean.progress, null, "no portfolio, no progress");
+  assert.equal(F.fiOutlook({ ...s, expenses: s.expenses.map((e) => ({ ...e, essential: false })) }, "2026-11").milestones().lean, null);
 });
 
 test("a new store starts with a few categories", () => {
@@ -1524,8 +1614,9 @@ test("today's money: every amount with the inflation since the start taken out",
   close(F.deflated(1030, 3, 12), 1000, "a year at 3 %");
   // With growth equal to the inflation, the portfolio stays the same in
   // today's money, and so does the FI number.
-  const nominal = F.forecast(plan({ growth: 3, inflation: 3, contribution: 0 }));
-  const real = F.forecastInTodaysMoney(nominal, 3);
+  const o = outlook({ value: 50000 * EUR, goal: 600000 * EUR, rate: 3, inflation: 3, settings: { birthYear: 1990 } });
+  const nominal = o.forecast();
+  const real = o.forecast({ money: "today" });
   for (const index of [0, 12, 360]) {
     close(real.plans.keep.values[index], 50000 * EUR, `value after ${index} months`);
     close(real.goal[index], 600000 * EUR, `FI number after ${index} months`);
@@ -1535,11 +1626,10 @@ test("today's money: every amount with the inflation since the start taken out",
   assert.equal(real.plans.keep.runsOut, nominal.plans.keep.runsOut, "milestones stay");
   assert.equal(nominal.plans.keep.values[12] > 50000 * EUR, true, "the original is untouched");
 
-  const p = F.fiProjection({ month: "2026-10", start: 1000, payIn: 0, goal: 2000, rate: 3, inflation: 3 });
-  const today = F.projectionInTodaysMoney(p, 3);
-  close(today.points[11].mid, 1000, "the mid line, a year on");
-  close(today.points[11].goal, 2000, "the goal, a year on");
-  assert.equal(F.projectionInTodaysMoney(null, 3), null);
+  const today = outlook({ value: 1200, goal: 2400, rate: 3, inflation: 3 }).path("today");
+  close(today.points[11].mid, 1200, "the mid line, a year on");
+  close(today.points[11].goal, 2400, "the goal, a year on");
+  assert.equal(outlook({ value: 1200 }).path("today"), null);
 });
 
 test("forecast: the growth rates are the expected return and 2 points less and more", () => {
@@ -1623,39 +1713,31 @@ test("Coast FI on the dashboard: the Forecast page's Coast plan at the expected 
     accounts: [{ id: "a", name: "A" }],
     records: [{ month: "2026-10", account: "a", value: 50000 * EUR, payIn: 1000 * EUR }],
   });
-  const m = F.metrics(s, "2026-11");
-  const coast = F.coastFi(s, m, "2026-11");
+  const o = F.fiOutlook(s, "2026-11");
+  const { coast } = o.milestones();
   // The same as plan(): 50,000 in October 2026, 1,000 a month, 5 %, FI at
-  // 600,000, born 1990, retiring at 67.
+  // 600,000, born 1990, retiring at 67, and nothing after Coast FI.
   const f = F.forecast(plan());
   assert.equal(coast.month, f.plans.coast.coastMonth);
   assert.equal(coast.months, F.monthIndex(f.plans.coast.coastMonth) - F.monthIndex("2026-10"));
   close(coast.fiNumber, f.coastNumber, "Coast FI number");
   close(coast.progress, (50000 * EUR) / f.coastNumber, "progress");
   close(coast.fiAtRetirement, 600000 * EUR, "the FI number when retirement starts");
-  // The forecast params are the dashboard's: the average pay-in, nothing
-  // after Coast FI.
-  const params = F.forecastParams(s, m, "2026-11");
-  assert.equal(params.contribution, 1000 * EUR);
-  assert.equal(params.coastContribution, 0);
-  assert.equal(params.start, "2026-10");
+  assert.equal(o.payIn.invested, 1000 * EUR);
+  assert.equal(o.start, "2026-10");
 
-  const reached = { ...s, records: [{ ...s.records[0], value: 200000 * EUR }] };
-  const now = F.coastFi(reached, F.metrics(reached, "2026-11"), "2026-11");
+  const at = (changed) => F.fiOutlook(changed, "2026-11").milestones().coast;
+  const now = at({ ...s, records: [{ ...s.records[0], value: 200000 * EUR }] });
   assert.equal(now.months, 0);
   assert.ok(now.progress > 1);
 
-  const empty = { ...s, records: [] };
-  const none = F.coastFi(empty, F.metrics(empty, "2026-11"), "2026-11");
+  const none = at({ ...s, records: [] });
   assert.ok(none.fiNumber > 0, "what it needs, without a portfolio too");
   assert.deepEqual([none.progress, none.month, none.months], [null, null, null]);
 
-  const unborn = { ...s, settings: { ...s.settings, birthYear: null } };
-  assert.equal(F.coastFi(unborn, F.metrics(unborn, "2026-11"), "2026-11"), null, "without a year of birth");
-  const retired = { ...s, settings: { ...s.settings, birthYear: 1950 } };
-  assert.equal(F.coastFi(retired, F.metrics(retired, "2026-11"), "2026-11"), null, "past the retirement age");
-  const nothing = { ...s, expenses: [] };
-  assert.equal(F.coastFi(nothing, F.metrics(nothing, "2026-11"), "2026-11"), null, "without an FI number");
+  assert.equal(at({ ...s, settings: { ...s.settings, birthYear: null } }), null, "without a year of birth");
+  assert.equal(at({ ...s, settings: { ...s.settings, birthYear: 1950 } }), null, "past the retirement age");
+  assert.equal(at({ ...s, expenses: [] }), null, "without an FI number");
 });
 
 test("forecast: retire at FI takes out expenses from the month after FI", () => {

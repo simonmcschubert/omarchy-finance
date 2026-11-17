@@ -96,6 +96,16 @@ const intervalLabel = (n) => INTERVALS.find(([v]) => v === n)?.[1] ?? `Every ${n
 // The month index of this month, for what counts now.
 const thisMonth = () => F.monthIndex(F.currentMonth());
 
+// The FI outlook of a store this month, kept while the store is the same:
+// the milestones, the Path to FI chart and the Forecast share its
+// projections.
+const outlooks = new WeakMap();
+function outlook(store) {
+  const month = F.currentMonth();
+  if (outlooks.get(store)?.month !== month) outlooks.set(store, { month, outlook: F.fiOutlook(store, month) });
+  return outlooks.get(store).outlook;
+}
+
 // When an expense or income starts and ends, in words: "From age 67",
 // "Until retirement", "From Jan. 2027 until Dec. 2031". null when always.
 function windowText(item) {
@@ -639,31 +649,34 @@ function viewDashboard() {
 // The milestones on the way to FI, a row each, in the order the portfolio
 // reaches them: Coast FI (with a year of birth, before retirement), Lean FI
 // (with essential expenses) and FI. Each says what the portfolio needs, how
-// much of it it has, and when it gets there, as Time to FI counts.
+// much of it it has, and when it gets there, as the Forecast counts.
 function milestonesCard(m) {
   const store = state.store;
   const { withdrawalRate, expectedReturn, birthYear, retirementAge } = store.settings;
   const expenses = F.counted(store.expenses);
-  const known = m.portfolio !== null;
+  const o = outlook(store);
+  const known = o.known;
   const head = h("div", { class: "card-head" }, h("h2", null, "Milestones"),
-    expenses.length && known ? h("span", { class: "muted" }, `at ${percentUnit.format(expectedReturn)} return and ${money(m.payIn.amount)} a month`) : null);
+    expenses.length && known ? h("span", { class: "muted" }, `at ${percentUnit.format(expectedReturn)} return and ${money(o.payIn.invested)} a month`) : null);
   if (expenses.length === 0) {
     return h("section", { class: "card milestones" }, head,
       h("p", { class: "muted" }, h("a", { href: "#expenses" }, store.expenses.length ? "All expenses are inactive" : "Add expenses"), ", for the FI number."));
   }
 
-  const coast = F.coastFi(store, m);
+  const { coast, lean, fi } = o.milestones();
+  // Not reached before retirement, or within 100 years without one.
+  const never = o.retirement ? `Not before ${retirementAge}` : "Over 100 years";
   const multiple = plain.format(m.multiple);
   const rate = percentUnit.format(withdrawalRate);
   const rateIn = ["The withdrawal rate is set in ", h("a", { href: "#settings" }, "Settings"), "."];
   const rows = [
-    coast && { name: "Coast FI", what: `stop investing, FI at ${retirementAge}`, number: coast.fiNumber, progress: coast.progress, months: coast.months, never: `Not before ${retirementAge}`,
+    coast && { name: "Coast FI", what: `stop investing, FI at ${retirementAge}`, number: coast.fiNumber, progress: coast.progress, months: coast.months, never,
       about: [`Once the portfolio has this much, you can stop investing: it still grows to the FI number by ${retirementAge}, ${money(coast.fiAtRetirement)} by then.`,
         ["As in the Coast plan of the ", h("a", { href: "#forecast" }, "Forecast"), "."]] },
-    m.lean && { name: "Lean FI", what: "essential expenses only", number: m.lean.fiNumber, progress: m.lean.progress, months: m.lean.months, never: "Over 100 years",
+    lean && { name: "Lean FI", what: "essential expenses only", number: lean.fiNumber, progress: lean.progress, months: lean.months, never,
       about: ["FI on the leanest budget: the FI number, worked out the same way, with only the expenses marked Essential.",
         ["Mark them on the ", h("a", { href: "#expenses" }, "Expenses"), " page."]] },
-    { name: "FI", what: "all expenses", number: m.fiNumber, progress: m.fiProgress, months: m.fiMonths, never: "Over 100 years",
+    { name: "FI", what: "all expenses", number: fi.fiNumber, progress: fi.progress, months: fi.months, never,
       about: [`The FI number: what the portfolio needs to pay your expenses for good, ${multiple} × yearly expenses at a ${rate} withdrawal rate.`,
         m.fiParts.extra >= 100
           ? `Retiring now: ${multiple} × ${money(m.fiParts.long * 12)} a year from ${monthLabel(F.monthFromIndex(m.fiParts.from), true)} on, plus ${money(m.fiParts.extra)} to bridge the years until then.`
@@ -680,7 +693,7 @@ function milestonesCard(m) {
     const reached = r.progress !== null && r.progress >= 1;
     const meter = h("div", { class: "meter", role: "presentation" }, h("div", { class: "meter-fill" }));
     meter.firstChild.style.width = `${Math.min(100, (r.progress ?? 0) * 100)}%`;
-    const month = r.months > 0 ? F.addMonths(m.latestMonth, r.months) : null;
+    const month = r.months > 0 ? F.addMonths(o.start, r.months) : null;
     return h("tr", { class: reached ? "reached" : null },
       h("th", { scope: "row" }, r.name, info(r.name, ...r.about), h("div", { class: "sub" }, r.what)),
       h("td", { class: "num" }, money(r.number),
@@ -691,13 +704,14 @@ function milestonesCard(m) {
         r.progress === null ? "–" : r.months === 0 ? "Now" : r.months === null ? r.never : `in ${duration(r.months)}`,
         month
           ? h("div", { class: "sub" }, `around ${monthLabel(month, r.months >= 24)}${birthYear === null ? "" : `, at ${F.ageIn(month, birthYear)}`}`)
-          : r.months === 0 ? h("div", { class: "sub" }, `as of ${monthLabel(m.latestMonth)}`) : null));
+          : r.months === 0 ? h("div", { class: "sub" }, `as of ${monthLabel(o.start)}`) : null));
   };
 
   // Only what is missing, with where to add it.
   const notes = [
     coast === null && birthYear === null ? h("li", null, "Coast FI needs your year of birth, in ", h("a", { href: "#settings" }, "Settings"), ".") : null,
     known ? null : h("li", null, h("a", { href: "#portfolio" }, "Add broker values"), " to see how far the portfolio is."),
+    known && o.payIn.withdrawal ? h("li", null, `Your average pay-in is a withdrawal of ${money(-o.payIn.amount)} a month, so these count 0.`) : null,
   ].filter(Boolean);
   return h("section", { class: "card milestones" }, head,
     h("div", { class: "table-wrap" }, h("table", null,
@@ -782,19 +796,11 @@ function netWorthCard(m) {
 const chartGoal = (m) => (F.counted(state.store.expenses).length ? m.fiNumber : 0);
 
 function chartView(m) {
-  return state.chartView === "path" && chartGoal(m) > 0 ? "path" : "history";
+  return state.chartView === "path" && chartGoal(m) > 0 && outlook(state.store).fiNumber > 0 ? "path" : "history";
 }
 
-function projection(m) {
-  const { inflation } = state.store.settings;
-  const p = projectionNominal(m);
-  return inTodaysMoney() ? F.projectionInTodaysMoney(p, inflation) : p;
-}
-
-function projectionNominal(m) {
-  const { expectedReturn, inflation } = state.store.settings;
-  return F.fiProjection({ month: m.latestMonth, start: m.portfolio, payIn: m.payIn.amount, goal: chartGoal(m) > 0 ? m.goal : 0, rate: expectedReturn, inflation, oneOffs: m.oneOffs });
-}
+// The Path to FI chart's projection, in the money the switch says.
+const projection = () => outlook(state.store).path(inTodaysMoney() ? "today" : "nominal");
 
 function portfolioCard(m) {
   const view = chartView(m);
@@ -806,11 +812,11 @@ function portfolioCard(m) {
   let note = null;
   let about;
   if (view === "path") {
-    const p = projection(m);
+    const p = projection();
     legend = [key("value", "Portfolio value"),
       p.points.length ? key("projection", `At ${percentUnit.format(p.rates.mid)} a year (${percentUnit.format(p.rates.low)} to ${percentUnit.format(p.rates.high)})`) : null,
       key("goal", "FI number")];
-    ({ note, about } = pathSummary(m, p));
+    ({ note, about } = pathSummary(p));
   } else {
     legend = [key("value", "Portfolio value"), key("paid", "Paid in"), key("gain", "Gain"),
       m.series.some((s) => s.value < s.invested) ? key("loss", "Loss") : null,
@@ -832,17 +838,20 @@ function portfolioCard(m) {
 
 // When the projection reaches the FI number: a short line under the chart,
 // and what it assumes for the ⓘ.
-function pathSummary(m, p) {
-  const { inflation } = state.store.settings;
+function pathSummary(p) {
+  const { inflation, retirementAge } = state.store.settings;
+  const o = outlook(state.store);
   const rate = (k) => percentUnit.format(p.rates[k]);
   const year = (k) => monthLabel(p.reach[k], true);
-  const limit = `within ${F.MAX_PROJECTION_MONTHS / 12} years`;
+  const limit = o.retirement ? `before ${retirementAge}` : `within ${F.MAX_PROJECTION_MONTHS / 12} years`;
   const settings = ["The expected return and inflation are set in ", h("a", { href: "#settings" }, "Settings"), "."];
-  if (p.points.length === 0) return { note: "The portfolio has reached the FI number.", about: [settings] };
-  const about = [`At ${rate("mid")} growth a year and ${money(m.payIn.amount)} paid in a month: ${payInSource(m.payIn)}.`];
+  if (p.reach.mid === o.start) return { note: "The portfolio has reached the FI number.", about: [settings] };
+  const about = [`At ${rate("mid")} growth a year and ${money(o.payIn.invested)} paid in a month${o.retirement ? `, until ${retirementAge}` : ""}: ${o.payIn.withdrawal
+    ? `your average of ${payInMonths(o.payIn.months)} is a withdrawal of ${money(-o.payIn.amount)} a month, which counts as 0`
+    : payInSource(o.payIn)}.`];
   let note;
   if (p.reach.mid) {
-    const months = F.monthIndex(p.reach.mid) - F.monthIndex(m.latestMonth);
+    const months = F.monthIndex(p.reach.mid) - F.monthIndex(o.start);
     const low = p.reach.low ? `${year("low")} at ${rate("low")}` : `not ${limit} at ${rate("low")}`;
     note = `FI around ${year("mid")}, in ${duration(months)}: ${year("high")} at ${rate("high")}, ${low}.`;
     about.push(inTodaysMoney()
@@ -865,7 +874,7 @@ function drawChart() {
     view,
     series: m.series,
     fiNumber: chartGoal(m),
-    projection: view === "path" ? projection(m) : null,
+    projection: view === "path" ? projection() : null,
     format: money,
     formatSigned: signedMoney,
     formatPercent: (fraction) => percent.format(fraction),
@@ -1414,20 +1423,27 @@ function returnsCard(store) {
 // The plans' names, on the chart and on their tiles.
 const PLAN_LABELS = { keep: "Keep investing", coast: "Coast", fi: "Retire early" };
 
-// What the forecast starts from, and what is paid in: the future pay-in,
-// as the dashboard's milestones use it, in whole cents and never a
-// withdrawal (forecastParams).
+// What the forecast starts from, and what is paid in: the FI outlook's, with
+// the future pay-in in whole cents and never a withdrawal, and the amount
+// after Coast FI from the page.
 function forecastBase(store) {
-  const m = F.metrics(store);
-  return {
-    m,
-    params: { ...F.forecastParams(store, m), coastContribution: state.forecast.coastContribution },
+  const o = outlook(store);
+  const params = {
+    start: o.start,
+    value: o.value,
+    fiNumber: o.fiNumber,
+    inflation: store.settings.inflation,
+    contribution: o.payIn.invested,
+    coastContribution: state.forecast.coastContribution,
   };
+  // The plans at a growth ("low", "mid" or "high"), in the money the
+  // switch says or in "nominal" money.
+  const plans = (growth, money = inTodaysMoney() ? "today" : "nominal") =>
+    o.forecast({ growth, coastContribution: params.coastContribution, money });
+  // Retired already: every plan lives off the portfolio from the start, so
+  // they are one.
+  return { o, params, plans, retired: o.retired };
 }
-
-// Retired already: every plan lives off the portfolio from the start, so
-// they are one.
-const retiredAt = (params) => F.monthIndex(params.start) >= (params.birthYear + params.retirementAge) * 12;
 
 function viewForecast() {
   const store = state.store;
@@ -1441,11 +1457,10 @@ function viewForecast() {
       h("ul", null, missing)));
   }
 
-  const { params } = forecastBase(store);
+  const { params, retired } = forecastBase(store);
   const rates = F.growthRates(store.settings.expectedReturn);
   const inflation = percentUnit.format(params.inflation);
   const retirementYear = birthYear + retirementAge;
-  const retired = retiredAt(params);
   // What the portfolio pays when retirement starts, in today's money and
   // with inflation by then.
   const retirementIndex = retirementYear * 12;
@@ -1551,15 +1566,15 @@ function readForecastForm(form) {
 }
 
 // What every plan invests a month until it changes course, and where that
-// comes from, for the forecast's ⓘ.
-function investedNote(m, contribution) {
+// comes from (the FI outlook's payIn), for the forecast's ⓘ.
+function investedNote(payIn, contribution) {
   const settings = h("a", { href: "#settings" }, "Settings");
   const invests = `Every plan invests ${money(contribution)} a month until it changes course: `;
-  if (m.payIn === null) return [invests, "there are no pay-ins yet. You can set your own future pay-in in ", settings, "."];
-  if (m.payIn.months === null) return [invests, "your own future pay-in from ", settings, "."];
-  const average = m.payIn.amount < 0
-    ? `your average of ${payInMonths(m.payIn.months)} is a withdrawal of ${money(-m.payIn.amount)} a month, which counts as 0`
-    : `the average pay-in of ${payInMonths(m.payIn.months)}`;
+  if (payIn.amount === null) return [invests, "there are no pay-ins yet. You can set your own future pay-in in ", settings, "."];
+  if (payIn.months === null) return [invests, "your own future pay-in from ", settings, "."];
+  const average = payIn.withdrawal
+    ? `your average of ${payInMonths(payIn.months)} is a withdrawal of ${money(-payIn.amount)} a month, which counts as 0`
+    : `the average pay-in of ${payInMonths(payIn.months)}`;
   return [invests, `${average}. You can set your own future pay-in in `, settings, "."];
 }
 
@@ -1585,14 +1600,12 @@ function updateForecast() {
 function forecastResults() {
   const store = state.store;
   const { birthYear, retirementAge, expectedReturn, inflation, withdrawalRate } = store.settings;
-  const { m, params } = forecastBase(store);
+  const { o, params, plans, retired } = forecastBase(store);
   const rates = F.growthRates(expectedReturn);
   const growth = state.forecast.growth;
-  const nominal = F.forecast({ ...params, growth: rates[growth] });
-  const result = inTodaysMoney() ? F.forecastInTodaysMoney(nominal, inflation) : nominal;
+  const result = plans(growth);
   // A plan that lasts here may run out at the lowest growth: the tile says so.
-  const low = growth === "low" ? nominal : F.forecast({ ...params, growth: rates.low });
-  const retired = retiredAt(params);
+  const low = plans("low", "nominal");
   const age = (month) => F.ageIn(month, birthYear);
   const when = (month) => (month === params.start ? "Now" : `At ${age(month)}, in ${month.slice(0, 4)}`);
   const goalIn = (month) => result.goal[F.monthIndex(month) - F.monthIndex(params.start)];
@@ -1648,7 +1661,7 @@ function forecastResults() {
       h("li", null, store.records.length
         ? `It starts from the portfolio in ${monthLabel(params.start)}, ${money(params.value)}.`
         : "It starts from 0, as there are no broker values yet."),
-      retired ? null : h("li", null, investedNote(m, params.contribution)),
+      retired ? null : h("li", null, investedNote(o.payIn, params.contribution)),
       h("li", null, "Expenses and income with a start or an end count only in their months; for Retire early, retirement starts the month after FI. ",
         "Income that goes on after retirement, such as a pension, lowers what the portfolio pays: the FI number is what it pays for good once nothing changes any more, ",
         `× ${plain.format(100 / withdrawalRate)}, plus what it pays on top until then, such as bridging the years until the pension.`),
@@ -1670,9 +1683,8 @@ function drawForecast() {
   const box = document.getElementById("forecast-chart");
   if (!box) return;
   const { birthYear } = state.store.settings;
-  const { params } = forecastBase(state.store);
-  const nominal = F.forecast({ ...params, growth: F.growthRates(state.store.settings.expectedReturn)[state.forecast.growth] });
-  const result = inTodaysMoney() ? F.forecastInTodaysMoney(nominal, state.store.settings.inflation) : nominal;
+  const { params, plans, retired } = forecastBase(state.store);
+  const result = plans(state.forecast.growth);
   const first = F.monthIndex(result.months[0]);
   const index = (month) => (month === null ? -1 : F.monthIndex(month) - first);
   const age = (month) => F.ageIn(month, birthYear);
@@ -1681,7 +1693,7 @@ function drawForecast() {
   const line = (plan, label, mark, markLabel) => ({ key: plan, label, values: result.plans[plan].values, mark: index(mark), markLabel });
   // Keep investing last, on top: until the others change course, they
   // share its line.
-  const lines = retiredAt(params)
+  const lines = retired
     ? [line("keep", "Portfolio", null)]
     : [
         line("fi", PLAN_LABELS.fi, fiMonth, fiMonth && `Retire at ${age(fiMonth)}`),

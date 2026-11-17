@@ -66,8 +66,10 @@ coming month. One-offs count as paid in, but never for the average pay-in.
 plus the **bridge**. The bridge is the need above that until the last
 change, such as the years before a pension starts.
 
-**FI**: the portfolio reaches the FI number. **Time to FI** is the months
-until then.
+**FI**: the portfolio reaches the FI number. It counts at the end of the
+first month in which the portfolio reaches the FI number of retiring the
+month after, and only before retirement. **Time to FI** is the months until
+then.
 
 **Lean FI**: FI for the essential expenses only.
 
@@ -78,6 +80,12 @@ for that today.
 
 **Milestones**: Coast FI, Lean FI and FI on the dashboard, in the order the
 portfolio reaches them.
+
+**FI outlook** (`fiOutlook()`): where the portfolio goes from the latest
+month on. Every FI date the app shows comes from it: the milestones, the
+Path to FI chart and the Forecast's plans. It invests the average pay-in,
+or 0 when that is a withdrawal, adds the planned one-offs, and runs
+`forecast()`.
 
 ## Projections
 
