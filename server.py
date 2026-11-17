@@ -3,8 +3,9 @@
 
 Listens on 127.0.0.1 only. The data lives in one JSON file,
 ~/.local/state/omarchy-finance/finance.json, in a directory only the owner
-can open. The page's colors come from the current Omarchy theme. Updates
-come from the update script next to this file.
+can open. With the lock on, the data is shown only once the system has
+confirmed it's you. The page's colors come from the current Omarchy theme.
+Updates come from the update script next to this file.
 
 Python standard library only (3.11 or newer).
 """
@@ -12,6 +13,7 @@ Python standard library only (3.11 or newer).
 import argparse
 import datetime
 import hashlib
+import http.cookies
 import http.server
 import json
 import os
@@ -43,6 +45,18 @@ CHECK_EVERY = 4 * 60 * 60
 INSTALL_UNIT = "omarchy-finance-update"
 # Which updates Finance offers: releases, or previews of main (update script).
 CHANNELS = ("stable", "preview")
+
+# The lock (Lock below). The system confirms it's you through polkit, in
+# Omarchy's own dialog: the fingerprint when one is set up, the password
+# otherwise. setup installs the action from polkit/.
+UNLOCK_ACTION = "io.github.simonmcschubert.omarchy-finance.unlock"
+POLICY_FILE = Path("/usr/share/polkit-1/actions/io.github.simonmcschubert.omarchy-finance.policy")
+IDLE_LOCK = 20 * 60  # seconds without use, then Finance locks again
+# Seconds the boot clock may gain on the monotonic one, which stops while
+# the computer sleeps, before Finance counts it as sleep.
+SLEPT = 5
+CONFIRM_TIMEOUT = 120  # seconds the dialog may stay open
+SESSION_COOKIE = "finance-session"
 
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -382,17 +396,141 @@ class Updater:
             self.check()
 
 
+def ask_polkit():
+    """Asks the system to confirm it's the user, in its own dialog.
+    Returns (confirmed, why): why is "" when the dialog was dismissed."""
+    pid = os.getpid()
+    try:
+        # Field 22 of /proc/<pid>/stat, the start time, after the name in
+        # parentheses: pkcheck can't be fooled by a new process of that pid.
+        start = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
+        result = subprocess.run(
+            ["pkcheck", "--action-id", UNLOCK_ACTION, "--process", f"{pid},{start},{os.getuid()}", "--allow-user-interaction"],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=CONFIRM_TIMEOUT,
+        )  # fmt: skip
+    except subprocess.TimeoutExpired:
+        return False, f"no answer within {CONFIRM_TIMEOUT // 60} minutes"
+    except (OSError, IndexError) as error:
+        return False, f"can't ask the system: {getattr(error, 'strerror', None) or error}"
+    if result.returncode == 0:
+        return True, ""
+    if result.returncode == 3:  # dismissed
+        return False, ""
+    lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+    return False, lines[-1] if lines else "not confirmed"
+
+
+def sleep_offset():
+    """How far the boot clock is ahead of the monotonic one: it grows by the
+    time the computer sleeps."""
+    return time.clock_gettime(time.CLOCK_BOOTTIME) - time.clock_gettime(time.CLOCK_MONOTONIC)
+
+
+class Lock:
+    """Finance's lock. When it is on, the data goes only to requests with a
+    session, and a session starts once the system has confirmed it's you
+    (ask_polkit). Every session ends after IDLE_LOCK without use, after the
+    computer slept, when the page locks, and with the server. The lock is on
+    when setup has installed the polkit action, unless turned off in
+    Settings, which the system confirms too."""
+
+    def __init__(self, settings, policy=POLICY_FILE, confirm=ask_polkit, clock=time.monotonic, slept=sleep_offset):
+        self.settings = Path(settings)  # {"enabled": false} when turned off
+        self.policy = None if policy is None else Path(policy)
+        self.confirm = confirm
+        self.clock = clock
+        self.slept = slept
+        self.mutex = threading.Lock()  # guards the fields below
+        self.sessions = set()
+        self.used = 0.0  # self.clock() of the last use
+        self.offset = slept()
+        self.asking = False  # one dialog at a time
+
+    def available(self):
+        """Whether the system can be asked: setup installed the action."""
+        return self.policy is not None and self.policy.is_file()
+
+    def enabled(self):
+        if not self.available():
+            return False
+        try:
+            return json.loads(self.settings.read_text()).get("enabled") is not False
+        except (OSError, ValueError, AttributeError):
+            return True
+
+    def expire(self):
+        """Ends every session after the idle time or a sleep. Holds mutex."""
+        offset = self.slept()
+        slept, self.offset = offset - self.offset > SLEPT, offset
+        if slept or self.clock() - self.used > IDLE_LOCK:
+            self.sessions.clear()
+
+    def unlocked(self, session):
+        if not self.enabled():
+            return True
+        with self.mutex:
+            self.expire()
+            return session in self.sessions
+
+    def use(self, session):
+        """Counts as use: the idle time starts again."""
+        with self.mutex:
+            self.expire()
+            if session in self.sessions:
+                self.used = self.clock()
+
+    def lock(self):
+        with self.mutex:
+            self.sessions.clear()
+
+    def start(self):
+        """A new session, and the idle time from now."""
+        session = secrets.token_urlsafe(32)
+        with self.mutex:
+            self.expire()
+            self.sessions.add(session)
+            self.used = self.clock()
+        return session
+
+    def ask(self):
+        """(confirmed, why) from the system's dialog; why is None while
+        another dialog is open."""
+        with self.mutex:
+            if self.asking:
+                return False, None
+            self.asking = True
+        try:
+            return self.confirm()
+        finally:
+            with self.mutex:
+                self.asking = False
+
+    def set_enabled(self, enabled):
+        write_atomic(self.settings, (json.dumps({"enabled": enabled}) + "\n").encode())
+
+    def state(self, session):
+        """What GET /api/lock says: nothing about the data."""
+        return {
+            "available": self.available(),
+            "enabled": self.enabled(),
+            "locked": not self.unlocked(session),
+            "idleMinutes": IDLE_LOCK // 60,
+        }
+
+
 class FinanceServer(http.server.ThreadingHTTPServer):
     """A thread per connection, so an idle browser connection blocks nothing.
     Saves hold a lock, so they never overlap."""
 
     daemon_threads = True
 
-    def __init__(self, port, data_file, theme_path, updater=None):
+    def __init__(self, port, data_file, theme_path, updater=None, lock=None):
         self.data_file = Path(data_file)
         self.theme_path = Path(theme_path)
         self.updater = updater
-        self.lock = threading.Lock()
+        # Without one: no lock, as for a server started without setup.
+        self.lock = lock or Lock(self.data_file.parent / "lock.json", policy=None)
+        self.saving = threading.Lock()
         super().__init__(("127.0.0.1", port), Handler)
         bound = self.server_address[1]
         self.hosts = {f"127.0.0.1:{bound}", f"localhost:{bound}"}
@@ -423,9 +561,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def send_json(self, status, value):
+    def send_json(self, status, value, extra=None):
         body = json.dumps(value, ensure_ascii=False).encode()
-        self.send_body(status, body, "application/json; charset=utf-8")
+        self.send_body(status, body, "application/json; charset=utf-8", extra)
+
+    def session(self):
+        """The session from the page's cookie, or None."""
+        try:
+            morsel = http.cookies.SimpleCookie(self.headers.get("Cookie", "")).get(SESSION_COOKIE)
+        except http.cookies.CookieError:
+            return None
+        return morsel.value if morsel else None
+
+    def unlocked(self):
+        """Whether this request may see the data; says no if not."""
+        if self.server.lock.unlocked(self.session()):
+            return True
+        self.send_json(401, {"error": "Finance is locked", "locked": True})
+        return False
 
     def allowed(self):
         # The Host check stops other websites from reaching this server
@@ -447,7 +600,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         path = self.path.split("?", 1)[0]
         if path == "/api/data":
-            self.get_data()
+            if self.unlocked():
+                self.get_data()
+        elif path == "/api/lock":
+            self.send_json(200, self.server.lock.state(self.session()))
         elif path == "/api/update" and self.server.updater:
             self.send_json(200, self.server.updater.snapshot())
         elif path == "/theme.css":
@@ -504,12 +660,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.allowed():
             return
+        path = self.path.split("?", 1)[0]
+        if path == "/api/lock":
+            self.post_lock()
+            return
         updater = self.server.updater
-        if self.path.split("?", 1)[0] != "/api/update" or not updater:
+        if path != "/api/update" or not updater:
             self.send_json(404, {"error": "Not found"})
             return
         body = self.read_json()
-        if body is NO_BODY:
+        if body is NO_BODY or not self.unlocked():
             return
         action = body.get("action") if isinstance(body, dict) else None
         if action == "check":
@@ -532,6 +692,64 @@ class Handler(http.server.BaseHTTPRequestHandler):
             channels = " or ".join(CHANNELS)
             self.send_json(400, {"error": f"Expected {{action: check, download, install, or channel with channel: {channels}}}"})
 
+    def post_lock(self):
+        """Unlocks once the system confirms it's you, locks, counts a use,
+        or turns the lock on or off (off needs the system's confirmation)."""
+        body = self.read_json()
+        if body is NO_BODY:
+            return
+        action = body.get("action") if isinstance(body, dict) else None
+        lock, session = self.server.lock, self.session()
+        cookie = None  # the Set-Cookie header of a new session
+        if action == "lock":
+            lock.lock()
+        elif action == "use":
+            lock.use(session)
+        elif action == "unlock":
+            if not lock.unlocked(session):
+                confirmed, why = lock.ask()
+                if not confirmed:
+                    self.not_confirmed(why)
+                    return
+                session, cookie = self.start_session()
+        elif action in ("on", "off"):
+            if not lock.available():
+                self.send_json(409, {"error": "the unlock prompt is not installed: run setup again"})
+                return
+            if not self.unlocked():
+                return
+            if action == "off" and lock.enabled():
+                confirmed, why = lock.ask()
+                if not confirmed:
+                    self.not_confirmed(why)
+                    return
+            try:
+                lock.set_enabled(action == "on")
+            except OSError as error:
+                self.log_error("saving the lock setting failed: %s", error)
+                self.send_json(500, {"error": f"Could not save: {error.strerror}"})
+                return
+            if action == "on":
+                session, cookie = self.start_session()
+        else:
+            self.send_json(400, {"error": "Expected {action: unlock, lock, use, on or off}"})
+            return
+        self.send_json(200, lock.state(session), cookie)
+
+    def start_session(self):
+        """A new session, and the header that sets it as the page's cookie:
+        HttpOnly, so the page's scripts never see it, and kept until the
+        browser closes."""
+        session = self.server.lock.start()
+        return session, {"Set-Cookie": f"{SESSION_COOKIE}={session}; Path=/; HttpOnly; SameSite=Strict"}
+
+    def not_confirmed(self, why):
+        if why is None:
+            self.send_json(409, {"error": "Finance is asking already: confirm in the open dialog"})
+        else:
+            # "" when the dialog was dismissed: the page then says nothing.
+            self.send_json(401, {"error": why})
+
     def do_PUT(self):
         if not self.allowed():
             return
@@ -541,6 +759,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = self.read_json()
         if body is NO_BODY:
             return
+        # Once the body is in: a slow one must not outlast the lock.
+        if not self.unlocked():
+            return
+        self.server.lock.use(self.session())
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, dict) or data.get("version") != VERSION:
             # Also refuses a window still running an older version of the page.
@@ -548,7 +770,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         out = (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode()
-        with self.server.lock:
+        with self.server.saving:
             current = self.current()
             if body.get("revision") != current["revision"] or "error" in current:
                 # Another window saved first, or the file was edited by hand.
@@ -576,8 +798,9 @@ def main():
     args = parser.parse_args()
     data_file = Path(args.data) if args.data else state_dir() / "finance.json"
     updater = Updater(UPDATE_SCRIPT, update_log())
+    lock = Lock(data_file.parent / "lock.json")
     try:
-        server = FinanceServer(args.port, data_file, theme_file(), updater)
+        server = FinanceServer(args.port, data_file, theme_file(), updater, lock)
     except OSError as error:
         sys.exit(f"finance: cannot listen on 127.0.0.1:{args.port}: {error.strerror}")
     updater.start()

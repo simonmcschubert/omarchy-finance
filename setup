@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Installs Finance on Omarchy: a user service that runs the local server at
-# login, and a "Finance" web app in the app launcher. Running it again after
-# a `git pull` restarts the server with the new code. `setup --remove` takes
-# both out again; the data file stays.
+# login, a "Finance" web app in the app launcher with a browser profile of
+# its own, and the polkit action for the lock (with sudo, once). Running it
+# again after a `git pull` restarts the server with the new code.
+# `setup --remove` takes all of it out again; the data file stays.
 set -euo pipefail
 
 NAME=Finance
@@ -11,7 +12,15 @@ PORT=47219
 URL="http://127.0.0.1:$PORT/"
 DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 UNIT_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT"
-DATA_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-finance/finance.json"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-finance"
+DATA_FILE="$STATE_DIR/finance.json"
+# The Finance window's browser profile: no extensions, and nothing shared
+# with everyday browsing.
+PROFILE="$STATE_DIR/browser"
+# The lock asks the system to confirm it's you through this polkit action
+# (server.py, Lock). Only root can add one.
+POLICY=io.github.simonmcschubert.omarchy-finance.policy
+POLICY_FILE=/usr/share/polkit-1/actions/$POLICY
 
 fail() {
   echo "setup: $*" >&2
@@ -27,7 +36,12 @@ case ${1:-} in
     if command -v omarchy-webapp-remove >/dev/null; then
       OMARCHY_REMOVE_NOTIFY=false omarchy-webapp-remove "$NAME" || true
     fi
-    echo "Removed Finance's service and launcher entry. The data stays in $DATA_FILE."
+    rm -rf "$PROFILE"
+    if [[ -e $POLICY_FILE ]]; then
+      echo "Removing the lock's polkit action (sudo): $POLICY_FILE"
+      sudo rm -f "$POLICY_FILE" || echo "setup: could not remove $POLICY_FILE" >&2
+    fi
+    echo "Removed Finance's service, launcher entry and lock. The data stays in $DATA_FILE."
     exit 0
     ;;
   -h | --help)
@@ -41,6 +55,21 @@ command -v omarchy-webapp-install >/dev/null || fail "omarchy-webapp-install not
 PYTHON=$(command -v python3) || fail "python3 not found"
 "$PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 11))' || fail "Finance needs Python 3.11 or newer"
 [[ $DIR != *[[:space:]\"\\%]* ]] || fail "move the repository to a path without spaces, quotes, backslashes or %"
+[[ $PROFILE != *[[:space:]\"\\%]* ]] || fail "Finance needs a state directory without spaces, quotes, backslashes or %: $STATE_DIR"
+
+# Asks for sudo only when the action is missing or changed.
+install_lock() {
+  cmp -s "$DIR/polkit/$POLICY" "$POLICY_FILE" && return
+  if [[ ! -d ${POLICY_FILE%/*} ]] || ! command -v pkcheck >/dev/null; then
+    echo "polkit not found: Finance runs without the lock."
+    return
+  fi
+  echo "Installing the lock's polkit action, so the system can confirm it's you (sudo, once):"
+  echo "  $POLICY_FILE"
+  if ! sudo install -m 644 -o root -g root "$DIR/polkit/$POLICY" "$POLICY_FILE"; then
+    echo "Not installed: Finance runs without the lock. Run setup again to install it."
+  fi
+}
 
 mkdir -p "$(dirname "$UNIT_FILE")"
 cat >"$UNIT_FILE" <<EOF
@@ -55,11 +84,16 @@ Restart=on-failure
 WantedBy=default.target
 EOF
 
+install_lock
+
 systemctl --user daemon-reload
 systemctl --user enable "$UNIT" >/dev/null
 systemctl --user restart "$UNIT"
 
-omarchy-webapp-install "$NAME" "$URL" "$DIR/icon.png"
+mkdir -p "$STATE_DIR"
+chmod 700 "$STATE_DIR"
+omarchy-webapp-install "$NAME" "$URL" "$DIR/icon.png" \
+  "omarchy-launch-webapp $URL --user-data-dir=$PROFILE --no-first-run --no-default-browser-check"
 
 for _ in $(seq 20); do
   if curl -fs -o /dev/null "$URL"; then

@@ -26,7 +26,8 @@ git clone https://github.com/simonmcschubert/omarchy-finance.git ~/.local/share/
 `setup` adds a user service (`omarchy-finance.service`) that runs the server
 at login on `http://127.0.0.1:47219/`, and a "Finance" entry in the app
 launcher (`Super+Space`). The server reads the code from the cloned
-directory, so keep it where it is.
+directory, so keep it where it is. It asks for `sudo` once, to install the
+[lock](#lock)'s polkit action; without it, Finance runs unlocked.
 
 ## Update
 
@@ -82,7 +83,8 @@ launcher entry.
 rm -rf ~/.local/share/omarchy-finance
 ```
 
-The data file stays.
+`setup --remove` also takes out the lock's polkit action (with `sudo`) and the
+Finance window's browser profile. The data file stays.
 
 ## Use
 
@@ -136,6 +138,7 @@ The data file stays.
     [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
     Deleting one deletes its monthly values too.
   - Import past months from CSV, and export all monthly values as CSV.
+  - The [lock](#lock): on or off.
   - Where the data file and its daily backups are, and which updates to
     offer.
 
@@ -150,6 +153,25 @@ Settings. `Ctrl+Shift+H`, or the eye at the right end of the top bar, hides
 every amount (as `••• €`, in charts and amount fields too) and keeps the
 percentages, for sharing the screen; again shows them. The choice is kept in
 this browser.
+
+### Lock
+
+With the lock on, Finance shows nothing until the system has confirmed it's
+you, in Omarchy's own dialog: touch the fingerprint sensor, or type your
+password; with the lid shut, it asks for the password. Opening Finance asks
+straight away.
+Finance locks again after 20 minutes without use (keys, clicks, scrolling),
+when the computer sleeps, with `Ctrl+L` or the padlock at the right end of the
+top bar, and when its server restarts, after an update for example. While it
+is locked, the page forgets the data, and the server gives it to no one: not
+to the page, and not to other programs on the computer.
+
+The lock is on once `setup` has installed its polkit action. The fingerprint
+needs Omarchy's fingerprint setup (Omarchy menu › Setup › Security ›
+Fingerprint); without it, the dialog asks for the password. Settings › Lock
+turns the lock off, after the same dialog, and on again. If the dialog never
+appears, `sudo rm /usr/share/polkit-1/actions/io.github.simonmcschubert.omarchy-finance.policy`
+turns the lock off until `setup` runs again.
 
 ### Expenses and income
 
@@ -444,14 +466,25 @@ window with old data is refused and that window reloads.
 
 The server listens on `127.0.0.1` only. It answers only requests addressed to
 `127.0.0.1:47219` or `localhost:47219` and refuses writes from other web
-pages, so a website open in the browser cannot read or change the data. Other
-programs running as the same user can, as with any file in the home
-directory.
+pages, so a website open in the browser cannot read or change the data.
+
+With the [lock](#lock) on, the data goes only to a window that was unlocked:
+its session is an `HttpOnly` cookie that the page's scripts never see and the
+server forgets when it locks. Other programs on the computer, other users
+included, get nothing from the server without your fingerprint or password.
+They can still read the data file itself if they run as you, as with any file
+in the home directory; Omarchy's disk encryption protects it while the
+computer is off.
+
+The Finance window has a browser profile of its own
+(`~/.local/state/omarchy-finance/browser`), so browser extensions and
+everyday browsing don't share it. Copies installed before get it, and the
+lock, when `setup` runs again.
 
 ## Development
 
 ```text
-server.py          # local server: page, /api/data (load/save, daily backups), /api/update, /theme.css
+server.py          # local server: page, /api/data (load/save, daily backups), /api/lock, /api/update, /theme.css
 app/
 ├── index.html
 ├── app.mjs        # the views; saves every change
@@ -459,7 +492,8 @@ app/
 ├── chart.mjs      # portfolio and forecast charts (SVG)
 ├── update.mjs     # the update button, and the channel in Settings
 └── style.css
-setup              # user service and launcher entry; --remove undoes
+polkit/            # the lock's polkit action, which setup installs
+setup              # user service, launcher entry and the lock's action; --remove undoes
 update             # finds, downloads and installs releases or previews
 ```
 
