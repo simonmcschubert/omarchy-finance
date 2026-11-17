@@ -1126,31 +1126,95 @@ test("accountSeries: one account's values, pay-ins and one-offs", () => {
   assert.equal(F.accountSeries(s, a, "2026-02").length, 2, "already there");
 });
 
-test("countsIn: from its first month until before its end", () => {
+test("budget: where each expense and income stands in a month", () => {
   const birthYear = 1990;
   const retirement = (1990 + 67) * 12; // January 2057
   const at = (month) => F.monthIndex(month);
-  const item = (from, until, active) => ({ from, until, ...(active === undefined ? {} : { active }) });
-  const counts = (i, month, retire = retirement, born = birthYear) => F.countsIn(i, at(month), born, retire);
+  const item = (from, until, active) => ({ id: "x", name: "X", category: "", amount: 100 * EUR, everyMonths: 1, from, until, ...(active === undefined ? {} : { active }) });
+  // The list of the budget the item is in, as an expense and as income.
+  const status = (i, month, retire = retirement, born = birthYear) => {
+    const lists = (kind) => {
+      const b = F.budget(store({ settings: { ...F.DEFAULT_SETTINGS, birthYear: born }, [kind]: [i] }), at(month), retire)[kind];
+      return ["now", "later", "ended", "inactive"].filter((list) => b[list].some((x) => x.id === i.id));
+    };
+    const [expense, income] = [lists("expenses"), lists("income")];
+    if (i.active === undefined) assert.deepEqual(income, expense, "income stands where an expense would");
+    assert.equal(expense.length, 1, "in one list");
+    return expense[0];
+  };
 
-  assert.equal(counts(item(null, null), "1900-01"), true);
-  assert.equal(counts(item(null, null, false), "2026-11"), false, "inactive never counts");
+  assert.equal(status(item(null, null), "1900-01"), "now");
+  assert.equal(status(item(null, null, false), "2026-11"), "inactive", "inactive never counts");
   // A month start is its first month; a month end its last.
   const kita = item({ month: "2027-08" }, { month: "2031-07" });
-  assert.deepEqual(["2027-07", "2027-08", "2031-07", "2031-08"].map((m) => counts(kita, m)), [false, true, true, false]);
+  assert.deepEqual(["2027-07", "2027-08", "2031-07", "2031-08"].map((m) => status(kita, m)), ["later", "now", "now", "ended"]);
   // Retirement and ages are January of their year.
   const salary = item(null, { at: "retirement" });
-  assert.deepEqual(["2056-12", "2057-01"].map((m) => counts(salary, m)), [true, false]);
-  assert.equal(counts(salary, "2056-12", at("2040-05")), false, "retiring early ends it early");
+  assert.deepEqual(["2056-12", "2057-01"].map((m) => status(salary, m)), ["now", "ended"]);
+  assert.equal(status(salary, "2056-12", at("2040-05")), "ended", "retiring early ends it early");
   const pension = item({ age: 67 }, null);
-  assert.deepEqual(["2056-12", "2057-01"].map((m) => counts(pension, m)), [false, true]);
+  assert.deepEqual(["2056-12", "2057-01"].map((m) => status(pension, m)), ["later", "now"]);
   const bridge = item({ at: "retirement" }, { age: 67 });
-  assert.deepEqual(["2049-12", "2050-01", "2056-12", "2057-01"].map((m) => counts(bridge, m, at("2050-01"))), [false, true, true, false]);
+  assert.deepEqual(["2049-12", "2050-01", "2056-12", "2057-01"].map((m) => status(bridge, m, at("2050-01"))), ["later", "now", "now", "ended"]);
   // Without a year of birth, ages and retirement are never reached.
-  assert.equal(counts(pension, "2090-01", Infinity, null), false);
-  assert.equal(counts(item(null, { age: 30 }), "2090-01", Infinity, null), true);
+  assert.equal(status(pension, "2090-01", Infinity, null), "later");
+  assert.equal(status(item(null, { age: 30 }), "2090-01", Infinity, null), "now");
   assert.equal(F.retirementIndex({ birthYear: null, retirementAge: 67 }), Infinity);
   assert.equal(F.retirementIndex({ birthYear: 1990, retirementAge: 67 }), retirement);
+});
+
+test("budget: the month's totals with the buffer, and what the portfolio pays", () => {
+  const item = (name, amount, from, until, extra = {}) => ({ id: name, name, category: "", amount: amount * EUR, everyMonths: 1, from, until, ...extra });
+  const rent = item("Rent", 1000, null, null, { active: true, essential: true });
+  const insurance = item("Insurance", 300, null, null, { everyMonths: 3, active: true, essential: false });
+  const health = item("Health insurance", 300, { at: "retirement" }, { age: 67 }, { active: true, essential: true });
+  const kita = item("Kita", 400, null, { month: "2026-10" }, { active: true, essential: false });
+  const gym = item("Gym", 50, null, null, { active: false, essential: true });
+  const salary = item("Salary", 3000, null, { at: "retirement" });
+  const flat = item("Rent from a flat", 200, null, null);
+  const pension = item("State pension", 1000, { age: 67 }, null);
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, birthYear: 1990, bufferPercent: 10 },
+    expenses: [rent, insurance, health, kita, gym],
+    income: [salary, flat, pension],
+  });
+  const now = F.monthIndex("2026-11");
+
+  const working = F.budget(s, now);
+  assert.deepEqual(
+    { now: working.expenses.now, later: working.expenses.later, ended: working.expenses.ended, inactive: working.expenses.inactive },
+    { now: [rent, insurance], later: [health], ended: [kita], inactive: [gym] });
+  assert.deepEqual([working.income.now, working.income.later, working.income.ended], [[salary, flat], [pension], []]);
+  assert.equal(working.expenses.monthly, 1100 * EUR, "a quarterly 300 is 100 a month");
+  assert.equal(working.expenses.buffer, 110 * EUR);
+  assert.equal(working.expenses.total, 1210 * EUR);
+  assert.deepEqual(working.expenses.essential, { monthly: 1000 * EUR, total: 1100 * EUR });
+  assert.equal(working.income.monthly, 3200 * EUR);
+  assert.equal(working.need, 0, "the income pays it all");
+  assert.equal(working.essentialNeed, 0);
+
+  // Retiring now: health insurance starts, the salary ends.
+  const retired = F.budget(s, now, now);
+  assert.deepEqual(retired.expenses.now, [rent, insurance, health]);
+  assert.equal(retired.expenses.total, 1540 * EUR);
+  assert.equal(retired.income.monthly, 200 * EUR);
+  assert.equal(retired.need, 1340 * EUR);
+  assert.equal(retired.essentialNeed, 1230 * EUR, "rent and health insurance with the buffer, less the flat");
+
+  // The dashboard reads this month's budget.
+  const m = F.metrics(s, "2026-11");
+  assert.deepEqual(m.budget, working);
+  assert.equal(m.expenses, working.expenses.total);
+  assert.equal(m.retiredNeed, retired.need);
+
+  // needIn is the same rule without the lists, for the projections.
+  for (const retire of [now, F.monthIndex("2050-01"), F.retirementIndex(s.settings)]) {
+    for (let index = now; index <= F.monthIndex("2060-12"); index += 7) {
+      const b = F.budget(s, index, retire);
+      assert.equal(F.needIn(s, index, retire), b.need);
+      assert.equal(F.needIn(s, index, retire, { essential: true }), b.essentialNeed);
+    }
+  }
 });
 
 test("metrics: what counts now, and the FI number for retiring now", () => {

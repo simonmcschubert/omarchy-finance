@@ -1,6 +1,7 @@
 import http.client
 import json
 import os
+import re
 import socket
 import stat
 import sys
@@ -504,6 +505,17 @@ class WriteAtomicTest(unittest.TestCase):
                 server.os.replace = original
             self.assertEqual(path.read_text(), "old")
             self.assertEqual(list(Path(tmp).iterdir()), [path])
+
+
+class VersionTest(unittest.TestCase):
+    def test_the_server_and_the_app_write_the_same_version(self):
+        # The server refuses data of any other version, so a version raised
+        # in one and not the other stops every save.
+        source = (server.APP_DIR / "finance.mjs").read_text()
+        found = re.search(r"^export const VERSION = (\d+);$", source, re.MULTILINE)
+        self.assertIsNotNone(found, "VERSION in app/finance.mjs")
+        self.assertEqual(int(found.group(1)), server.VERSION)
+        self.assertEqual(STORE["version"], server.VERSION)
 
 
 if __name__ == "__main__":
