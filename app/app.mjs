@@ -256,7 +256,7 @@ function toggleHidden() {
       if (!el || el instanceof RadioNodeList) continue;
       if (el.type === "checkbox") el.checked = value;
       else el.value = value;
-      // A start or end shows the field of its choice.
+      // A choice shows its field: a start or end, the future pay-in.
       if (el.tagName === "SELECT" && el.closest(".bound")) el.dispatchEvent(new Event("change"));
     }
   });
@@ -1794,7 +1794,7 @@ function futurePayInField(store) {
   } },
     h("option", { value: "average" }, average ? `Average of ${payInMonths(average.months)}: ${money(average.average)}` : "Average of the last 12 months"),
     h("option", { value: "own" }, "Own amount"));
-  return h("div", { class: "field" },
+  return h("div", { class: "field bound" },
     h("span", { class: "field-label" }, h("label", { for: select.id }, "Future pay-in a month"),
       info("the future pay-in",
         "What you pay in from now on, for the investment rate, the milestones, the Path to FI chart and the forecast.",
