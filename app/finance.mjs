@@ -399,7 +399,8 @@ const CURRENCY_CODES = new Set(Intl.supportedValuesOf("currency"));
 // separator followed by exactly three digits is a thousands separator
 // ("1.234" is 1234), because money never has three decimals. Currency signs
 // and a three-letter code before or after the number are left out.
-// Returns { ok: true, cents } or { ok: false, error }.
+// Returns { ok: true, cents } or { ok: false, error }. The error never
+// repeats the text, which may be an amount hidden on screen.
 export function parseMoney(text) {
   let s = String(text ?? "")
     .replace(/[\s\u00a0\u202f']/g, "")
@@ -414,7 +415,7 @@ export function parseMoney(text) {
     s = s.slice(1);
   }
   if (s === "") return { ok: false, error: "Enter an amount" };
-  if (!/^[0-9.,]+$/.test(s) || !/[0-9]/.test(s)) return { ok: false, error: `"${text}" is not an amount` };
+  if (!/^[0-9.,]+$/.test(s) || !/[0-9]/.test(s)) return { ok: false, error: "Not an amount" };
 
   const lastDot = s.lastIndexOf(".");
   const lastComma = s.lastIndexOf(",");
@@ -426,19 +427,19 @@ export function parseMoney(text) {
     const at = s.lastIndexOf(decimal);
     whole = s.slice(0, at);
     fraction = s.slice(at + 1);
-    if (whole.includes(decimal)) return { ok: false, error: `"${text}" is not an amount` };
+    if (whole.includes(decimal)) return { ok: false, error: "Not an amount" };
     whole = groupedWhole(whole, decimal === "." ? "," : ".");
-    if (whole === null) return { ok: false, error: `"${text}" has misplaced thousands separators` };
+    if (whole === null) return { ok: false, error: "Misplaced thousands separators" };
   } else if (lastDot !== -1 || lastComma !== -1) {
     const sep = lastDot !== -1 ? "." : ",";
     const parts = s.split(sep);
     if (parts.length > 2) {
       whole = groupedWhole(s, sep);
-      if (whole === null) return { ok: false, error: `"${text}" has misplaced thousands separators` };
+      if (whole === null) return { ok: false, error: "Misplaced thousands separators" };
     } else if (parts[1].length === 3) {
-      if (/^0*$/.test(parts[0])) return { ok: false, error: `"${text}" has more than two decimals` };
+      if (/^0*$/.test(parts[0])) return { ok: false, error: "More than two decimals" };
       whole = groupedWhole(s, sep);
-      if (whole === null) return { ok: false, error: `"${text}" has misplaced thousands separators` };
+      if (whole === null) return { ok: false, error: "Misplaced thousands separators" };
     } else {
       whole = parts[0];
       fraction = parts[1];
@@ -447,10 +448,10 @@ export function parseMoney(text) {
 
   if (whole === "") whole = "0";
   if (!/^[0-9]+$/.test(whole) || !/^[0-9]{0,2}$/.test(fraction)) {
-    return { ok: false, error: fraction.length > 2 ? `"${text}" has more than two decimals` : `"${text}" is not an amount` };
+    return { ok: false, error: fraction.length > 2 ? "More than two decimals" : "Not an amount" };
   }
   const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
-  if (!Number.isSafeInteger(cents) || cents >= MAX_CENTS) return { ok: false, error: `"${text}" is too large` };
+  if (!Number.isSafeInteger(cents) || cents >= MAX_CENTS) return { ok: false, error: "Too large" };
   return { ok: true, cents: sign * cents || 0 };
 }
 

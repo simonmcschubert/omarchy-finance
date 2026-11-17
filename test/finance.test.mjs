@@ -73,6 +73,14 @@ test("parseMoney rejects what it cannot read safely", () => {
   }
 });
 
+test("parseMoney errors leave out the typed amount, which hide amounts would show", () => {
+  for (const text of ["1.234,567", "12.34.567", "98765abc", "123456789012345678"]) {
+    const { ok, error } = F.parseMoney(text);
+    assert.equal(ok, false, text);
+    assert.doesNotMatch(error, /[0-9]/, `${text}: ${error}`);
+  }
+});
+
 test("parsePercent", () => {
   assert.deepEqual(F.parsePercent("3,5"), { ok: true, value: 3.5 });
   assert.deepEqual(F.parsePercent("4 %"), { ok: true, value: 4 });
@@ -536,6 +544,7 @@ test("planImport reports every problem with its line", () => {
   const { errors } = F.planImport(F.emptyStore(), csv);
   assert.deepEqual(errors.map((e) => e.line), [2, 3, 4, 5, 7, 8, 9]);
   assert.match(errors[0].message, /"31.02.2026" is not a date/);
+  assert.equal(errors[2].message, "Value: Not an amount");
   assert.match(errors[4].message, /already on line 6/);
   assert.match(errors[5].message, /decimal comma/);
   assert.match(errors[6].message, /"2026-12" is not a date/);
