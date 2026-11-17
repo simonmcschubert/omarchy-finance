@@ -1109,7 +1109,9 @@ export function metrics(store, now = currentMonth()) {
   const series = portfolioSeries(store);
   const worth = netWorthSeries(store);
   const last = series.at(-1) ?? null;
-  const payIn = payInPlan(store, series, last ? last.month : now).now;
+  // What is paid in this month, like the income: the plan from the month
+  // before on, also when the latest values are older.
+  const payIn = payInPlan(store, series, addMonths(now, -1)).now;
   const fiNumber = fiNumberIn(store, nowIndex);
   return {
     // What counts this month (budget).

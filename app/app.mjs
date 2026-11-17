@@ -261,13 +261,19 @@ function toggleHidden() {
   }
   // A notice may name an amount: it goes.
   state.notice = null;
-  // The page is drawn again with every amount: what is typed into its forms
-  // and not saved yet stays, and so does the focus.
+  // The page is drawn again with every amount.
+  keepingDrafts();
+}
+
+// Draws the page again with `draw` (render, or a commit that renders):
+// what is typed into its forms and not saved yet stays, and so does the
+// focus.
+function keepingDrafts(draw = render) {
   const forms = () => [...document.querySelectorAll("#main form")];
   const drafts = forms().map((form) => [...form.elements].filter((el) => el.name).map((el) => [el.name, el.type === "checkbox" ? el.checked : el.value]));
   const active = document.activeElement;
   const focused = active?.form ? [forms().indexOf(active.form), active.name] : null;
-  render();
+  draw();
   forms().forEach((form, i) => {
     for (const [name, value] of drafts[i] ?? []) {
       const el = form.elements.namedItem(name);
@@ -2176,9 +2182,11 @@ function payInsCard(store) {
       h("button", { type: "submit", class: "primary" }, editing ? "Save" : "Add change"),
       editing ? h("button", { type: "button", onclick: () => { state.editingPayIn = null; render(); } }, "Cancel") : null));
 
+  // Saved on a click, so what is typed elsewhere on the page stays.
   const rise = h("input", { type: "checkbox", id: "payins-rise", checked: payInsRiseWithInflation, onchange: (event) => {
     const on = event.currentTarget.checked;
-    commit(F.saveSettings(state.store, { payInsRiseWithInflation: on }), on ? "Pay-ins now rise with inflation." : "Pay-ins now stay the same.");
+    state.focus = "#payins-rise";
+    keepingDrafts(() => commit(F.saveSettings(state.store, { payInsRiseWithInflation: on }), on ? "Pay-ins now rise with inflation." : "Pay-ins now stay the same."));
   } });
 
   return card(["Future pay-ins", info("future pay-ins",

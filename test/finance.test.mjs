@@ -1185,6 +1185,13 @@ test("a planned pay-in change that has started is what is paid in now", () => {
   const both = { ...s, payInChanges: [back, earlier] };
   assert.deepEqual(F.metrics(both, "2026-11").payIn, { amount: 1000 * EUR, months: 1, change: back });
   assert.deepEqual(F.metrics({ ...s, payInChanges: [earlier] }, "2026-11").payIn, { amount: 300 * EUR, months: null, change: earlier });
+
+  // The dashboard counts this month's, like the income, also when the
+  // latest values are older.
+  const december = { id: "d", from: { month: "2026-12" }, amount: 2000 * EUR };
+  const lagging = F.metrics({ ...s, payInChanges: [december] }, "2027-01");
+  assert.deepEqual(lagging.payIn, { amount: 2000 * EUR, months: null, change: december });
+  assert.equal(lagging.investmentRate, 2000 / 4000);
 });
 
 test("pay-ins rise with inflation only when the settings say so", () => {
