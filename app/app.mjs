@@ -308,6 +308,7 @@ const state = {
 let pending = null; // newest store waiting to be saved, also after a save failed
 let inFlight = false;
 let saves = 0; // successful saves, so a slower reload cannot undo one
+let locks = 0; // times Finance locked: a save sent before a lock is forgotten
 
 async function request(method, body) {
   const response = await fetch("/api/data", {
@@ -377,12 +378,17 @@ async function pump() {
   if (inFlight || !pending) return;
   inFlight = true;
   const store = pending;
+  const locksBefore = locks;
   pending = null;
   let retry = true; // no answer: the server is down or restarting
   try {
     const { status, json } = await request("PUT", { revision: state.revision, data: store });
     retry = status >= 500;
-    if (status === 200) {
+    if (locks !== locksBefore) {
+      // Finance locked while this was on its way: the page forgot the data,
+      // so it never tries this again, and unlocking says it was not saved.
+      if (status !== 200) state.lock.lost = true;
+    } else if (status === 200) {
       state.revision = json.revision;
       saves++;
       if (state.notice?.retry) {
@@ -403,7 +409,8 @@ async function pump() {
       throw new Error(json?.error ?? `HTTP ${status}`);
     }
   } catch (error) {
-    if (retry) {
+    if (locks !== locksBefore) state.lock.lost = true;
+    else if (retry) {
       // Keep it unsaved, unless a newer change came meanwhile: it goes on
       // focus, with the next change, or before an update restart.
       pending ??= store;
@@ -486,6 +493,7 @@ function adoptLock(json) {
 // Finance locked: forget the data, and whatever was typed from it. A change
 // still waiting to be saved goes too, and unlocking says so.
 function showLocked() {
+  locks++;
   if (pending) state.lock.lost = true;
   Object.assign(state.lock, { locked: true, enabled: true, available: true });
   state.store = null;
