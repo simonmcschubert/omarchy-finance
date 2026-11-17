@@ -88,8 +88,10 @@ then.
 
 **Coast FI**: from then on, the portfolio reaches the FI number by the
 retirement month without any more pay-ins (or, in the Forecast, with only
-the coast pay-in). The **Coast FI number** is what the portfolio needs
-for that today.
+the coast pay-in), after the planned one-offs that take money out. The
+**Coast FI number** is what the portfolio needs for that today. Pay-ins to
+come, planned or one-off, never lower it: they only make the portfolio
+reach it sooner.
 
 **Milestones**: Coast FI, Lean FI and FI on the dashboard, in the order the
 portfolio reaches them. Coast FI here never counts the coast pay-in.

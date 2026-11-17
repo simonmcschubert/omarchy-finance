@@ -1772,7 +1772,7 @@ test("forecast: Retire early needs the FI number of the month it retires in", ()
   assert.equal(f.plans.fi.fiMonth, "2051-11");
 });
 
-test("forecast: planned one-offs go into every plan, and Coast FI counts on them", () => {
+test("forecast: planned one-offs go into every plan, and Coast FI counts only those taken out ahead", () => {
   const at = (month) => F.monthIndex(month) - F.monthIndex("2026-10");
   const inheritance = F.monthIndex("2040-01");
   const deposit = F.monthIndex("2028-01");
@@ -1785,12 +1785,16 @@ test("forecast: planned one-offs go into every plan, and Coast FI counts on them
   }
   assert.equal(f.plans.keep.values[at("2040-01")], 330000 * EUR);
   // Without growth, from 300,000 and 1,000 a month: Coast FI when nothing
-  // more is needed to reach 600,000. With the inheritance to come and the
-  // deposit to pay, 20,000 more are enough: after 20 months.
+  // more is needed to reach 600,000. With the deposit to pay, it needs
+  // 620,000 until then. The inheritance doesn't count before it comes, but
+  // once it is there the portfolio has enough: 300,000 + 13 years of 1,000
+  // - 20,000 + 300,000 in January 2040, not 2051.
   const coast = F.forecast({ ...plan({ growth: 0, value: 300000 * EUR }), oneOffs }).plans.coast;
   const without = F.forecast(plan({ growth: 0, value: 300000 * EUR })).plans.coast;
-  assert.equal(coast.coastMonth, "2028-06");
+  assert.equal(coast.coastMonth, "2040-01");
   assert.equal(without.coastMonth, "2051-10");
+  // From 640,000 the deposit is covered: Coast FI at the start.
+  assert.equal(F.forecast({ ...plan({ growth: 0, value: 640000 * EUR }), oneOffs }).plans.coast.coastMonth, "2026-10");
   // A one-off bigger than the portfolio leaves nothing, not a debt.
   const broke = F.forecast({ ...base, oneOffs: (index) => (index === deposit ? -100000 * EUR : 0) });
   assert.equal(broke.plans.keep.values[at("2028-01")], 0);
@@ -1886,11 +1890,15 @@ test("forecast: the Coast FI number is what the portfolio needs at the start for
   // Coast FI is at the start from that value on, and not a little below it.
   assert.equal(F.forecast(plan({ value: f.coastNumber })).plans.coast.coastMonth, "2026-10");
   assert.ok(F.forecast(plan({ value: f.coastNumber * 0.999 })).plans.coast.coastMonth > "2026-10");
-  // What is paid in after Coast FI, and one-offs to come, lower it.
+  // What is paid in after Coast FI lowers it, and one-offs to take out
+  // raise it. One-offs to come in leave it as it is: they only make the
+  // portfolio reach it sooner.
   assert.ok(F.forecast(plan({ coastContribution: 200 * EUR })).coastNumber < f.coastNumber);
   const oneOffs = (index) => (index === F.monthIndex("2040-01") ? 300000 * EUR : index === F.monthIndex("2028-01") ? -20000 * EUR : 0);
-  close(F.forecast({ ...plan({ growth: 0 }), oneOffs }).coastNumber, 320000 * EUR, "600,000 less the inheritance, plus the deposit");
-  assert.equal(F.forecast({ ...plan({ growth: 0 }), oneOffs: () => 700000 * EUR }).coastNumber, 0, "one-offs alone reach it");
+  close(F.forecast({ ...plan({ growth: 0 }), oneOffs }).coastNumber, 620000 * EUR, "600,000 plus the deposit, not less the inheritance");
+  close(F.forecast({ ...plan(), oneOffs: () => 700000 * EUR }).coastNumber, f.coastNumber, "one-offs to come in");
+  close(F.forecast({ ...plan(), oneOffs: (index) => (index === F.monthIndex("2028-01") ? -20000 * EUR : 0) }).coastNumber,
+    f.coastNumber + (20000 * EUR) / (1 + r) ** 15, "a deposit 15 months on needs what grows to it by then");
   assert.equal(F.forecast(plan({ birthYear: 1950 })).coastNumber, null, "retired already");
 });
 
@@ -1918,6 +1926,14 @@ test("Coast FI on the dashboard: the Forecast page's Coast plan at the expected 
   const now = at({ ...s, records: [{ ...s.records[0], value: 200000 * EUR }] });
   assert.equal(now.months, 0);
   assert.ok(now.progress > 1);
+
+  // A planned inheritance doesn't lower what Coast FI needs, as it doesn't
+  // lower the FI number: the portfolio only gets there sooner, once the
+  // money is in.
+  const inheritance = at({ ...s, events: [{ id: "i", name: "Inheritance", month: "2030-01", amount: 200000 * EUR }] });
+  close(inheritance.fiNumber, coast.fiNumber, "the Coast FI number with an inheritance to come");
+  assert.ok(coast.month > "2030-01");
+  assert.equal(inheritance.month, "2030-01");
 
   const none = at({ ...s, records: [] });
   assert.ok(none.fiNumber > 0, "what it needs, without a portfolio too");

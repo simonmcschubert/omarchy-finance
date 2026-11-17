@@ -1245,8 +1245,10 @@ export function ageIn(month, birthYear) {
 // month of `index` (fiNumberIn), both in today's money. A plan's retirement
 // starts with the retirement age, or for Retire early the month after FI.
 // oneOffs(index), when given, is what is paid in once in the month of
-// `index` (oneOffsIn), in today's money: every plan gets it, and Coast FI
-// counts on those still to come before retirement.
+// `index` (oneOffsIn), in today's money: every plan gets it in its month.
+// Coast FI sets aside the money still to go out before retirement, but never
+// counts on money still to come in: that only makes it come sooner, once it
+// is there.
 //
 // Returns { months: shown months from start on, retirement: its first
 // month (null without), goal: the FI number of each shown month,
@@ -1278,19 +1280,20 @@ export function forecast(params) {
   // reach the FI number of retiring then.
   const fiAtRetirement = retires ? inflated(goal(retirement), inflation, retirement - 1 - first) : null;
 
-  // The one-offs after `index` until retirement, each grown to when
-  // retirement starts.
-  const onceAhead = [];
+  // The one-offs taken out after `index` until retirement, each grown to
+  // when retirement starts (0 or less). Those paid in are left out: like
+  // pay-ins, they don't lower what Coast FI needs.
+  const outAhead = [];
   for (let index = retires ? retirement - 1 : -Infinity, total = 0; index >= first; index--) {
-    onceAhead[index - first] = total;
-    total += onceAt(index) * (1 + rate) ** (retirement - 1 - index);
+    outAhead[index - first] = total;
+    total += Math.min(0, onceAt(index)) * (1 + rate) ** (retirement - 1 - index);
   }
   // What a month-end value grows to when retirement starts, with `monthly`
-  // paid in every month until then, and the one-offs.
+  // paid in every month until then, less the one-offs taken out.
   const grown = (v, index, monthly) => {
     const n = retirement - 1 - index;
     const factor = (1 + rate) ** n;
-    return v * factor + monthly * (rate === 0 ? n : (factor - 1) / rate) + (onceAhead[index - first] ?? 0);
+    return v * factor + monthly * (rate === 0 ? n : (factor - 1) / rate) + (outAhead[index - first] ?? 0);
   };
 
   const months = [];
@@ -1350,9 +1353,9 @@ export function forecast(params) {
     goal: goals,
     fiAtRetirement: ahead ? fiAtRetirement : null,
     // What the portfolio needs at the end of `start` for Coast FI then:
-    // grown to when retirement starts, with coastContribution and the
-    // one-offs, it reaches fiAtRetirement. 0 when those reach it on their
-    // own; null if retirement has started, or without one.
+    // grown to when retirement starts, with coastContribution and less the
+    // one-offs taken out, it reaches fiAtRetirement. 0 when coastContribution
+    // reaches it on its own; null if retirement has started, or without one.
     coastNumber: ahead ? Math.max(0, (fiAtRetirement - grown(0, first, coastContribution)) / (1 + rate) ** (retirement - 1 - first)) : null,
     plans: Object.fromEntries(PLANS.map((plan) => [plan, run(plan)])),
   };
@@ -1467,9 +1470,9 @@ export function fiOutlook(store, now = currentMonth()) {
     // retirement, or within MAX_PROJECTION_MONTHS), months: from start (0:
     // reached) }; progress, month and months are null without a portfolio,
     // or with an FI number of 0 (nothing to reach). Coast FI's fiNumber is
-    // what the portfolio needs at start (forecast's coastNumber; 0 when
-    // the pay-ins and one-offs get there on their own), and it has
-    // fiAtRetirement, the FI number it grows to.
+    // what the portfolio needs at start (forecast's coastNumber, which no
+    // pay-in lowers, planned or one-off), and it has fiAtRetirement, the FI
+    // number it grows to.
     milestones() {
       const main = run();
       const milestone = (number, result) => {
