@@ -1426,7 +1426,7 @@ function emergencyCard(store) {
       h("div", { class: "big" }, money(e.cash)),
       h("p", { class: "muted" }, `in cash${asOf}`),
       h("p", { class: "muted" }, store.expenses.length
-        ? [h("a", { href: "#expenses" }, "All expenses are inactive"), "."]
+        ? [h("a", { href: "#expenses" }, "No expenses count this month"), "."]
         : [h("a", { href: "#expenses" }, "Add expenses"), " to see how long it lasts."]));
   }
 
