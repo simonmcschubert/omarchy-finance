@@ -964,7 +964,9 @@ function pensionCard() {
       if (r.error) return showError(event.currentTarget, r.error);
       if (store.settings.birthYear === null) return showError(event.currentTarget, "The pension starts at an age, which needs your year of birth, in Settings.");
       const item = { id: existing?.id ?? F.newId(), name: PENSION_NAME, category: existing?.category ?? "", amount: Math.round(r.net), everyMonths: 1, from: { age: r.startAge }, until: null };
-      commit(F.saveItem(store, "income", item), `${existing ? "Updated" : "Added"} ${PENSION_NAME}: ${money(item.amount)} a month from age ${r.startAge}.`);
+      const saved = F.saveItem(store, "income", item);
+      if (!saved.ok) return showError(event.currentTarget, `Can't add ${money(item.amount)} a month. ${saved.error}.`);
+      commit(saved.store, `${existing ? "Updated" : "Added"} ${PENSION_NAME}: ${money(item.amount)} a month from age ${r.startAge}.`);
     },
   },
     field("Rentenpunkte so far", h("input", { name: "points", inputmode: "decimal", autocomplete: "off", placeholder: "25,5", required: true })),
@@ -1023,7 +1025,9 @@ function healthCard() {
       const category = existing?.category ?? (store.categories.expenses.includes("Insurance") ? "Insurance" : "");
       const item = { id: existing?.id ?? F.newId(), name: HEALTH_NAME, category, amount: Math.round(r.amount), everyMonths: 1,
         from: { at: "retirement" }, until: { age: r.untilAge }, active: existing?.active ?? true, essential: true };
-      commit(F.saveItem(store, "expenses", item), `${existing ? "Updated" : "Added"} ${HEALTH_NAME}: ${money(item.amount)} a month from retirement until age ${r.untilAge}.`);
+      const saved = F.saveItem(store, "expenses", item);
+      if (!saved.ok) return showError(event.currentTarget, `Can't add ${money(item.amount)} a month. ${saved.error}.`);
+      commit(saved.store, `${existing ? "Updated" : "Added"} ${HEALTH_NAME}: ${money(item.amount)} a month from retirement until age ${r.untilAge}.`);
     },
   },
     field("Minimum base a month", h("input", { name: "base", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.minimumBase) }),
@@ -1113,9 +1117,11 @@ function viewItems(kind) {
         item.active = editing?.active ?? true;
         item.essential = data.get("essential") === "on";
       }
+      const saved = F.saveItem(store, kind, item);
+      if (!saved.ok) return showError(event.currentTarget, `${saved.error}.`);
       state.editing[kind] = null;
       state.focus = "#item-name";
-      commit(F.saveItem(store, kind, item), editing ? `Saved ${name}.` : `Added ${name}.`);
+      commit(saved.store, editing ? `Saved ${name}.` : `Added ${name}.`);
     },
   },
     h("label", null, "Name", h("input", { id: "item-name", name: "name", required: true, autocomplete: "off", value: editing?.name ?? "", placeholder: kind === "expenses" ? "Rent" : "Salary" })),
@@ -1164,8 +1170,14 @@ function viewItems(kind) {
       kind === "expenses"
         ? h("button", { type: "button", class: "link",
             title: item.active ? "Keep it in the list, but leave it out of every total and chart" : "Count it again",
-            onclick: () => commit(F.saveItem(store, kind, { ...item, active: !item.active }),
-              item.active ? `${item.name} is inactive: it no longer counts.` : `${item.name} is active again.`) },
+            onclick: () => {
+              const saved = F.saveItem(store, kind, { ...item, active: !item.active });
+              if (!saved.ok) {
+                state.notice = { kind: "error", text: `Not saved: ${saved.error}.` };
+                return render();
+              }
+              commit(saved.store, item.active ? `${item.name} is inactive: it no longer counts.` : `${item.name} is active again.`);
+            } },
           item.active ? "Deactivate" : "Activate")
         : null,
       h("button", { type: "button", class: "link danger", onclick: () => {

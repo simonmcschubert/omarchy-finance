@@ -176,7 +176,7 @@ test("inactive expenses count nowhere until they are active again", () => {
   assert.deepEqual(F.counted(s.income), []);
   assert.equal(F.parseStore(JSON.parse(JSON.stringify(s))).ok, true);
 
-  const again = F.saveItem(s, "expenses", { ...gym, active: true });
+  const again = F.saveItem(s, "expenses", { ...gym, active: true }).store;
   assert.equal(F.metrics(again).baseExpenses, 1050 * EUR);
   assert.equal(s.expenses[1].active, false, "the original is untouched");
 });
@@ -400,8 +400,8 @@ test("byCategory groups and sorts by monthly total", () => {
 
 test("parseStore accepts what the app writes and refuses unknown fields", () => {
   let s = F.emptyStore();
-  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, from: null, until: null, active: true, essential: true });
-  s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1, from: null, until: { at: "retirement" } });
+  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, from: null, until: null, active: true, essential: true }).store;
+  s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1, from: null, until: { at: "retirement" } }).store;
   s = F.saveAccount(s, null, "Broker").store;
   s = F.saveMonth(s, "2026-10", [{ account: s.accounts[0].id, value: 5, payIn: -2 }]);
   const roundTrip = JSON.parse(JSON.stringify(s));
@@ -865,6 +865,28 @@ test("one-offs count as paid in, but not for the average pay-in", () => {
   assert.equal(m.payIn.amount, 1000 / 3);
 });
 
+test("expenses and income: saved and checked", () => {
+  const s = F.emptyStore();
+  const rent = { id: "e", name: "Rent", category: "Housing", amount: 1000 * EUR, everyMonths: 1, from: null, until: null, active: true, essential: true };
+  const saved = F.saveItem(s, "expenses", rent);
+  assert.equal(saved.ok, true);
+  assert.deepEqual(saved.store.expenses, [rent]);
+  assert.equal(F.parseStore(JSON.parse(JSON.stringify(saved.store))).ok, true);
+  assert.deepEqual(s.expenses, [], "the original is untouched");
+  const pension = { id: "i", name: "State pension", category: "", amount: 0, everyMonths: 1, from: { age: 67 }, until: null };
+  assert.deepEqual(F.saveItem(s, "income", pension), { ok: false, error: "Amount must be more than 0" });
+  assert.deepEqual(F.saveItem(s, "income", { ...pension, amount: 1e13 }), { ok: false, error: "Amount is too large" });
+  assert.equal(F.saveItem(s, "income", { ...pension, amount: 1e13 - 1 }).ok, true);
+  assert.deepEqual(F.saveItem(s, "expenses", { ...rent, everyMonths: 0 }), { ok: false, error: "Paid every must be whole months from 1 to 120" });
+  assert.equal(F.saveItem(s, "expenses", { ...rent, everyMonths: 121 }).ok, false);
+  assert.equal(F.saveItem(s, "expenses", { ...rent, everyMonths: 1.5 }).ok, false);
+  assert.deepEqual(F.saveItem(s, "expenses", { ...rent, name: "" }), { ok: false, error: "Enter a name" });
+  assert.deepEqual(F.saveItem(s, "expenses", { ...rent, category: "Gone" }), { ok: false, error: 'Category "Gone" no longer exists' });
+  assert.deepEqual(F.saveItem(s, "expenses", { ...rent, from: { age: 200 } }), { ok: false, error: "Choose when it starts" });
+  assert.deepEqual(F.saveItem(s, "expenses", { ...rent, from: { at: "retirement" }, until: { at: "retirement" } }),
+    { ok: false, error: "It cannot start and end at retirement" });
+});
+
 test("planned one-offs: saved, checked, and in the month they come", () => {
   let s = F.emptyStore();
   const added = F.saveEvent(s, { id: null, name: " House deposit ", month: "2028-04", amount: -6000000 });
@@ -1001,7 +1023,7 @@ test("emergency fund: the cash accounts in months of expenses, and what is missi
   assert.equal(F.emergencyFund(5000, 0, 6).months, null);
 
   let s = F.emptyStore();
-  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "", amount: 2000 * EUR, everyMonths: 1, from: null, until: null, active: true, essential: false });
+  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "", amount: 2000 * EUR, everyMonths: 1, from: null, until: null, active: true, essential: false }).store;
   s = F.saveAccount(s, null, "Broker", "invested").store;
   assert.equal(F.metrics(s).emergency, null, "no cash account");
   s = F.saveAccount(s, null, "Tagesgeld", "cash").store;
@@ -1264,8 +1286,8 @@ test("a new store starts with a few categories", () => {
 
 test("categories: add, rename with their items, delete", () => {
   let s = { ...F.emptyStore(), categories: { expenses: ["Housing"], income: ["Work"] } };
-  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, from: null, until: null, active: true, essential: true });
-  s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1, from: null, until: { at: "retirement" } });
+  s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, from: null, until: null, active: true, essential: true }).store;
+  s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1, from: null, until: { at: "retirement" } }).store;
 
   const added = F.saveCategory(s, "expenses", null, "  Car ");
   assert.equal(added.ok, true);
