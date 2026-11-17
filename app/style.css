@@ -1453,8 +1453,9 @@ table.entry th {
   align-items: end;
 }
 
-/* Amounts hidden: what is typed into amount fields shows as dots too;
-   percentages and other numbers stay. */
-body.hide-amounts input.amount {
+/* Amounts hidden: what is typed into amount fields and the CSV box shows
+   as dots too; percentages and other numbers stay. */
+body.hide-amounts input.amount,
+body.hide-amounts textarea.amount {
   -webkit-text-security: disc;
 }

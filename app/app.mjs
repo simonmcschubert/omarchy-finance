@@ -1889,7 +1889,7 @@ function categoryList(store, kind) {
 
 function importCard(store) {
   const plan = state.importPlan;
-  const textarea = h("textarea", { id: "import-text", rows: 8, spellcheck: "false", "aria-label": "CSV text",
+  const textarea = h("textarea", { id: "import-text", class: "amount", rows: 8, spellcheck: "false", "aria-label": "CSV text",
     placeholder: "date;account;value;pay_in\n31.01.2025;Trade Republic;12.345,67;500\n31.01.2025;ING;8.000;0",
     oninput: (event) => {
       // The checked rows no longer match the text: take back the Import button.
