@@ -179,7 +179,8 @@ top bar, and when its server restarts, after an update for example. While it
 is locked, the page forgets the data, and the server gives it to no one: not
 to the page, and not to other programs on the computer.
 
-The lock is on once `setup` has installed its polkit action. The fingerprint
+The lock is on once `setup` has installed its polkit action. Until then, its
+box in Settings › General › Lock is greyed out and names the command. The fingerprint
 needs Omarchy's fingerprint setup (Omarchy menu › Setup › Security ›
 Fingerprint); without it, the dialog asks for the password. Settings ›
 General › Lock turns the lock off, after the same dialog, and on again. If the dialog never

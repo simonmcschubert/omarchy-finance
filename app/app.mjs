@@ -310,6 +310,7 @@ const state = {
   revision: null,
   file: "",
   backups: "", // the directory with the daily copies of the file
+  setup: "", // the setup script, which installs what the lock needs
   blocked: null, // why nothing can be saved, e.g. an unreadable data file
   notice: null, // { kind: "error" | "info", text, retry }; retry: goes once the server answers
   view: "dashboard",
@@ -359,6 +360,7 @@ function adopt(json) {
   state.revision = json.revision;
   if (json.file) state.file = json.file;
   if (json.backups) state.backups = json.backups;
+  if (json.setup) state.setup = json.setup;
   if (json.error) {
     state.blocked = `${json.error}. Nothing is saved until the file at ${state.file} is fixed or moved away.`;
     state.store = null;
@@ -592,16 +594,16 @@ async function setLock(on) {
 }
 
 // Picks up a lock from the idle time or sleep, an unlock in another window,
-// and the lock turned on or off elsewhere.
+// the lock turned on or off elsewhere, and setup installing it.
 async function checkLock() {
   if (state.lock.asking) return;
   const { ok, json } = await lockCall();
   if (!ok || state.lock.asking) return;
-  const was = state.lock.enabled;
+  const was = { ...state.lock };
   adoptLock(json);
   if (json.locked && !state.lock.locked) showLocked();
   else if (!json.locked && state.lock.locked) reopen();
-  else if (state.lock.enabled !== was) {
+  else if (state.lock.enabled !== was.enabled || state.lock.available !== was.available) {
     renderLockButton();
     renderLockChoice();
   }
@@ -1962,11 +1964,13 @@ function renderLockChoice() {
   // While the server is asked, it shows what was clicked.
   lockChoice.box.checked = asking === "on" ? true : asking === "off" ? false : enabled;
   lockChoice.box.disabled = !available || Boolean(asking);
-  lockChoice.note.className = error ? "lock-error" : "muted";
-  lockChoice.note.textContent = error ? sentence(error)
-    : !available ? "Run setup again to install the unlock prompt."
-    : asking === "off" ? "Confirm in the dialog."
-    : "";
+  // Without the polkit action the box can't change: the line says what
+  // installs it, as the next step rather than a remark.
+  lockChoice.note.className = error ? "lock-error" : available ? "muted" : "";
+  lockChoice.note.replaceChildren(...(error ? [sentence(error)]
+    : !available ? ["Not installed yet: run ", h("code", null, state.setup || "setup"), " once in a terminal. It asks for sudo."]
+    : asking === "off" ? ["Confirm in the dialog."]
+    : []));
 }
 
 // What seldom changes: how amounts are shown, and the year of birth and the
