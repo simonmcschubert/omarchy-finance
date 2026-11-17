@@ -4,7 +4,7 @@
 // portfolioSeries, `invested`), with the gap between them shaded green for a
 // gain and red for a loss. The FI number shows once the data reaches it.
 // Path to FI: the portfolio value, then the projection to the FI number
-// (finance.mjs fiProjection): a dashed line at the expected return, a band
+// (finance.mjs fiOutlook().path): a dashed line at the expected return, a band
 // from the low to the high return, both ending at the FI number, and a dot
 // where the line reaches it. The FI number is today's over the history, and
 // rises with inflation over the projection.
@@ -74,7 +74,7 @@ const areaPath = (upper, lower) => `${linePath(upper)} ${linePath([...lower].rev
 // - view: "history" | "path"
 // - series: portfolioSeries
 // - fiNumber: 0 for none
-// - projection: fiProjection, for the path view
+// - projection: fiOutlook().path, for the path view
 // - format(cents), formatSigned(cents), formatPercent(fraction),
 //   formatSignedPercent(fraction), formatRate(percent), formatAxis(cents),
 //   formatMonth(month, yearOnly), monthNumber(month)

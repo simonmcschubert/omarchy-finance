@@ -267,12 +267,15 @@ with your age then.
 | Coast FI | What the portfolio needs now to grow to the FI number by the retirement age without another pay-in, at the expected return and with the planned one-offs: as the Coast plan on the Forecast page counts it. Shown with a year of birth, until retirement |
 
 How much it has is the portfolio ÷ what it needs. When, for FI and Lean
-FI, is Time to FI: the months until the portfolio reaches the FI number of
-that month (for retiring then). From the latest month it grows by the
-expected return (compounded monthly) and gets the future pay-in (the
-average monthly pay-in of the last 12 months, or your own amount from
-Settings) each month, while the FI number rises by the inflation. Years from two
-years on; nothing beyond 100 years. For Coast FI, it is the first month
+FI, is Time to FI, counted as the Forecast page's Retire early counts it.
+From the latest month the portfolio grows by the expected return
+(compounded monthly) and gets the future pay-in each month (the average
+monthly pay-in of the last 12 months, 0 when that is a withdrawal, or your
+own amount from Settings), with the planned one-offs, while the FI number
+rises by the inflation. FI is the end of the first month in which the
+portfolio reaches the FI number of retiring the month after. It counts only
+before retirement ("Not before 67"); without a year of birth, up to 100
+years. Years from two years on. For Coast FI, it is the first month
 from which the portfolio, with the same pay-ins until then and none after,
 grows to the FI number by the retirement age: the month the Forecast page's
 Coast tile names, for the future pay-in and nothing after Coast FI.
@@ -289,8 +292,9 @@ The **Portfolio** chart has two views; the one picked last stays picked.
   goes on growing the way Time to FI counts, with planned one-offs, as a
   dashed line until it reaches the FI number, with a band from 2 points
   below to 2 points above the expected return (6 % to 10 % at 8 %), also up
-  to the FI number. From the latest month on, the FI number is that of
-  retiring in each month, risen by the inflation. The line under the chart
+  to the FI number, and never past retirement. From the latest month on, the
+  FI number is what FI needs at each month's end, that of retiring the month
+  after, risen by the inflation. The line under the chart
   says when each reaches the FI number; its ⓘ, what the FI number is by
   then.
   Its switch shows the projection in today's money instead, as on the
