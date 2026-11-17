@@ -96,9 +96,6 @@ const intervalLabel = (n) => INTERVALS.find(([v]) => v === n)?.[1] ?? `Every ${n
 // The month index of this month, for what counts now.
 const thisMonth = () => F.monthIndex(F.currentMonth());
 
-// Expenses or income that count this month.
-const countingNow = (kind) => F.countingIn(state.store[kind], thisMonth(), state.store.settings);
-
 // When an expense or income starts and ends, in words: "From age 67",
 // "Until retirement", "From Jan. 2027 until Dec. 2031". null when always.
 function windowText(item) {
@@ -601,7 +598,7 @@ function viewDashboard() {
   if (m.series.length > 0) parts.push(portfolioCard(m));
 
   const breakdown = (kind, total) => {
-    const groups = F.byCategory(countingNow(kind));
+    const groups = F.byCategory(m.budget[kind].now);
     if (groups.length === 0) return null;
     const max = groups[0].monthly;
     return card(`${KINDS[kind].title} by category`,
@@ -1054,34 +1051,30 @@ function viewItems(kind) {
   const items = store[kind];
   const { birthYear } = store.settings;
   const retirement = F.retirementIndex(store.settings);
-  const now = thisMonth();
-  // Active items that count this month; the others start later or have
-  // ended.
-  const active = F.countingIn(items, now, store.settings);
-  const later = F.counted(items).filter((item) => !active.includes(item) && F.itemWindow(item, birthYear, retirement).from > now);
-  const ended = F.counted(items).filter((item) => !active.includes(item) && !later.includes(item));
-  const inactive = items.filter((item) => item.active === false);
-  const essential = active.filter((item) => item.essential);
+  // This month's: what counts, what starts later or has ended, and the
+  // inactive expenses.
+  const b = F.budget(store, thisMonth());
+  const { now: active, later, ended, inactive } = b[kind];
   const editing = items.find((item) => item.id === state.editing[kind]) ?? null;
-  const monthly = (list) => list.reduce((t, item) => t + F.monthlyAmount(item), 0);
-  const monthlyTotal = monthly(active);
 
   let summary;
   if (kind === "expenses") {
-    const buffer = (monthlyTotal * store.settings.bufferPercent) / 100;
+    const { monthly, buffer, total, essential } = b.expenses;
+    const off = inactive.reduce((t, item) => t + F.monthlyAmount(item), 0);
     summary = h("dl", { class: "summary" },
-      h("div", null, h("dt", null, "Regular expenses"), h("dd", { class: "num" }, `${money(monthlyTotal)} / month`)),
+      h("div", null, h("dt", null, "Regular expenses"), h("dd", { class: "num" }, `${money(monthly)} / month`)),
       h("div", null, h("dt", null, `Buffer, ${percentUnit.format(store.settings.bufferPercent)}`), h("dd", { class: "num" }, `${money(buffer)} / month`)),
-      h("div", null, h("dt", null, "Total"), h("dd", { class: "num strong" }, `${money(monthlyTotal + buffer)} / month · ${money((monthlyTotal + buffer) * 12)} / year`)),
-      essential.length
-        ? h("div", null, h("dt", null, "Essential, for Lean FI"), h("dd", { class: "num" }, `${money(monthly(essential))} / month · ${money(monthly(essential) * (1 + store.settings.bufferPercent / 100))} with buffer`))
+      h("div", null, h("dt", null, "Total"), h("dd", { class: "num strong" }, `${money(total)} / month · ${money(total * 12)} / year`)),
+      active.some((item) => item.essential)
+        ? h("div", null, h("dt", null, "Essential, for Lean FI"), h("dd", { class: "num" }, `${money(essential.monthly)} / month · ${money(essential.total)} with buffer`))
         : null,
       inactive.length
-        ? h("div", null, h("dt", null, "Inactive, not counted"), h("dd", { class: "num muted" }, `${money(monthly(inactive))} / month`))
+        ? h("div", null, h("dt", null, "Inactive, not counted"), h("dd", { class: "num muted" }, `${money(off)} / month`))
         : null);
   } else {
+    const { monthly } = b.income;
     summary = h("dl", { class: "summary" },
-      h("div", null, h("dt", null, "Net income"), h("dd", { class: "num strong" }, `${money(monthlyTotal)} / month · ${money(monthlyTotal * 12)} / year`)));
+      h("div", null, h("dt", null, "Net income"), h("dd", { class: "num strong" }, `${money(monthly)} / month · ${money(monthly * 12)} / year`)));
   }
 
   const categories = store.categories[kind];
@@ -1435,8 +1428,8 @@ function viewForecast() {
   // What the portfolio pays when retirement starts, in today's money and
   // with inflation by then.
   const retirementIndex = retirementYear * 12;
-  const paysThen = F.needIn(store, retirementIndex, retirementIndex);
-  const paysNow = F.needIn(store, thisMonth(), Math.min(retirementIndex, thisMonth()));
+  const paysThen = F.budget(store, retirementIndex, retirementIndex).need;
+  const paysNow = F.budget(store, thisMonth(), Math.min(retirementIndex, thisMonth())).need;
   const then = (amount) => money(F.inflated(amount, params.inflation, retirementIndex - 1 - F.monthIndex(params.start)));
   const read = (event) => {
     event.preventDefault();
@@ -1599,7 +1592,7 @@ function forecastResults() {
   let tiles;
   if (retired) {
     tiles = [planTile("keep", "Living off the portfolio", money(params.value),
-      `now, taking out ${money(F.needIn(store, F.monthIndex(params.start) + 1, F.retirementIndex(store.settings)))} a month, rising by ${percentUnit.format(inflation)} a year.`)];
+      `now, taking out ${money(F.budget(store, F.monthIndex(params.start) + 1).need)} a month, rising by ${percentUnit.format(inflation)} a year.`)];
   } else {
     const { coastMonth } = result.plans.coast;
     const { fiMonth } = result.plans.fi;

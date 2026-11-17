@@ -532,7 +532,10 @@ export function parseDate(text) {
   return `${ym}-${String(d).padStart(2, "0")}`;
 }
 
-// ---------------------------------------------------------------- metrics
+// ---------------------------------------------------------------- budget
+// What counts in a month: the one rule for which expenses and income count
+// when, and for the buffer. Pages read budget(); the projections loop over
+// needIn, its fast form.
 
 export function monthlyAmount(item) {
   return item.amount / item.everyMonths;
@@ -565,31 +568,65 @@ export function itemWindow(item, birthYear, retirement) {
   };
 }
 
-// Whether an expense or income counts in the month of `index` when
-// retirement starts in the month of `retirement`. Inactive expenses never
-// count.
-export function countsIn(item, index, birthYear, retirement) {
-  if (item.active === false) return false;
+// Where an expense or income stands in the month of `index` when retirement
+// starts in the month of `retirement`: "now" (it counts), "later" (it
+// starts after), "ended", or "inactive" (an expense switched off, which
+// counts nowhere).
+function statusIn(item, index, birthYear, retirement) {
+  if (item.active === false) return "inactive";
   const { from, until } = itemWindow(item, birthYear, retirement);
-  return from <= index && index < until;
+  if (from <= index && index < until) return "now";
+  return from > index ? "later" : "ended";
 }
 
-// The items that count in the month of `index`, with retirement when the
-// settings say.
-export function countingIn(items, index, settings) {
-  return items.filter((item) => countsIn(item, index, settings.birthYear, retirementIndex(settings)));
+const countsIn = (item, index, birthYear, retirement) => statusIn(item, index, birthYear, retirement) === "now";
+
+// The buffer on `amount` of expenses.
+const bufferOn = (amount, settings) => (amount * settings.bufferPercent) / 100;
+
+// The budget of the month of `index` when retirement starts in the month of
+// `retirement` (by default when the settings say). Amounts are a month, in
+// today's money, and may carry fractions of a cent.
+// Returns {
+//   expenses: { now, later, ended, inactive: the expenses by where they
+//     stand (statusIn), in the store's order; monthly: those that count,
+//     without the buffer; buffer; total: with it; essential: { monthly,
+//     total } for the essential ones },
+//   income: { now, later, ended, inactive (always empty), monthly },
+//   need: what the portfolio pays when retired then: the total less the
+//     income, never below 0,
+//   essentialNeed: the same for the essential expenses only (Lean FI),
+// }
+export function budget(store, index, retirement = retirementIndex(store.settings)) {
+  const { settings } = store;
+  const sorted = (items) => {
+    const lists = { now: [], later: [], ended: [], inactive: [] };
+    for (const item of items) lists[statusIn(item, index, settings.birthYear, retirement)].push(item);
+    return lists;
+  };
+  const expenses = sorted(store.expenses);
+  const income = sorted(store.income);
+  const monthly = sum(expenses.now.map(monthlyAmount));
+  const essential = sum(expenses.now.filter((item) => item.essential).map(monthlyAmount));
+  const total = monthly + bufferOn(monthly, settings);
+  const essentialTotal = essential + bufferOn(essential, settings);
+  const incomeMonthly = sum(income.now.map(monthlyAmount));
+  return {
+    expenses: { ...expenses, monthly, buffer: bufferOn(monthly, settings), total, essential: { monthly: essential, total: essentialTotal } },
+    income: { ...income, monthly: incomeMonthly },
+    need: Math.max(0, total - incomeMonthly),
+    essentialNeed: Math.max(0, essentialTotal - incomeMonthly),
+  };
 }
 
-// What the portfolio has to pay in the month of `index` when retirement
-// starts in the month of `retirement`, in today's money: the expenses that
-// count then, with the buffer, less the income that counts then; never
-// below 0. essential: the essential expenses only, for Lean FI.
+// budget(store, index, retirement).need, or .essentialNeed with essential,
+// without the lists: the projections ask for it month after month.
 export function needIn(store, index, retirement, { essential = false } = {}) {
-  const { birthYear, bufferPercent } = store.settings;
+  const { birthYear } = store.settings;
   const counts = (item) => countsIn(item, index, birthYear, retirement);
   const expenses = sum(store.expenses.filter((item) => counts(item) && (!essential || item.essential)).map(monthlyAmount));
   const income = sum(store.income.filter(counts).map(monthlyAmount));
-  return Math.max(0, expenses + (expenses * bufferPercent) / 100 - income);
+  return Math.max(0, expenses + bufferOn(expenses, store.settings) - income);
 }
 
 // The items that count. An inactive expense stays in the list but counts
@@ -602,6 +639,8 @@ export function counted(items) {
 function sum(values) {
   return values.reduce((total, v) => total + v, 0);
 }
+
+// ---------------------------------------------------------------- metrics
 
 // One entry per month from the first to the last recorded month, gaps
 // included. An account without a value in a month keeps its last value.
@@ -1039,12 +1078,13 @@ export const GERMANY_2026 = Object.freeze({
 // the FI number is for retiring now: the expenses that would count then,
 // less the income that would.
 export function metrics(store, now = currentMonth()) {
-  const { withdrawalRate, bufferPercent, expectedReturn, inflation } = store.settings;
+  const { withdrawalRate, expectedReturn, inflation } = store.settings;
   const nowIndex = monthIndex(now);
-  const income = sum(countingIn(store.income, nowIndex, store.settings).map(monthlyAmount));
-  const baseExpenses = sum(countingIn(store.expenses, nowIndex, store.settings).map(monthlyAmount));
-  const buffer = (baseExpenses * bufferPercent) / 100;
-  const expenses = baseExpenses + buffer;
+  const working = budget(store, nowIndex);
+  // Retiring now: what counts then.
+  const retired = budget(store, nowIndex, nowIndex);
+  const income = working.income.monthly;
+  const expenses = working.expenses.total;
   const multiple = 100 / withdrawalRate;
   const series = portfolioSeries(store);
   const worth = netWorthSeries(store);
@@ -1062,26 +1102,27 @@ export function metrics(store, now = currentMonth()) {
   const essential = store.expenses.some((item) => item.active !== false && item.essential);
   let lean = null;
   if (essential) {
-    const leanExpenses = needIn(store, nowIndex, nowIndex, { essential: true });
     const leanNumber = fiNumberIn(store, nowIndex, { essential: true });
     const leanAhead = last && leanNumber > 0 ? projectToGoal(last.value, payIn.amount, expectedReturn, goal({ essential: true }), inflation, oneOffs) : null;
     lean = {
-      expenses: leanExpenses,
+      expenses: retired.essentialNeed,
       fiNumber: leanNumber,
       progress: last && leanNumber > 0 ? last.value / leanNumber : null,
       months: leanAhead ? leanAhead.length : null,
     };
   }
   return {
+    // What counts this month (budget).
+    budget: working,
     income,
-    baseExpenses,
-    buffer,
+    baseExpenses: working.expenses.monthly,
+    buffer: working.expenses.buffer,
     expenses,
     multiple,
     fiNumber,
     // What the portfolio pays a month when retiring now, with the buffer,
     // and how the FI number comes about (fiNumberParts).
-    retiredNeed: needIn(store, nowIndex, nowIndex),
+    retiredNeed: retired.need,
     fiParts: fiNumberParts(store, nowIndex),
     // The FI number of each month from the latest one on (n months later),
     // and the planned one-offs then, in today's money, for the Path to FI
