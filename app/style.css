@@ -92,6 +92,77 @@ code {
   white-space: nowrap;
 }
 
+/* ---- explanations: an ⓘ button, and its popover next to it */
+
+.info-button {
+  display: inline-grid;
+  place-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0;
+  border: 1px solid var(--fg-muted);
+  border-radius: 50%;
+  background: none;
+  color: var(--fg-muted);
+  font: 600 11px/1 var(--font);
+  vertical-align: 1px;
+}
+
+.info-button:hover,
+.info:has(:popover-open) .info-button {
+  border-color: var(--fg-strong);
+  color: var(--fg-strong);
+}
+
+.info-pop {
+  inset: auto;
+  margin: 6px 0;
+  position-area: bottom span-right;
+  position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+  width: max-content;
+  max-width: min(380px, calc(100vw - 32px));
+  max-height: min(420px, calc(100vh - 32px));
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
+  color: var(--fg);
+  font: 13px/1.5 var(--font);
+  text-align: left;
+  white-space: normal;
+}
+
+.info-pop p,
+.info-pop ul {
+  margin: 0;
+}
+
+.info-pop > :not(:first-child) {
+  margin-top: 6px;
+}
+
+.info-pop ul {
+  padding-left: 18px;
+}
+
+.info-pop li + li {
+  margin-top: 4px;
+}
+
+/* A field's label and its ⓘ, which follows the label's last word when the
+   label wraps. */
+.field-label label {
+  display: inline;
+}
+
+/* A link next to a field's label, to where its choices are set. */
+.label-link {
+  margin-left: 8px;
+  font-size: 12px;
+}
+
 /* ---- layout */
 
 .top {
@@ -848,7 +919,8 @@ label {
   align-items: end;
 }
 
-.item-form label {
+.item-form label,
+.item-form .field {
   min-width: 0;
 }
 
@@ -876,9 +948,18 @@ label {
   flex: none;
 }
 
-.item-form .check {
+.item-form .check-row {
   grid-row: 3;
   grid-column: 1 / -1;
+}
+
+/* A checkbox with its ⓘ after it. */
+.check-row {
+  display: flex;
+  align-items: center;
+}
+
+.check-row .check {
   flex-direction: row;
   align-items: center;
   gap: 8px;
@@ -968,7 +1049,8 @@ form.inline input {
 
 .settings-form {
   display: grid;
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
   max-width: 560px;
 }
 
@@ -1248,6 +1330,23 @@ table.entry th {
   color: var(--fg-strong);
 }
 
+/* The data file and its daily copies, in Settings. */
+.paths {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.paths dt {
+  color: var(--fg-muted);
+}
+
+.paths dd {
+  margin: 0;
+  min-width: 0;
+}
+
 /* ---- notices */
 
 .notice {
@@ -1280,7 +1379,7 @@ table.entry th {
 
   .item-form .bound.from,
   .item-form .bound.until,
-  .item-form .check {
+  .item-form .check-row {
     grid-row: auto;
     grid-column: 1 / -1;
   }

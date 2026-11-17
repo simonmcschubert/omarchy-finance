@@ -116,9 +116,10 @@ The data file stays.
     they are: when they rise, so does their 12-month average. Data files
     from before this setting get 3 % inflation and 3 points more expected
     return, so 5 % after inflation becomes 8 % before it.
-  - Year of birth and retirement age (default 67), for the forecast. The
-    forecast needs the year of birth; it is empty until entered. Ages and
-    retirement start in January of their year.
+  - Year of birth and the official retirement age (default 67: when the
+    state pension starts without deductions, not when you plan to stop
+    working), for the forecast. The forecast needs the year of birth; it is
+    empty until entered. Ages and retirement start in January of their year.
   - Emergency fund (default 6): how many months of expenses to keep in
     cash accounts; 0 sets no target.
   - Categories, one list for expenses and one for income. A new data file
@@ -131,6 +132,12 @@ The data file stays.
   - Import past months from CSV, and export all monthly values as CSV.
   - Where the data file and its daily backups are, and which updates to
     offer.
+
+The pages keep their text short. An ⓘ next to a number, a column or a field
+explains it: what it means, how it is worked out, and what is assumed. Click
+it, or press Enter on it, to open it; Esc or a click elsewhere closes it.
+
+![The ⓘ next to FI, open: the FI number and how it is worked out](docs/info.png)
 
 `Ctrl+1` to `Ctrl+6` open Dashboard, Expenses, Income, Portfolio, Forecast and
 Settings. `Ctrl+Shift+H`, or the eye at the right end of the top bar, hides
@@ -277,7 +284,8 @@ The **Portfolio** chart has two views; the one picked last stays picked.
   below to 2 points above the expected return (6 % to 10 % at 8 %), also up
   to the FI number. From the latest month on, the FI number is that of
   retiring in each month, risen by the inflation. The line under the chart
-  says when each reaches the FI number, and what the FI number is by then.
+  says when each reaches the FI number; its ⓘ, what the FI number is by
+  then.
   Its switch shows the projection in today's money instead, as on the
   Forecast page.
 
