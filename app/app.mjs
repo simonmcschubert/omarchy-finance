@@ -74,6 +74,8 @@ function duration(months) {
 
 // The months the average pay-in is of, in words.
 const payInMonths = (months) => (months === 12 ? "the last 12 months" : months === 1 ? "1 month" : `${months} months`);
+// Where the future pay-in (metrics' payIn) comes from, in words.
+const payInSource = (payIn) => (payIn.months === null ? "your own pay-in from Settings" : `the average pay-in of ${payInMonths(payIn.months)}`);
 
 function monthLabel(month, yearOnly = false) {
   const date = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1);
@@ -287,9 +289,9 @@ const state = {
   chartView: savedChartView(), // "history" | "path"
   money: savedMoney(), // "nominal" (the money of each year) | "today"
   hideAmounts: savedHidden(), // amounts as dots, for sharing the screen
-  // On the forecast page. contribution null: the average pay-in. growth:
-  // "low", "mid" or "high", the expected return and RETURN_SPREAD around it.
-  forecast: { contribution: null, coastContribution: 0, growth: "mid" },
+  // On the forecast page. growth: "low", "mid" or "high", the expected
+  // return and RETURN_SPREAD around it.
+  forecast: { coastContribution: 0, growth: "mid" },
   focus: null, // selector to focus after the next render
 };
 
@@ -566,9 +568,9 @@ function viewDashboard() {
         ? `incl. ${percentUnit.format(bufferPercent)} buffer (${money(m.buffer)})`
         : h("a", { href: "#expenses" }, store.expenses.length ? "All expenses are inactive" : "Add expenses")),
     tile(["Investment rate", m.investmentRate === null ? null
-      : info("the investment rate", `The share of your net income you invest: the average pay-in of ${payInMonths(m.payIn.months)}, ${money(m.payIn.average)} a month, of ${money(m.income)}. One-offs do not count.`)],
+      : info("the investment rate", `The share of your net income you invest: ${payInSource(m.payIn)}, ${money(m.payIn.amount)} a month, of ${money(m.income)}. One-offs do not count.`)],
       m.investmentRate === null ? "–" : percent.format(m.investmentRate),
-      m.payIn === null ? h("a", { href: "#portfolio" }, "Add pay-ins") : `${money(m.payIn.average)} a month paid in`),
+      m.payIn === null ? h("a", { href: "#portfolio" }, "Add pay-ins") : `${money(m.payIn.amount)} a month ${m.payIn.months === null ? "planned" : "paid in"}`),
     tile("Portfolio", m.portfolio === null ? "–" : money(m.portfolio),
       m.series.length >= 2
         ? `${signedMoney(m.portfolio - m.series.at(-2).value)} in ${monthLabel(m.latestMonth)} (${money(m.series.at(-1).payIn)} paid in${m.series.at(-1).oneOff ? `, ${signedMoney(m.series.at(-1).oneOff)} one-off` : ""})`
@@ -626,7 +628,7 @@ function milestonesCard(m) {
   const expenses = F.counted(store.expenses);
   const known = m.portfolio !== null;
   const head = h("div", { class: "card-head" }, h("h2", null, "Milestones"),
-    expenses.length && known ? h("span", { class: "muted" }, `at ${percentUnit.format(expectedReturn)} return and ${money(m.payIn.average)} a month`) : null);
+    expenses.length && known ? h("span", { class: "muted" }, `at ${percentUnit.format(expectedReturn)} return and ${money(m.payIn.amount)} a month`) : null);
   if (expenses.length === 0) {
     return h("section", { class: "card milestones" }, head,
       h("p", { class: "muted" }, h("a", { href: "#expenses" }, store.expenses.length ? "All expenses are inactive" : "Add expenses"), ", for the FI number."));
@@ -695,7 +697,7 @@ function incomeCard(m) {
   const months = m.payIn?.months;
   const parts = [
     ["expenses", "Expenses", `incl. ${percentUnit.format(bufferPercent)} buffer`, split.expenses],
-    ["invested", "Invested", m.payIn ? (months === 1 ? "last month's pay-in" : `${months}-month average`) : null, m.payIn ? split.invested : null],
+    ["invested", "Invested", m.payIn ? (months === null ? "planned" : months === 1 ? "last month's pay-in" : `${months}-month average`) : null, m.payIn ? split.invested : null],
     ["left", "Left over", null, split.over > 0 ? null : split.leftOver],
   ];
   const bar = h("div", { class: "split", "aria-hidden": "true" });
@@ -773,7 +775,7 @@ function projection(m) {
 
 function projectionNominal(m) {
   const { expectedReturn, inflation } = state.store.settings;
-  return F.fiProjection({ month: m.latestMonth, start: m.portfolio, payIn: m.payIn.average, goal: chartGoal(m) > 0 ? m.goal : 0, rate: expectedReturn, inflation, oneOffs: m.oneOffs });
+  return F.fiProjection({ month: m.latestMonth, start: m.portfolio, payIn: m.payIn.amount, goal: chartGoal(m) > 0 ? m.goal : 0, rate: expectedReturn, inflation, oneOffs: m.oneOffs });
 }
 
 function portfolioCard(m) {
@@ -819,7 +821,7 @@ function pathSummary(m, p) {
   const limit = `within ${F.MAX_PROJECTION_MONTHS / 12} years`;
   const settings = ["The expected return and inflation are set in ", h("a", { href: "#settings" }, "Settings"), "."];
   if (p.points.length === 0) return { note: "The portfolio has reached the FI number.", about: [settings] };
-  const about = [`At ${rate("mid")} growth a year and ${money(m.payIn.average)} paid in a month.`];
+  const about = [`At ${rate("mid")} growth a year and ${money(m.payIn.amount)} paid in a month: ${payInSource(m.payIn)}.`];
   let note;
   if (p.reach.mid) {
     const months = F.monthIndex(p.reach.mid) - F.monthIndex(m.latestMonth);
@@ -1273,7 +1275,7 @@ function viewPortfolio() {
                 "Cash, property, pension assets and debts take a value only: pay-ins are for the portfolio.")),
             h("th", null, "Paid in this month",
               info("paid in", "Your regular pay-ins, such as a savings plan; negative for a withdrawal.",
-                "Their average of the last 12 months is what the milestones and the forecast go on with.")),
+                ["Their average of the last 12 months is what the milestones and the forecast go on with, unless you set your own future pay-in in ", h("a", { href: "#settings" }, "Settings"), "."])),
             h("th", null, "One-off this month",
               info("one-offs", "A lump sum in or out, such as an inheritance or a house deposit. It counts as paid in, but not for the average pay-in.",
                 ["Plan future ones on the ", h("a", { href: "#forecast" }, "Forecast"), " page."])))),
@@ -1386,20 +1388,14 @@ function returnsCard(store) {
 // The plans' names, on the chart and on their tiles.
 const PLAN_LABELS = { keep: "Keep investing", coast: "Coast", fi: "Retire early" };
 
-// What the forecast starts from, and what is paid in.
+// What the forecast starts from, and what is paid in: the future pay-in,
+// as the dashboard's milestones use it, in whole cents and never a
+// withdrawal (forecastParams).
 function forecastBase(store) {
   const m = F.metrics(store);
-  // The average pay-in, as the dashboard's time to FI uses it, in whole
-  // cents and never a withdrawal.
-  const average = F.forecastPayIn(m);
   return {
     m,
-    average,
-    params: {
-      ...F.forecastParams(store, m),
-      contribution: state.forecast.contribution ?? average,
-      coastContribution: state.forecast.coastContribution,
-    },
+    params: { ...F.forecastParams(store, m), coastContribution: state.forecast.coastContribution },
   };
 }
 
@@ -1419,7 +1415,7 @@ function viewForecast() {
       h("ul", null, missing)));
   }
 
-  const { m, average, params } = forecastBase(store);
+  const { params } = forecastBase(store);
   const rates = F.growthRates(store.settings.expectedReturn);
   const inflation = percentUnit.format(params.inflation);
   const retirementYear = birthYear + retirementAge;
@@ -1432,9 +1428,8 @@ function viewForecast() {
   const then = (amount) => money(F.inflated(amount, params.inflation, retirementIndex - 1 - F.monthIndex(params.start)));
   const read = (event) => {
     event.preventDefault();
-    readForecastForm(event.currentTarget, average);
+    readForecastForm(event.currentTarget);
   };
-  const months = payInMonths(m.payIn?.months);
 
   // The growth buttons stay when the results redraw, and change in place: a
   // click on one that starts while a field's change redraws the results
@@ -1462,11 +1457,6 @@ function viewForecast() {
         ? h("div", { class: "forecast-controls" }, growthField)
         : h("form", { class: "forecast-controls", onsubmit: read, onchange: read },
             h("div", { class: "forecast-form" },
-              field("Invested per month",
-                h("input", { id: "forecast-contribution", name: "contribution", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.contribution) }),
-                !m.payIn ? "There are no pay-ins yet to start from."
-                  : m.payIn.average < 0 ? `Your average of ${months} is a withdrawal of ${money(-m.payIn.average)} a month, so this starts at 0.`
-                  : `Starts as your average pay-in of ${months}, ${money(average)}.`),
               field("After Coast FI, per month",
                 h("input", { id: "forecast-coast", name: "coastContribution", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(params.coastContribution) }),
                 "What the Coast plan still invests once Coast FI is reached: 0 stops investing."),
@@ -1522,21 +1512,29 @@ function eventsCard(start) {
     form);
 }
 
-function readForecastForm(form, average) {
+function readForecastForm(form) {
   const data = new FormData(form);
-  const contribution = F.parseMoney(data.get("contribution"));
   const coast = F.parseMoney(data.get("coastContribution"));
   let error = null;
-  if (!contribution.ok) error = `Invested per month: ${contribution.error}.`;
-  else if (contribution.cents < 0) error = "Invested per month: must not be negative.";
-  else if (!coast.ok) error = `After Coast FI: ${coast.error}.`;
+  if (!coast.ok) error = `After Coast FI: ${coast.error}.`;
   else if (coast.cents < 0) error = "After Coast FI: must not be negative.";
   if (error) return showError(form, error);
   if (form.nextElementSibling?.classList.contains("form-error")) form.nextElementSibling.remove();
-  // The average stays the average when new months come in.
-  state.forecast.contribution = contribution.cents === average ? null : contribution.cents;
   state.forecast.coastContribution = coast.cents;
   updateForecast();
+}
+
+// What every plan invests a month until it changes course, and where that
+// comes from, for the forecast's ⓘ.
+function investedNote(m, contribution) {
+  const settings = h("a", { href: "#settings" }, "Settings");
+  const invests = `Every plan invests ${money(contribution)} a month until it changes course: `;
+  if (m.payIn === null) return [invests, "there are no pay-ins yet. You can set your own future pay-in in ", settings, "."];
+  if (m.payIn.months === null) return [invests, "your own future pay-in from ", settings, "."];
+  const average = m.payIn.amount < 0
+    ? `your average of ${payInMonths(m.payIn.months)} is a withdrawal of ${money(-m.payIn.amount)} a month, which counts as 0`
+    : `the average pay-in of ${payInMonths(m.payIn.months)}`;
+  return [invests, `${average}. You can set your own future pay-in in `, settings, "."];
 }
 
 // Redraws the results only, so the form keeps what is typed and its focus.
@@ -1561,7 +1559,7 @@ function updateForecast() {
 function forecastResults() {
   const store = state.store;
   const { birthYear, retirementAge, expectedReturn, inflation, withdrawalRate } = store.settings;
-  const { params } = forecastBase(store);
+  const { m, params } = forecastBase(store);
   const rates = F.growthRates(expectedReturn);
   const growth = state.forecast.growth;
   const nominal = F.forecast({ ...params, growth: rates[growth] });
@@ -1624,6 +1622,7 @@ function forecastResults() {
       h("li", null, store.records.length
         ? `It starts from the portfolio in ${monthLabel(params.start)}, ${money(params.value)}.`
         : "It starts from 0, as there are no broker values yet."),
+      retired ? null : h("li", null, investedNote(m, params.contribution)),
       h("li", null, "Expenses and income with a start or an end count only in their months; for Retire early, retirement starts the month after FI. ",
         "Income that goes on after retirement, such as a pension, lowers what the portfolio pays: the FI number is what it pays for good once nothing changes any more, ",
         `× ${plain.format(100 / withdrawalRate)}, plus what it pays on top until then, such as bridging the years until the pension.`),
@@ -1706,6 +1705,7 @@ function viewSettings() {
 function settingsForm(store) {
   const { withdrawalRate, bufferPercent, currency: code, numberFormat, expectedReturn, inflation, birthYear, retirementAge, emergencyMonths } = store.settings;
   const codes = Intl.supportedValuesOf("currency");
+  const payIn = futurePayInField(store);
   if (!codes.includes(code)) codes.push(code);
   return h("form", { class: "settings-form", onsubmit: (event) => {
     event.preventDefault();
@@ -1718,6 +1718,7 @@ function settingsForm(store) {
     const prices = F.parsePercent(data.get("inflation"));
     const emergencyText = String(data.get("emergencyMonths")).trim();
     const emergency = Number(emergencyText);
+    const ownPayIn = data.get("futurePayIn") === "own" ? F.parseMoney(data.get("futurePayIn-amount")) : null;
     const birthText = String(data.get("birthYear")).trim();
     const ageText = String(data.get("retirementAge")).trim();
     const born = birthText === "" ? null : Number(birthText);
@@ -1732,6 +1733,8 @@ function settingsForm(store) {
     else if (!buffer.ok || !(buffer.value >= 0 && buffer.value <= 100)) error = "Buffer: enter a percentage from 0 to 100.";
     else if (!growth.ok || !(growth.value >= 0 && growth.value <= 100)) error = "Expected return: enter a percentage from 0 to 100.";
     else if (!prices.ok || !(prices.value >= 0 && prices.value <= 100)) error = "Inflation: enter a percentage from 0 to 100.";
+    else if (ownPayIn && !ownPayIn.ok) error = `Future pay-in: ${ownPayIn.error}.`;
+    else if (ownPayIn && ownPayIn.cents < 0) error = "Future pay-in: enter an amount of 0 or more.";
     else if (born !== null && !(/^[0-9]{4}$/.test(birthText) && born >= firstYear && born <= thisYear)) error = `Year of birth: enter a year from ${firstYear} to ${thisYear}, or leave it empty.`;
     else if (!/^[0-9]+$/.test(ageText) || age < ages.min || age > ages.max) error = `Retirement age: enter whole years from ${ages.min} to ${ages.max}.`;
     else if (!/^[0-9]+$/.test(emergencyText) || emergency < F.EMERGENCY_MONTHS.min || emergency > F.EMERGENCY_MONTHS.max) error = `Emergency fund: enter whole months from ${F.EMERGENCY_MONTHS.min} to ${F.EMERGENCY_MONTHS.max}.`;
@@ -1746,6 +1749,7 @@ function settingsForm(store) {
       birthYear: born,
       retirementAge: age,
       emergencyMonths: emergency,
+      futurePayIn: ownPayIn ? ownPayIn.cents : null,
     }), "Settings saved.");
   } },
     field("Currency",
@@ -1764,7 +1768,8 @@ function settingsForm(store) {
       "World stocks have returned about 8 % a year over the long run, about 5 % after inflation, with many years far above or below that."),
     field("Inflation (%)", h("input", { name: "inflation", inputmode: "decimal", value: plain.format(inflation), required: true }),
       "How much prices rise a year. The milestones, the Path to FI chart and the forecast raise your expenses and the FI number by it.",
-      "What is paid in stays the same: when your pay-ins rise, so does their average."),
+      "What is paid in does not rise by it: see Future pay-in."),
+    payIn,
     field("Year of birth", h("input", { name: "birthYear", inputmode: "numeric", autocomplete: "off", value: birthYear === null ? "" : String(birthYear), placeholder: "1990" })),
     field("Official retirement age", h("input", { name: "retirementAge", inputmode: "numeric", autocomplete: "off", value: String(retirementAge), required: true }),
       "When the state pension starts without deductions: 67 in Germany for everyone born in 1964 or later. Not when you plan to stop working: the forecast works that out.",
@@ -1773,6 +1778,28 @@ function settingsForm(store) {
       "How many months of expenses you want to keep in cash accounts, apart from the portfolio: 3 to 6 are common. 0 sets no target.",
       "The dashboard says how far your cash goes, under Expenses covered."),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, "Save")));
+}
+
+// What is paid in a month from now on: the average pay-in of the last 12
+// months, or an amount of your own. The amount shows only for your own; it
+// is disabled otherwise, so a value left in it cannot stop the form. It
+// starts as the average, so switching keeps the projections where they are.
+function futurePayInField(store) {
+  const own = store.settings.futurePayIn;
+  const average = F.averagePayIn(F.portfolioSeries(store));
+  const amount = h("input", { name: "futurePayIn-amount", class: "amount", inputmode: "decimal", autocomplete: "off", "aria-label": "Own pay-in a month",
+    value: inputMoney(own ?? Math.max(0, Math.round(average?.average ?? 0))), hidden: own === null, disabled: own === null });
+  const select = h("select", { id: "future-payin", name: "futurePayIn", value: own === null ? "average" : "own", onchange: (event) => {
+    amount.hidden = amount.disabled = event.target.value !== "own";
+  } },
+    h("option", { value: "average" }, average ? `Average of ${payInMonths(average.months)}: ${money(average.average)}` : "Average of the last 12 months"),
+    h("option", { value: "own" }, "Own amount"));
+  return h("div", { class: "field" },
+    h("span", { class: "field-label" }, h("label", { for: select.id }, "Future pay-in a month"),
+      info("the future pay-in",
+        "What you pay in from now on, for the investment rate, the milestones, the Path to FI chart and the forecast.",
+        "The average follows your pay-ins under Portfolio. Set your own amount when you know it will change, such as after a raise or once you reach Coast FI. Either stays the same every month: inflation does not raise it.")),
+    h("div", { class: "bound-row" }, select, amount));
 }
 
 // A list of names, each with Rename and Delete, and a field to add one.
