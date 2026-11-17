@@ -487,6 +487,262 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(self.request("GET")[1]["channel"], "stable")
 
 
+class FakeUpdater:
+    def snapshot(self):
+        return {"status": "", "installed": "0.2.0"}
+
+    def check(self, asked=False):
+        return ""
+
+
+class LockTest(unittest.TestCase):
+    """The lock, with a stand-in for the system's dialog and clocks that
+    move only when the test says so."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.data_file = root / "state" / "finance.json"
+        self.policy = root / "unlock.policy"
+        self.policy.write_text("<policyconfig/>")
+        self.answers = []  # what the dialog answers, in turn
+        self.asked = 0
+        self.now = 1000.0
+        self.offset = 0.0  # how long the computer has slept
+        self.lock = server.Lock(self.data_file.parent / "lock.json", policy=self.policy, confirm=self.confirm,
+                                clock=lambda: self.now, slept=lambda: self.offset)  # fmt: skip
+        self.server = server.FinanceServer(0, self.data_file, root / "colors.toml", FakeUpdater(), self.lock)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.tmp.cleanup()
+
+    def confirm(self):
+        self.asked += 1
+        return self.answers.pop(0)
+
+    def request(self, method, path, body=None, session=None, headers=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        all_headers = {"Host": f"127.0.0.1:{self.port}", "Origin": f"http://127.0.0.1:{self.port}"}
+        if body is not None:
+            all_headers["Content-Type"] = "application/json"
+            body = json.dumps(body).encode()
+        if session:
+            all_headers["Cookie"] = f"{server.SESSION_COOKIE}={session}"
+        all_headers.update(headers or {})
+        conn.request(method, path, body=body, headers=all_headers)
+        response = conn.getresponse()
+        data = json.loads(response.read() or b"null")
+        conn.close()
+        return response, data
+
+    def unlock(self):
+        """A session, after the dialog said yes."""
+        self.answers.append((True, ""))
+        response, state = self.request("POST", "/api/lock", {"action": "unlock"})
+        self.assertEqual(response.status, 200, state)
+        self.assertFalse(state["locked"])
+        cookie = response.getheader("Set-Cookie")
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=Strict", cookie)
+        return cookie.split(";")[0].split("=", 1)[1]
+
+    def data_status(self, session=None):
+        return self.request("GET", "/api/data", session=session)[0].status
+
+    def test_without_the_prompt_installed_nothing_is_locked(self):
+        self.policy.unlink()
+        self.assertEqual(self.data_status(), 200)
+        response, state = self.request("GET", "/api/lock")
+        self.assertEqual(state, {"available": False, "enabled": False, "locked": False, "idleMinutes": 20})
+        response, _ = self.request("POST", "/api/lock", {"action": "on"})
+        self.assertEqual(response.status, 409)
+
+    def test_shows_and_saves_nothing_until_the_system_confirms(self):
+        response, body = self.request("GET", "/api/data")
+        self.assertEqual((response.status, body), (401, {"error": "Finance is locked", "locked": True}))
+        response, _ = self.request("PUT", "/api/data", {"revision": "none", "data": STORE})
+        self.assertEqual(response.status, 401)
+        self.assertFalse(self.data_file.exists())
+        response, _ = self.request("POST", "/api/update", {"action": "check"})
+        self.assertEqual(response.status, 401)
+        # What the update button shows says nothing about the data.
+        self.assertEqual(self.request("GET", "/api/update")[0].status, 200)
+        self.assertEqual(self.request("GET", "/api/lock")[1], {"available": True, "enabled": True, "locked": True, "idleMinutes": 20})
+
+        session = self.unlock()
+        self.assertEqual(self.asked, 1)
+        self.assertEqual(self.data_status(session), 200)
+        self.assertEqual(self.request("PUT", "/api/data", {"revision": "none", "data": STORE}, session)[0].status, 200)
+        self.assertEqual(self.request("POST", "/api/update", {"action": "check"}, session)[0].status, 200)
+        # Other programs, without the page's cookie, or with a made-up one.
+        self.assertEqual(self.data_status(), 401)
+        self.assertEqual(self.data_status("made-up"), 401)
+        # Unlocked already: no second dialog.
+        response, state = self.request("POST", "/api/lock", {"action": "unlock"}, session)
+        self.assertEqual((response.status, state["locked"], self.asked), (200, False, 1))
+
+    def test_a_dismissed_or_refused_dialog_unlocks_nothing(self):
+        self.answers += [(False, ""), (False, "Not authorized.")]
+        for error in ["", "Not authorized."]:
+            response, body = self.request("POST", "/api/lock", {"action": "unlock"})
+            self.assertEqual((response.status, body), (401, {"error": error}))
+            self.assertIsNone(response.getheader("Set-Cookie"))
+        self.assertEqual(self.data_status(), 401)
+
+    def test_one_dialog_at_a_time(self):
+        self.lock.asking = True
+        response, body = self.request("POST", "/api/lock", {"action": "unlock"})
+        self.assertEqual(response.status, 409)
+        self.assertIn("open dialog", body["error"])
+        self.assertEqual(self.asked, 0)
+
+    def test_locks_again_after_the_idle_time(self):
+        session = self.unlock()
+        self.now += server.IDLE_LOCK - 1
+        self.assertEqual(self.request("POST", "/api/lock", {"action": "use"}, session)[1]["locked"], False)
+        self.now += server.IDLE_LOCK - 1
+        self.assertEqual(self.request("PUT", "/api/data", {"revision": "none", "data": STORE}, session)[0].status, 200)
+        self.now += server.IDLE_LOCK - 1
+        # Only use counts: reading the data or the lock's state does not.
+        self.assertEqual(self.data_status(session), 200)
+        self.assertEqual(self.request("GET", "/api/lock", session=session)[1]["locked"], False)
+        self.now += 2
+        self.assertEqual(self.data_status(session), 401)
+        self.assertEqual(self.request("POST", "/api/lock", {"action": "use"}, session)[1]["locked"], True)
+
+    def test_locks_after_the_computer_slept(self):
+        session = self.unlock()
+        self.offset += server.SLEPT  # a busy moment, not sleep
+        self.assertEqual(self.data_status(session), 200)
+        self.offset += 60
+        self.assertEqual(self.data_status(session), 401)
+
+    def test_locking_ends_every_session(self):
+        first, second = self.unlock(), self.unlock()
+        self.assertEqual((self.data_status(first), self.data_status(second)), (200, 200))
+        self.assertEqual(self.request("POST", "/api/lock", {"action": "lock"})[1]["locked"], True)
+        self.assertEqual((self.data_status(first), self.data_status(second)), (401, 401))
+
+    def test_turning_the_lock_off_needs_the_system_too(self):
+        response, _ = self.request("POST", "/api/lock", {"action": "off"})
+        self.assertEqual((response.status, self.asked), (401, 0), "locked: no dialog")
+        session = self.unlock()
+        self.answers.append((False, ""))
+        self.assertEqual(self.request("POST", "/api/lock", {"action": "off"}, session)[0].status, 401)
+        self.assertTrue(self.lock.enabled())
+
+        self.answers.append((True, ""))
+        response, state = self.request("POST", "/api/lock", {"action": "off"}, session)
+        self.assertEqual((response.status, state["enabled"], state["locked"]), (200, False, False))
+        self.assertEqual(json.loads((self.data_file.parent / "lock.json").read_text()), {"enabled": False})
+        self.assertEqual(self.data_status(), 200)
+
+        # On again: the window that turned it on stays unlocked.
+        response, state = self.request("POST", "/api/lock", {"action": "on"})
+        self.assertEqual((response.status, state["enabled"], state["locked"]), (200, True, False))
+        session = response.getheader("Set-Cookie").split(";")[0].split("=", 1)[1]
+        self.assertEqual(self.data_status(session), 200)
+        self.assertEqual(self.data_status(), 401)
+        self.assertEqual(self.asked, 3)
+
+    def test_a_slow_save_is_checked_once_its_body_is_in(self):
+        session = self.unlock()
+        body = json.dumps({"revision": "none", "data": STORE}).encode()
+        slow = socket.create_connection(("127.0.0.1", self.port))
+        try:
+            slow.sendall(
+                f"PUT /api/data HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nContent-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\nCookie: {server.SESSION_COOKIE}={session}\r\n\r\n".encode()
+            )
+            time.sleep(0.2)
+            self.request("POST", "/api/lock", {"action": "lock"})
+            slow.sendall(body)
+            reply = slow.makefile("rb").read().decode()
+        finally:
+            slow.close()
+        self.assertTrue(reply.startswith("HTTP/1.0 401"), reply[:40])
+        self.assertFalse(self.data_file.exists())
+
+    def test_other_sites_and_anything_but_json_reach_no_dialog(self):
+        response, _ = self.request("POST", "/api/lock", {"action": "unlock"}, headers={"Origin": "https://evil.example"})
+        self.assertEqual(response.status, 403)
+        response, _ = self.request("POST", "/api/lock", {"action": "unlock"}, headers={"Content-Type": "text/plain"})
+        self.assertEqual(response.status, 415)
+        response, _ = self.request("POST", "/api/lock", {"action": "open sesame"})
+        self.assertEqual(response.status, 400)
+        self.assertEqual(self.asked, 0)
+
+
+class SetupAgreesTest(unittest.TestCase):
+    def test_the_server_looks_for_the_action_setup_installs(self):
+        root = Path(__file__).resolve().parent.parent
+        setup = (root / "setup").read_text()
+        name = next(line.split("=", 1)[1] for line in setup.splitlines() if line.startswith("POLICY="))
+        self.assertEqual(server.POLICY_FILE, Path("/usr/share/polkit-1/actions") / name)
+        self.assertIn("POLICY_FILE=/usr/share/polkit-1/actions/$POLICY", setup)
+        policy = (root / "polkit" / name).read_text()
+        self.assertIn(f'<action id="{server.UNLOCK_ACTION}">', policy)
+        self.assertIn("<allow_active>auth_self</allow_active>", policy)
+
+
+FAKE_PKCHECK = """#!/usr/bin/env bash
+printf '%s\\n' "$@" > "$PKCHECK_ARGS"
+[[ -z $PKCHECK_ERROR ]] || echo "$PKCHECK_ERROR" >&2
+exit "$PKCHECK_EXIT"
+"""
+
+
+class AskPolkitTest(unittest.TestCase):
+    """ask_polkit against a stand-in for pkcheck."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        bin_dir = Path(self.tmp.name)
+        (bin_dir / "pkcheck").write_text(FAKE_PKCHECK)
+        (bin_dir / "pkcheck").chmod(0o755)
+        self.args = bin_dir / "args"
+        self.environ = dict(os.environ)
+        os.environ.update(PATH=f"{bin_dir}:{os.environ['PATH']}", PKCHECK_ARGS=str(self.args), PKCHECK_ERROR="")
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self.environ)
+        self.tmp.cleanup()
+
+    def answer(self, code, error=""):
+        os.environ.update(PKCHECK_EXIT=str(code), PKCHECK_ERROR=error)
+        return server.ask_polkit()
+
+    def test_asks_for_this_process_with_the_dialog(self):
+        self.assertEqual(self.answer(0), (True, ""))
+        start = Path("/proc/self/stat").read_text().rsplit(")", 1)[1].split()[19]
+        self.assertEqual(self.args.read_text().split("\n")[:-1], [
+            "--action-id", server.UNLOCK_ACTION,
+            "--process", f"{os.getpid()},{start},{os.getuid()}",
+            "--allow-user-interaction",
+        ])  # fmt: skip
+
+    def test_dismissed_refused_or_failed(self):
+        self.assertEqual(self.answer(3), (False, ""))
+        self.assertEqual(self.answer(1, "Not authorized."), (False, "Not authorized."))
+        self.assertEqual(self.answer(127, "Error checking for authorization: no agent"), (False, "Error checking for authorization: no agent"))
+        self.assertEqual(self.answer(1), (False, "not confirmed"))
+
+    def test_without_pkcheck(self):
+        os.environ["PATH"] = self.tmp.name + "/none"
+        confirmed, why = server.ask_polkit()
+        self.assertFalse(confirmed)
+        self.assertIn("can't ask the system", why)
+
+    def test_sleep_offset_stays_while_awake(self):
+        # The two clocks are read one after the other: a few microseconds apart.
+        self.assertLess(abs(server.sleep_offset() - server.sleep_offset()), 0.01)
+
+
 class WriteAtomicTest(unittest.TestCase):
     def test_keeps_the_old_file_when_writing_fails(self):
         with tempfile.TemporaryDirectory() as tmp:

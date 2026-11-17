@@ -300,6 +300,9 @@ const state = {
   // return and RETURN_SPREAD around it.
   forecast: { coastContribution: 0, growth: "mid" },
   focus: null, // selector to focus after the next render
+  // The lock (server.py, Lock). asking: what waits for the server, "unlock",
+  // "on" or "off". lost: a change was refused because Finance had locked.
+  lock: { available: false, enabled: false, locked: false, idleMinutes: 20, asking: false, error: "", lost: false },
 };
 
 let pending = null; // newest store waiting to be saved, also after a save failed
@@ -345,6 +348,7 @@ function adopt(json) {
 async function load() {
   try {
     const { status, json } = await request("GET");
+    if (status === 401 && json?.locked) return showLocked();
     if (status !== 200 || !json) throw new Error(json?.error ?? `HTTP ${status}`);
     adopt(json);
   } catch (error) {
@@ -387,6 +391,9 @@ async function pump() {
         state.notice = null;
         document.querySelector("#main > .notice")?.remove();
       }
+    } else if (status === 401 && json?.locked) {
+      state.lock.lost = true;
+      showLocked();
     } else if (status === 409) {
       pending = null;
       adopt(json);
@@ -432,13 +439,15 @@ async function refresh() {
   theme.removeAttribute("id");
   old.after(theme);
 
+  if (state.lock.locked) return;
   if (pending) pump(); // a save that failed: try again
   if (inFlight || pending) return;
   const savesBefore = saves;
   try {
     const { status, json } = await request("GET");
     if (inFlight || pending || saves !== savesBefore) return;
-    if (status === 200 && json && json.revision !== state.revision) {
+    if (status === 401 && json?.locked) showLocked();
+    else if (status === 200 && json && json.revision !== state.revision) {
       adopt(json);
       render();
     }
@@ -446,6 +455,130 @@ async function refresh() {
     // the next save reports it
   }
 }
+
+// ---------------------------------------------------------------- lock
+
+// With the lock on, the server gives the data only to a window that was
+// unlocked: the system confirms it's you in Omarchy's own dialog, with the
+// fingerprint or the password. Finance locks again after a while without
+// use, after the computer slept, and with Ctrl+L; the page then forgets the
+// data until it is unlocked again.
+const LOCK_POLL = 5 * 1000; // ms between asks whether it locked or unlocked
+const USE_EVERY = 60 * 1000; // ms: tell the server about use at most this often
+
+async function lockCall(body) {
+  try {
+    const response = await fetch("/api/lock", {
+      method: body ? "POST" : "GET",
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { ok: response.ok, json: await response.json() };
+  } catch {
+    return { ok: false, json: null };
+  }
+}
+
+function adoptLock(json) {
+  Object.assign(state.lock, { available: Boolean(json.available), enabled: Boolean(json.enabled), idleMinutes: json.idleMinutes ?? state.lock.idleMinutes });
+}
+
+// Finance locked: forget the data, and whatever was typed from it. A change
+// still waiting to be saved goes too, and unlocking says so.
+function showLocked() {
+  if (pending) state.lock.lost = true;
+  Object.assign(state.lock, { locked: true, enabled: true, available: true });
+  state.store = null;
+  state.revision = null;
+  pending = null;
+  state.notice = null;
+  state.importText = "";
+  state.importPlan = null;
+  state.editing = { expenses: null, income: null };
+  state.editingEvent = null;
+  state.renaming = null;
+  state.focus = "#unlock";
+  render();
+}
+
+async function unlock() {
+  if (state.lock.asking) return;
+  Object.assign(state.lock, { asking: "unlock", error: "" });
+  render();
+  const { ok, json } = await lockCall({ action: "unlock" });
+  state.lock.asking = false;
+  if (ok && !json.locked) {
+    adoptLock(json);
+    return reopen();
+  }
+  state.lock.error = json ? (json.error ?? "") : "the Finance server does not answer";
+  state.focus = "#unlock";
+  render();
+}
+
+// Unlocked, here or in another window: the data again, and a word about a
+// change that was not saved.
+async function reopen() {
+  Object.assign(state.lock, { locked: false, error: "" });
+  await load();
+  // Said once the data is back: a load that failed, or a lock meanwhile,
+  // keeps it for the next unlock.
+  if (state.lock.lost && state.store) {
+    state.lock.lost = false;
+    state.notice = { kind: "error", text: "Finance locked before your last change was saved. Please make it again." };
+    render();
+  }
+}
+
+async function lockNow() {
+  await lockCall({ action: "lock" });
+  showLocked();
+}
+
+// Turns the lock on or off in Settings; off needs the system's dialog too.
+async function setLock(on) {
+  if (state.lock.asking) return;
+  Object.assign(state.lock, { asking: on ? "on" : "off", error: "" });
+  renderLockChoice();
+  const { ok, json } = await lockCall({ action: on ? "on" : "off" });
+  state.lock.asking = false;
+  if (ok) adoptLock(json);
+  else if (json?.locked) return showLocked();
+  else state.lock.error = json ? (json.error ?? "") : "the Finance server does not answer";
+  renderLockChoice();
+  renderLockButton();
+}
+
+// Picks up a lock from the idle time or sleep, an unlock in another window,
+// and the lock turned on or off elsewhere.
+async function checkLock() {
+  if (state.lock.asking) return;
+  const { ok, json } = await lockCall();
+  if (!ok || state.lock.asking) return;
+  const was = state.lock.enabled;
+  adoptLock(json);
+  if (json.locked && !state.lock.locked) showLocked();
+  else if (!json.locked && state.lock.locked) reopen();
+  else if (state.lock.enabled !== was) {
+    renderLockButton();
+    renderLockChoice();
+  }
+}
+
+// Keys, clicks and scrolling are use: the idle time starts again.
+let lastUse = 0;
+function used() {
+  if (!state.lock.enabled || state.lock.locked || Date.now() - lastUse < USE_EVERY) return;
+  lastUse = Date.now();
+  lockCall({ action: "use" }).then(({ ok, json }) => {
+    if (ok && json.locked && !state.lock.locked) showLocked();
+  });
+}
+for (const type of ["keydown", "pointerdown", "wheel"]) addEventListener(type, used, { capture: true, passive: true });
+addEventListener("focus", checkLock);
+setInterval(() => {
+  if (!document.hidden) checkLock();
+}, LOCK_POLL);
 
 addEventListener("focus", refresh);
 addEventListener("beforeunload", (event) => {
@@ -462,6 +595,12 @@ addEventListener("hashchange", () => {
 // Ctrl+1 to Ctrl+6 open the views. Matched by key position, not by the
 // character, so it works the same on every keyboard layout.
 addEventListener("keydown", (event) => {
+  // Ctrl+L locks Finance, when the lock is on.
+  if (event.code === "KeyL" && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && state.lock.enabled && !state.lock.locked) {
+    event.preventDefault();
+    lockNow();
+    return;
+  }
   // Ctrl+Shift+H hides or shows the amounts.
   if (event.code === "KeyH" && event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey) {
     event.preventDefault();
@@ -483,21 +622,28 @@ function viewFromHash() {
 
 // ---------------------------------------------------------------- render
 
+// A 24×24 icon from paths, drawn with the stroke of its CSS.
+function icon(paths, className) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  if (className) svg.setAttribute("class", className);
+  for (const d of paths) {
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+}
+
 // The button that hides or shows the amounts, in the header.
 const EYE = ["M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z", "M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6"];
 const EYE_OFF = [...EYE, "M4 4l16 16"];
 function renderPrivacy() {
   const root = document.getElementById("privacy");
   if (!root) return;
-  const ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("aria-hidden", "true");
-  for (const d of state.hideAmounts ? EYE_OFF : EYE) {
-    const path = document.createElementNS(ns, "path");
-    path.setAttribute("d", d);
-    svg.append(path);
-  }
+  const svg = icon(state.hideAmounts ? EYE_OFF : EYE);
   const label = state.hideAmounts ? "Show amounts (Ctrl+Shift+H)" : "Hide amounts, for sharing the screen (Ctrl+Shift+H)";
   const button = h("button", { type: "button", class: "update-button", title: label, "aria-label": label, "aria-pressed": String(state.hideAmounts),
     "aria-keyshortcuts": "Control+Shift+H", onclick: toggleHidden }, svg);
@@ -506,11 +652,40 @@ function renderPrivacy() {
   if (hadFocus) button.focus();
 }
 
+// The lock button, at the right end of the header when the lock is on.
+const PADLOCK = ["M7 11h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z", "M8 11V8a4 4 0 0 1 8 0v3"];
+function renderLockButton() {
+  const root = document.getElementById("lock");
+  if (!root) return;
+  if (!state.lock.enabled || state.lock.locked) return root.replaceChildren();
+  root.replaceChildren(h("button", { type: "button", class: "update-button", title: "Lock (Ctrl+L)", "aria-label": "Lock (Ctrl+L)",
+    "aria-keyshortcuts": "Control+L", onclick: lockNow }, icon(PADLOCK)));
+}
+
+const sentence = (text) => {
+  const trimmed = String(text).trim().replace(/\.$/, "");
+  return trimmed ? `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}.` : "";
+};
+
+// All the page shows while Finance is locked. Opening Finance asks straight
+// away; after that, Unlock (or Enter) asks.
+function viewLocked() {
+  const { asking, error } = state.lock;
+  return h("div", { class: "lock-view" },
+    h("section", { class: "card lock-card" },
+      icon(PADLOCK, "lock-icon"),
+      h("h2", null, "Finance is locked"),
+      h("button", { type: "button", class: "primary", id: "unlock", disabled: Boolean(asking), onclick: unlock }, asking ? "Unlocking…" : "Unlock"),
+      h("p", { class: error ? "lock-error" : "muted", role: "status" }, error ? sentence(error) : asking ? "Confirm in the dialog." : "")));
+}
+
 function render() {
   resizeObserver?.disconnect();
   if (state.store) useFormats(state.store.settings);
   document.body.classList.toggle("hide-amounts", state.hideAmounts);
+  document.body.classList.toggle("locked", state.lock.locked);
   renderPrivacy();
+  renderLockButton();
   const nav = document.getElementById("nav");
   nav.replaceChildren(
     ...VIEWS.map(([view, label], i) => h("a", {
@@ -531,7 +706,9 @@ function render() {
         h("button", { class: "link", type: "button", "aria-label": "Dismiss", onclick: () => { state.notice = null; render(); } }, "×")),
     );
   }
-  if (state.blocked) {
+  if (state.lock.locked) {
+    content.push(viewLocked());
+  } else if (state.blocked) {
     content.push(h("div", { class: "notice error", role: "alert" }, h("span", null, state.blocked), h("button", { type: "button", onclick: load }, "Reload")));
   } else if (state.store) {
     const views = {
@@ -1758,6 +1935,7 @@ function viewSettings() {
       accountList(store)),
     importCard(store),
     exportCard(store),
+    lockCard(),
     card(["Data file", info("the data file",
         "Everything is saved in one file on this computer. No account and no sync: copy the file to back it up.",
         "Before the first change of each day, Finance keeps a copy of the file as it was, for the last 30 days with changes. To go back to a day, copy its file over the data file; open windows show it once they get focus.")],
@@ -1768,6 +1946,33 @@ function viewSettings() {
         "Stable offers releases, with release notes on GitHub. Preview offers every change as soon as its tests pass, before it is released: new features first, and now and then a new bug.",
         "Back on Stable, Finance keeps the version it has until a release is newer, so it never goes back to an older one.")],
       updates.channelSettings()));
+}
+
+// The lock's switch, updated in place so the rest of Settings stays as typed.
+let lockChoice = null;
+function lockCard() {
+  const box = h("input", { type: "checkbox", id: "lock-switch", onchange: (event) => setLock(event.currentTarget.checked) });
+  const note = h("p", { role: "status" });
+  lockChoice = { box, note };
+  renderLockChoice();
+  return card(["Lock", info("the lock",
+      `Finance asks for your fingerprint, or your password, when it opens. It locks again after ${state.lock.idleMinutes} minutes without use, when the computer sleeps, and with Ctrl+L.`,
+      "While it is locked it shows nothing, and other programs on this computer can't read the data through it either.")],
+    h("div", { class: "check-row" }, h("label", { class: "check" }, box, "Lock Finance")),
+    note);
+}
+
+function renderLockChoice() {
+  if (!lockChoice) return;
+  const { available, enabled, asking, error } = state.lock;
+  // While the server is asked, it shows what was clicked.
+  lockChoice.box.checked = asking === "on" ? true : asking === "off" ? false : enabled;
+  lockChoice.box.disabled = !available || Boolean(asking);
+  lockChoice.note.className = error ? "lock-error" : "muted";
+  lockChoice.note.textContent = error ? sentence(error)
+    : !available ? "Run setup again to install the unlock prompt."
+    : asking === "off" ? "Confirm in the dialog."
+    : "";
 }
 
 function settingsForm(store) {
@@ -2051,6 +2256,19 @@ function importResult(plan) {
 
 // ---------------------------------------------------------------- start
 
+// Opening Finance with the lock on asks for the fingerprint straight away.
+async function start() {
+  const { ok, json } = await lockCall();
+  if (ok) adoptLock(json);
+  if (ok && json.locked) {
+    state.lock.locked = true;
+    render();
+    unlock();
+  } else {
+    load();
+  }
+}
+
 state.view = viewFromHash();
 // A restart waits for saving(), which it asks every 100 ms. The server
 // answers by then, so this also tries a failed save again, at most every
@@ -2064,4 +2282,4 @@ function saving() {
   return inFlight || pending !== null;
 }
 const updates = startUpdates(document.getElementById("update"), { saving });
-load();
+start();
