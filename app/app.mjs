@@ -76,6 +76,17 @@ function duration(months) {
 const payInMonths = (months) => (months === 12 ? "the last 12 months" : months === 1 ? "1 month" : `${months} months`);
 // Where the future pay-in (metrics' payIn) comes from, in words.
 const payInSource = (payIn) => (payIn.months === null ? "your own pay-in from Settings" : `the average pay-in of ${payInMonths(payIn.months)}`);
+// The planned pay-in changes ahead and whether pay-ins rise with inflation
+// (the FI outlook's payIn), in words for the notes; null when neither.
+function payInPlanText(payIn) {
+  const parts = [];
+  if (payIn.changes.length) {
+    const changes = payIn.changes.map((c) => `${c.average ? "the average, " : ""}${money(c.amount)} from ${monthLabel(c.month)}`);
+    parts.push(`Then as planned in Settings: ${changes.join("; ")}.`);
+  }
+  if (payIn.rises) parts.push("Pay-ins rise with inflation.");
+  return parts.length ? parts.join(" ") : null;
+}
 
 function monthLabel(month, yearOnly = false) {
   const date = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1);
@@ -250,13 +261,19 @@ function toggleHidden() {
   }
   // A notice may name an amount: it goes.
   state.notice = null;
-  // The page is drawn again with every amount: what is typed into its forms
-  // and not saved yet stays, and so does the focus.
+  // The page is drawn again with every amount.
+  keepingDrafts();
+}
+
+// Draws the page again with `draw` (render, or a commit that renders):
+// what is typed into its forms and not saved yet stays, and so does the
+// focus.
+function keepingDrafts(draw = render) {
   const forms = () => [...document.querySelectorAll("#main form")];
   const drafts = forms().map((form) => [...form.elements].filter((el) => el.name).map((el) => [el.name, el.type === "checkbox" ? el.checked : el.value]));
   const active = document.activeElement;
   const focused = active?.form ? [forms().indexOf(active.form), active.name] : null;
-  render();
+  draw();
   forms().forEach((form, i) => {
     for (const [name, value] of drafts[i] ?? []) {
       const el = form.elements.namedItem(name);
@@ -289,6 +306,7 @@ const state = {
   view: "dashboard",
   editing: { expenses: null, income: null }, // item id being edited
   editingEvent: null, // planned one-off being edited
+  editingPayIn: null, // "now" or the id of a planned pay-in change being edited
   renaming: null, // { list: "accounts" | "expenses" | "income", key: account id or category name }
   month: null,
   importText: "",
@@ -504,6 +522,7 @@ function showLocked() {
   state.importPlan = null;
   state.editing = { expenses: null, income: null };
   state.editingEvent = null;
+  state.editingPayIn = null;
   state.renaming = null;
   state.focus = "#unlock";
   render();
@@ -846,7 +865,7 @@ function milestonesCard(m) {
   const o = outlook(store);
   const known = o.known;
   const head = h("div", { class: "card-head" }, h("h2", null, "Milestones"),
-    expenses.length && known ? h("span", { class: "muted" }, `at ${percentUnit.format(expectedReturn)} return and ${money(o.payIn.invested)} a month`) : null);
+    expenses.length && known ? h("span", { class: "muted" }, `at ${percentUnit.format(expectedReturn)} return and ${money(o.payIn.invested)} a month${o.payIn.changes.length ? " for now" : ""}`) : null);
   if (expenses.length === 0) {
     return h("section", { class: "card milestones" }, head,
       h("p", { class: "muted" }, h("a", { href: "#expenses" }, store.expenses.length ? "All expenses are inactive" : "Add expenses"), ", for the FI number."));
@@ -1025,7 +1044,7 @@ function pathSummary(p) {
   if (p.reach.mid === o.start) return { note: "The portfolio has reached the FI number.", about: [settings] };
   const about = [`At ${rate("mid")} growth a year and ${money(o.payIn.invested)} paid in a month${o.retirement ? `, until ${retirementAge}` : ""}: ${o.payIn.withdrawal
     ? `your average of ${payInMonths(o.payIn.months)} is a withdrawal of ${money(-o.payIn.amount)} a month, which counts as 0`
-    : payInSource(o.payIn)}.`];
+    : payInSource(o.payIn)}.${payInPlanText(o.payIn) ? ` ${payInPlanText(o.payIn)}` : ""}`];
   let note;
   if (p.reach.mid) {
     const months = F.monthIndex(p.reach.mid) - F.monthIndex(o.start);
@@ -1489,7 +1508,7 @@ function viewPortfolio() {
                 "Cash, property, pension assets and debts take a value only: pay-ins are for the portfolio.")),
             h("th", null, "Paid in this month",
               info("paid in", "Your regular pay-ins, such as a savings plan; negative for a withdrawal.",
-                ["Their average of the last 12 months is what the milestones and the forecast go on with, unless you set your own future pay-in in ", h("a", { href: "#settings" }, "Settings"), "."])),
+                ["Their average of the last 12 months is what the milestones and the forecast go on with, unless you plan your own under Future pay-ins in ", h("a", { href: "#settings" }, "Settings"), "."])),
             h("th", null, "One-off this month",
               info("one-offs", "A lump sum in or out, such as an inheritance or a house deposit. It counts as paid in, but not for the average pay-in.",
                 ["Plan future ones on the ", h("a", { href: "#forecast" }, "Forecast"), " page."])))),
@@ -1790,12 +1809,14 @@ function readForecastForm(form) {
 function investedNote(payIn, contribution) {
   const settings = h("a", { href: "#settings" }, "Settings");
   const invests = `Every plan invests ${money(contribution)} a month until it changes course: `;
-  if (payIn.amount === null) return [invests, "there are no pay-ins yet. You can set your own future pay-in in ", settings, "."];
-  if (payIn.months === null) return [invests, "your own future pay-in from ", settings, "."];
+  const plan = payInPlanText(payIn);
+  const then = plan ? ` ${plan}` : "";
+  if (payIn.amount === null) return [invests, `there are no pay-ins yet.${then} You can plan your pay-ins in `, settings, "."];
+  if (payIn.months === null) return [invests, "your own future pay-in from ", settings, `.${then}`];
   const average = payIn.withdrawal
     ? `your average of ${payInMonths(payIn.months)} is a withdrawal of ${money(-payIn.amount)} a month, which counts as 0`
     : `the average pay-in of ${payInMonths(payIn.months)}`;
-  return [invests, `${average}. You can set your own future pay-in in `, settings, "."];
+  return [invests, `${average}.${then} You can plan your pay-ins in `, settings, "."];
 }
 
 // Redraws the results only, so the form keeps what is typed and its focus.
@@ -1854,7 +1875,7 @@ function forecastResults() {
     const coasting = params.coastContribution > 0 ? `invest only ${money(params.coastContribution)} a month` : "stop investing";
     tiles = [
       planTile("keep", PLAN_LABELS.keep, money(result.plans.keep.atRetirement),
-        `at ${retirementAge}, investing ${money(params.contribution)} a month until then.`),
+        `at ${retirementAge}, investing ${money(params.contribution)} a month${o.payIn.changes.length ? ", then as planned," : ""} until then.`),
       planTile("coast", PLAN_LABELS.coast, coastMonth === null ? `Not before ${retirementAge}` : when(coastMonth),
         coastMonth === null
           ? `the portfolio does not reach the FI number by ${retirementAge}, even investing until then.`
@@ -1876,8 +1897,10 @@ function forecastResults() {
       h("li", null, "Growth is before inflation: the expected return set in ", h("a", { href: "#settings" }, "Settings"),
         `, or ${F.RETURN_SPREAD} points less or more. Real markets do not grow the same every year, and bad years right after you start living off the portfolio hurt most.`),
       h("li", null, inTodaysMoney()
-        ? `Amounts are in today's money: what they would buy now, with ${percentUnit.format(inflation)} inflation a year taken out. So the FI number stays about the same, and what is invested shrinks a little each year.`
-        : `Amounts are in the money of each year: expenses and the FI number rise by ${percentUnit.format(inflation)} a year. What is invested stays the same.`),
+        ? `Amounts are in today's money: what they would buy now, with ${percentUnit.format(inflation)} inflation a year taken out. So the FI number stays about the same, and what is invested ${o.payIn.rises ? "does too" : "shrinks a little each year"}.`
+        : o.payIn.rises
+          ? `Amounts are in the money of each year: expenses, the FI number and what is invested rise by ${percentUnit.format(inflation)} a year.`
+          : `Amounts are in the money of each year: expenses and the FI number rise by ${percentUnit.format(inflation)} a year. What is invested stays the same.`),
       h("li", null, store.records.length
         ? `It starts from the portfolio in ${monthLabel(params.start)}, ${money(params.value)}.`
         : "It starts from 0, as there are no broker values yet."),
@@ -1940,6 +1963,7 @@ function viewSettings() {
   const store = state.store;
   return h("div", null,
     card("General", settingsForm(store)),
+    payInsCard(store),
     card("Categories",
       h("div", { class: "columns" }, F.KINDS.map((kind) => h("div", null, h("h3", null, KINDS[kind].title), categoryList(store, kind))))),
     card(["Accounts", info("accounts",
@@ -1991,7 +2015,6 @@ function renderLockChoice() {
 function settingsForm(store) {
   const { withdrawalRate, bufferPercent, currency: code, numberFormat, expectedReturn, inflation, birthYear, retirementAge, emergencyMonths } = store.settings;
   const codes = Intl.supportedValuesOf("currency");
-  const payIn = futurePayInField(store);
   if (!codes.includes(code)) codes.push(code);
   return h("form", { class: "settings-form", onsubmit: (event) => {
     event.preventDefault();
@@ -2004,7 +2027,6 @@ function settingsForm(store) {
     const prices = F.parsePercent(data.get("inflation"));
     const emergencyText = String(data.get("emergencyMonths")).trim();
     const emergency = Number(emergencyText);
-    const ownPayIn = data.get("futurePayIn") === "own" ? F.parseMoney(data.get("futurePayIn-amount")) : null;
     const birthText = String(data.get("birthYear")).trim();
     const ageText = String(data.get("retirementAge")).trim();
     const born = birthText === "" ? null : Number(birthText);
@@ -2019,8 +2041,6 @@ function settingsForm(store) {
     else if (!buffer.ok || !(buffer.value >= 0 && buffer.value <= 100)) error = "Buffer: enter a percentage from 0 to 100.";
     else if (!growth.ok || !(growth.value >= 0 && growth.value <= 100)) error = "Expected return: enter a percentage from 0 to 100.";
     else if (!prices.ok || !(prices.value >= 0 && prices.value <= 100)) error = "Inflation: enter a percentage from 0 to 100.";
-    else if (ownPayIn && !ownPayIn.ok) error = `Future pay-in: ${ownPayIn.error}.`;
-    else if (ownPayIn && ownPayIn.cents < 0) error = "Future pay-in: enter an amount of 0 or more.";
     else if (born !== null && !(/^[0-9]{4}$/.test(birthText) && born >= firstYear && born <= thisYear)) error = `Year of birth: enter a year from ${firstYear} to ${thisYear}, or leave it empty.`;
     else if (!/^[0-9]+$/.test(ageText) || age < ages.min || age > ages.max) error = `Retirement age: enter whole years from ${ages.min} to ${ages.max}.`;
     else if (!/^[0-9]+$/.test(emergencyText) || emergency < F.EMERGENCY_MONTHS.min || emergency > F.EMERGENCY_MONTHS.max) error = `Emergency fund: enter whole months from ${F.EMERGENCY_MONTHS.min} to ${F.EMERGENCY_MONTHS.max}.`;
@@ -2035,7 +2055,6 @@ function settingsForm(store) {
       birthYear: born,
       retirementAge: age,
       emergencyMonths: emergency,
-      futurePayIn: ownPayIn ? ownPayIn.cents : null,
     }), "Settings saved.");
   } },
     field("Currency",
@@ -2054,8 +2073,7 @@ function settingsForm(store) {
       "World stocks have returned about 8 % a year over the long run, about 5 % after inflation, with many years far above or below that."),
     field("Inflation (%)", h("input", { name: "inflation", inputmode: "decimal", value: plain.format(inflation), required: true }),
       "How much prices rise a year. The milestones, the Path to FI chart and the forecast raise your expenses and the FI number by it.",
-      "What is paid in does not rise by it: see Future pay-in."),
-    payIn,
+      "Pay-ins rise by it only if you choose so under Future pay-ins."),
     field("Year of birth", h("input", { name: "birthYear", inputmode: "numeric", autocomplete: "off", value: birthYear === null ? "" : String(birthYear), placeholder: "1990" })),
     field("Official retirement age", h("input", { name: "retirementAge", inputmode: "numeric", autocomplete: "off", value: String(retirementAge), required: true }),
       "When the state pension starts without deductions: 67 in Germany for everyone born in 1964 or later. Not when you plan to stop working: the forecast works that out.",
@@ -2066,26 +2084,123 @@ function settingsForm(store) {
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, "Save")));
 }
 
-// What is paid in a month from now on: the average pay-in of the last 12
-// months, or an amount of your own. The amount shows only for your own; it
-// is disabled otherwise, so a value left in it cannot stop the form. It
-// starts as the average, so switching keeps the projections where they are.
-function futurePayInField(store) {
-  const own = store.settings.futurePayIn;
-  const average = F.averagePayIn(F.portfolioSeries(store));
-  const amount = h("input", { name: "futurePayIn-amount", class: "amount", inputmode: "decimal", autocomplete: "off", "aria-label": "Own pay-in a month",
-    value: inputMoney(own ?? Math.max(0, Math.round(average?.average ?? 0))), hidden: own === null, disabled: own === null });
-  const select = h("select", { id: "future-payin", name: "futurePayIn", value: own === null ? "average" : "own", onchange: (event) => {
-    amount.hidden = amount.disabled = event.target.value !== "own";
+// The amount of a pay-in a month: the average pay-in of the last 12 months
+// (amount null), or an amount of your own (undefined: none typed yet). The
+// amount shows only for your own; it is disabled otherwise, so a value left
+// in it cannot stop the form. Your own starts as the average, so switching
+// keeps the projections where they are.
+function payInAmountField(name, label, amount, average) {
+  const input = h("input", { name: `${name}-amount`, class: "amount", inputmode: "decimal", autocomplete: "off", "aria-label": `${label}: own amount`,
+    value: amount === undefined ? "" : inputMoney(amount ?? Math.max(0, Math.round(average?.average ?? 0))), hidden: amount === null, disabled: amount === null });
+  const select = h("select", { id: name, name, value: amount === null ? "average" : "own", onchange: (event) => {
+    input.hidden = input.disabled = event.target.value !== "own";
   } },
     h("option", { value: "average" }, average ? `Average of ${payInMonths(average.months)}: ${money(average.average)}` : "Average of the last 12 months"),
     h("option", { value: "own" }, "Own amount"));
   return h("div", { class: "field bound" },
-    h("span", { class: "field-label" }, h("label", { for: select.id }, "Future pay-in a month"),
-      info("the future pay-in",
-        "What you pay in from now on, for the investment rate, the milestones, the Path to FI chart and the forecast.",
-        "The average follows your pay-ins under Portfolio. Set your own amount when you know it will change, such as after a raise or once you reach Coast FI. Either stays the same every month: inflation does not raise it.")),
-    h("div", { class: "bound-row" }, select, amount));
+    h("span", { class: "field-label" }, h("label", { for: select.id }, label)),
+    h("div", { class: "bound-row" }, select, input));
+}
+
+// Reads a payInAmountField. Returns { amount } (null: the average) or
+// { error }.
+function readPayInAmount(data, name, label) {
+  if (data.get(name) !== "own") return { amount: null };
+  const own = F.parseMoney(data.get(`${name}-amount`));
+  if (!own.ok) return { error: `${label}: ${own.error}.` };
+  if (own.cents < 0) return { error: `${label}: enter an amount of 0 or more.` };
+  return { amount: own.cents };
+}
+
+// What is paid in a month from now on: Now (the average, or an amount of
+// your own) and the planned changes, each from a month or an age on until
+// the next, in the order they start; and whether the projections raise
+// pay-ins by the inflation.
+function payInsCard(store) {
+  const { birthYear, futurePayIn, payInsRiseWithInflation } = store.settings;
+  const series = F.portfolioSeries(store);
+  const average = F.averagePayIn(series);
+  const now = thisMonth(); // as the dashboard counts it
+  const retirement = F.retirementIndex(store.settings);
+  // In the order they start (payInPlan's), an age without a year of birth
+  // last; the latest one that has started is what is paid in this month.
+  const changes = store.payInChanges.map((change) => ({ change, index: F.payInChangeIndex(change, birthYear) }))
+    .sort((a, b) => (a.index === b.index ? 0 : a.index < b.index ? -1 : 1));
+  const current = changes.filter((c) => c.index <= now).at(-1)?.change ?? null;
+  const editing = state.editingPayIn === "now" ? "now" : store.payInChanges.find((c) => c.id === state.editingPayIn) ?? null;
+
+  const amountText = (amount) => (amount !== null ? money(amount) : average ? `Average · ${money(average.average)}` : "Average");
+  const startText = ({ from }) => ("month" in from ? monthLabel(from.month) : `Age ${from.age}${birthYear === null ? "" : ` · ${birthYear + from.age}`}`);
+  const sub = (text) => (text ? h("div", { class: "sub" }, text) : null);
+  const editButton = (key) => h("button", { type: "button", class: "link", onclick: () => { state.editingPayIn = key; state.focus = "#payin-amount"; render(); } }, "Edit");
+  const rows = [
+    h("tr", { class: editing === "now" ? "editing" : null },
+      h("td", null, "Now", sub(current && "A change has started: it counts instead")),
+      h("td", { class: "num" }, amountText(futurePayIn)),
+      h("td", { class: "actions" }, editButton("now"))),
+    ...changes.map(({ change, index }) => {
+      let note = null;
+      if (!Number.isFinite(index)) note = "Needs your year of birth";
+      else if (index >= retirement) note = "After retirement: nothing is paid in then";
+      else if (change === current) note = `Paid in now${change.amount !== null && average ? `; your average: ${money(average.average)}` : ""}`;
+      else if (index <= now) note = "A later change counts instead";
+      return h("tr", { class: change === editing ? "editing" : null },
+        h("td", null, startText(change), sub(note)),
+        h("td", { class: "num" }, amountText(change.amount)),
+        h("td", { class: "actions" },
+          editButton(change.id),
+          h("button", { type: "button", class: "link danger", onclick: () => {
+            if (!confirm(`Delete the change from ${startText(change)}?`)) return;
+            if (state.editingPayIn === change.id) state.editingPayIn = null;
+            commit(F.deletePayInChange(store, change.id), `Deleted the change from ${startText(change)}.`);
+          } }, "Delete")));
+    }),
+  ];
+
+  const form = h("form", { class: "payin-form", onsubmit: (event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const from = editing === "now" ? null : readBound(data, "payin-from", "Starts");
+    if (from?.error) return showError(event.currentTarget, from.error);
+    const amount = readPayInAmount(data, "payin-amount", "A month");
+    if (amount.error) return showError(event.currentTarget, amount.error);
+    if (editing === "now") {
+      state.editingPayIn = null;
+      return commit(F.saveSettings(store, { futurePayIn: amount.amount }), "Saved what you pay in now.");
+    }
+    const result = F.savePayInChange(store, { id: editing?.id ?? null, from: from.bound, amount: amount.amount });
+    if (!result.ok) return showError(event.currentTarget, `${result.error}.`);
+    state.editingPayIn = null;
+    commit(result.store, `${editing ? "Saved" : "Added"} the change from ${startText({ from: from.bound })}.`);
+  } },
+    editing === "now"
+      ? h("div", { class: "field" }, h("span", { class: "field-label" }, h("span", null, "Starts")), h("div", { class: "field-static" }, "Now"))
+      : boundField("payin-from", "Starts", editing?.from ?? { month: "" }, [["month", "In a month"], ["age", "At an age"]]),
+    payInAmountField("payin-amount", "A month", editing === "now" ? futurePayIn : editing ? editing.amount : undefined, average),
+    h("div", { class: "form-actions" },
+      h("button", { type: "submit", class: "primary" }, editing ? "Save" : "Add change"),
+      editing ? h("button", { type: "button", onclick: () => { state.editingPayIn = null; render(); } }, "Cancel") : null));
+
+  // Saved on a click, so what is typed elsewhere on the page stays.
+  const rise = h("input", { type: "checkbox", id: "payins-rise", checked: payInsRiseWithInflation, onchange: (event) => {
+    const on = event.currentTarget.checked;
+    state.focus = "#payins-rise";
+    keepingDrafts(() => commit(F.saveSettings(state.store, { payInsRiseWithInflation: on }), on ? "Pay-ins now rise with inflation." : "Pay-ins now stay the same."));
+  } });
+
+  return card(["Future pay-ins", info("future pay-ins",
+      "What you pay in a month from now on, for the investment rate, the milestones, the Path to FI chart and the forecast.",
+      "Now is the average of your pay-ins under Portfolio, or an amount of your own. Add the changes you know of, such as a raise, a sabbatical or part-time: each holds until the next one. Pay-ins stop at retirement, and for Retire early at FI.",
+      "A change that has started is what you pay in now, until you delete it.")],
+    h("div", { class: "table-wrap" }, h("table", null,
+      h("thead", null, h("tr", null, h("th", null, "From"), h("th", { class: "num" }, "A month"), h("th"))),
+      h("tbody", null, rows))),
+    form,
+    h("div", { class: "check-row payins-rise" },
+      h("label", { class: "check" }, rise, "Rise with inflation"),
+      info("rising pay-ins",
+        "Off, every pay-in stays the same amount of money for good, as typed.",
+        "On, the amounts are in today's money, like your expenses: the projections raise them by the inflation set under General, as if you raised your savings plan with prices.")));
 }
 
 // A list of names, each with Rename and Delete, and a field to add one.

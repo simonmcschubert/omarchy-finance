@@ -115,15 +115,20 @@ Finance window's browser profile. The data file stays.
   - Inflation (default 3 %): how much prices rise a year. Time to FI, the
     Path to FI chart and the forecast raise the expenses and the FI number
     by it, so their amounts are in the money of each year. Pay-ins stay as
-    they are (see Future pay-in). Data files from before this setting get
+    they are unless you choose otherwise (see Future pay-ins). Data files from before this setting get
     3 % inflation and 3 points more expected return, so 5 % after inflation
     becomes 8 % before it.
-  - Future pay-in: what you pay in a month from now on, for the investment
-    rate, the milestones, the Path to FI chart and the forecast. Either the
-    average pay-in of the last 12 months (default), which follows your
-    pay-ins as you enter them, or an amount of your own, for a change you
-    know is coming, such as a raise or paying in less after Coast FI. It
-    stays the same every month: inflation does not raise it.
+  - Future pay-ins: what you pay in a month from now on, for the investment
+    rate, the milestones, the Path to FI chart and the forecast. **Now** is
+    the average pay-in of the last 12 months (default), which follows your
+    pay-ins as you enter them, or an amount of your own. Add the **changes**
+    you know are coming, each from a month or an age on, until the next
+    one: a raise from April, nothing during a sabbatical and then the
+    average again, 500 € from age 45. A change that has started is what you
+    pay in now, until you delete it.
+  - Rise with inflation (off by default): off, every pay-in stays the same
+    amount of money for good. On, pay-ins are in today's money like your
+    expenses, and the projections raise them by the inflation.
   - Year of birth and the official retirement age (default 67: when the
     state pension starts without deductions, not when you plan to stop
     working), for the forecast. The forecast needs the year of birth; it is
@@ -238,7 +243,7 @@ also what was paid in that month (negative for withdrawals), and a
 **one-off**: a lump sum in or out, such as an inheritance or a house
 deposit. A one-off counts as paid in (so it is no gain), but not for the
 average pay-in that the investment rate, Time to FI and the forecast go on
-with, unless Settings has your own future pay-in. An account without a value in a month counts with its last value.
+with, unless Settings plans your own future pay-ins. An account without a value in a month counts with its last value.
 The history lists every month with each account, the portfolio, what was
 paid in and, with other kinds of accounts, the net worth.
 
@@ -270,7 +275,7 @@ says to add one.
 | --- | --- |
 | Monthly income | Sum of the income that counts this month, each divided by its months (a yearly bonus counts one twelfth) |
 | Monthly expenses | Sum of the active expenses that count this month the same way, plus the buffer |
-| Investment rate | Future pay-in ÷ monthly income: the average monthly pay-in over the last 12 months (one-offs left out), or your own amount from Settings |
+| Investment rate | What you pay in now ÷ monthly income: the average monthly pay-in over the last 12 months (one-offs left out), your own amount from Settings, or a planned change that has started |
 | Portfolio | Sum of the invested accounts in the latest month, and its change since the month before |
 | Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins and one-offs. The return is that gain ÷ (the value 12 months ago + each pay-in and one-off for the part of the 12 months it was invested, from the middle of its month) |
 | Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them |
@@ -296,16 +301,17 @@ with your age then.
 How much it has is the portfolio ÷ what it needs. When, for FI and Lean
 FI, is Time to FI, counted as the Forecast page's Retire early counts it.
 From the latest month the portfolio grows by the expected return
-(compounded monthly) and gets the future pay-in each month (the average
+(compounded monthly) and gets the future pay-ins each month (the average
 monthly pay-in of the last 12 months, 0 when that is a withdrawal, or your
-own amount from Settings), with the planned one-offs, while the FI number
+own amount from Settings, then the planned changes; raised by the
+inflation if you chose so), with the planned one-offs, while the FI number
 rises by the inflation. FI is the end of the first month in which the
 portfolio reaches the FI number of retiring the month after. It counts only
 before retirement ("Not before 67"); without a year of birth, up to 100
 years. Years from two years on. For Coast FI, it is the first month
 from which the portfolio, with the same pay-ins until then and none after,
 grows to the FI number by the retirement age: the month the Forecast page's
-Coast tile names, for the future pay-in and nothing after Coast FI.
+Coast tile names, for the future pay-ins and nothing after Coast FI.
 
 The **Portfolio** chart has two views; the one picked last stays picked.
 
@@ -335,7 +341,7 @@ and its change since the month before (left out in a month an account is
 entered for the first time).
 
 **Where the income goes** splits the monthly income into expenses (with
-the buffer), the future pay-in (the 12-month average or your own amount),
+the buffer), what you pay in now (the 12-month average or your own amount),
 and what is left over, or says how much more than the income those two take.
 **Expenses by category** shows the expenses without the buffer.
 
@@ -343,8 +349,8 @@ and what is left over, or says how much more than the income those two take.
 
 ![Forecast](docs/forecast.png)
 
-Three plans, each investing the future pay-in from Settings a month until
-it changes course (a 12-month average that is a withdrawal counts as 0). A
+Three plans, each investing the future pay-ins from Settings until it
+changes course (a 12-month average that is a withdrawal counts as 0). A
 tile for each answers its question:
 
 | Plan | Invests | Its tile says |

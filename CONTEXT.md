@@ -46,9 +46,18 @@ pension and debt accounts count only for **net worth**.
 **average pay-in** covers the last 12 months, or fewer with a shorter
 history. A negative average is a _withdrawal_.
 
-**Future pay-in** (`futurePayIn`): what is paid in a month from now on, for
-the investment rate and every projection. It is the average pay-in, or an
-amount of your own set in Settings.
+**Future pay-in** (`futurePayIn`): what is paid in a month from now on
+(_Now_ in Settings). It is the average pay-in, or an amount of your own.
+
+**Pay-in change** (`payInChanges`): what is paid in a month from a month or
+an age on, until the next change: an amount, or the average pay-in. A
+change that has started is what is paid in now. The **pay-in plan**
+(`payInPlan()`) is the future pay-in and the changes, month by month, for
+the investment rate and every projection.
+
+**Rising pay-ins** (`payInsRiseWithInflation`, off by default): pay-ins are
+in today's money and rise with inflation in the projections, like expenses.
+Off, they stay the same amount of money for good.
 
 **One-off**: money paid in or out once, such as an inheritance or a house
 deposit. It is either recorded with a month's values or planned for a
@@ -83,8 +92,8 @@ portfolio reaches them.
 
 **FI outlook** (`fiOutlook()`): where the portfolio goes from the latest
 month on. Every FI date the app shows comes from it: the milestones, the
-Path to FI chart and the Forecast's plans. It invests the average pay-in,
-or 0 when that is a withdrawal, adds the planned one-offs, and runs
+Path to FI chart and the Forecast's plans. It invests the pay-in plan
+(0 when it is a withdrawal), adds the planned one-offs, and runs
 `forecast()`.
 
 ## Projections
@@ -93,8 +102,8 @@ or 0 when that is a withdrawal, adds the planned one-offs, and runs
 _high_ projections use 2 points less and more (`RETURN_SPREAD`).
 
 **Money of each month**: amounts as they will be then, with expenses and the
-FI number rising with inflation and pay-ins staying the same. **Today's
-money**: the same amounts with inflation taken out again.
+FI number rising with inflation, and pay-ins staying the same unless they
+rise. **Today's money**: the same amounts with inflation taken out again.
 
 **Plans** (the Forecast page):
 - _Keep investing_ pays in until retirement.
