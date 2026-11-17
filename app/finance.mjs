@@ -1021,9 +1021,10 @@ function changesAfter(store, retirement) {
 }
 
 // The planned one-offs of the month of `index`, added up: what is paid in
-// (or out, below 0) once, in today's money.
-export function oneOffsIn(store, index) {
-  return sum(store.events.filter((event) => monthIndex(event.month) === index).map((event) => event.amount));
+// (or out, below 0) once, in today's money. With `out`, only those taken
+// out.
+export function oneOffsIn(store, index, { out = false } = {}) {
+  return sum(store.events.filter((event) => monthIndex(event.month) === index && (!out || event.amount < 0)).map((event) => event.amount));
 }
 
 // The FI number if retirement starts in the month of `index`, in today's
@@ -1248,7 +1249,9 @@ export function ageIn(month, birthYear) {
 // `index` (oneOffsIn), in today's money: every plan gets it in its month.
 // Coast FI sets aside the money still to go out before retirement, but never
 // counts on money still to come in: that only makes it come sooner, once it
-// is there.
+// is there. takenOut(index), when given, is the part of them taken out (0 or
+// less), so that money coming in the same month doesn't hide it; without it,
+// a month's one-offs when they add up to less than 0.
 //
 // Returns { months: shown months from start on, retirement: its first
 // month (null without), goal: the FI number of each shown month,
@@ -1264,6 +1267,7 @@ export function forecast(params) {
   const goal = params.goal ?? (() => fiNumber);
   const paidIn = typeof contribution === "function" ? contribution : () => contribution;
   const oneOffs = params.oneOffs ?? (() => 0);
+  const takenOut = params.takenOut ?? ((index) => Math.min(0, oneOffs(index)));
   const rate = monthlyRate(growth);
   const first = monthIndex(start);
   const retires = birthYear != null;
@@ -1286,7 +1290,7 @@ export function forecast(params) {
   const outAhead = [];
   for (let index = retires ? retirement - 1 : -Infinity, total = 0; index >= first; index--) {
     outAhead[index - first] = total;
-    total += Math.min(0, onceAt(index)) * (1 + rate) ** (retirement - 1 - index);
+    total += inflated(takenOut(index), inflation, index - first) * (1 + rate) ** (retirement - 1 - index);
   }
   // What a month-end value grows to when retirement starts, with `monthly`
   // paid in every month until then, less the one-offs taken out.
@@ -1436,6 +1440,7 @@ export function fiOutlook(store, now = currentMonth()) {
         need: (index, from) => needIn(store, index, from),
         goal: goal(essential),
         oneOffs: (index) => oneOffsIn(store, index),
+        takenOut: (index) => oneOffsIn(store, index, { out: true }),
       }));
     }
     return runs.get(key);

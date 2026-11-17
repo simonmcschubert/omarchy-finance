@@ -1934,6 +1934,12 @@ test("Coast FI on the dashboard: the Forecast page's Coast plan at the expected 
   close(inheritance.fiNumber, coast.fiNumber, "the Coast FI number with an inheritance to come");
   assert.ok(coast.month > "2030-01");
   assert.equal(inheritance.month, "2030-01");
+  // Nor when a deposit is taken out the same month: Coast FI still sets it
+  // aside, as without the inheritance.
+  const deposit = { id: "d", name: "Deposit", month: "2030-01", amount: -20000 * EUR };
+  close(at({ ...s, events: [deposit, { id: "i", name: "Inheritance", month: "2030-01", amount: 200000 * EUR }] }).fiNumber,
+    at({ ...s, events: [deposit] }).fiNumber, "the Coast FI number with a deposit and an inheritance the same month");
+  assert.ok(at({ ...s, events: [deposit] }).fiNumber > coast.fiNumber);
 
   const none = at({ ...s, records: [] });
   assert.ok(none.fiNumber > 0, "what it needs, without a portfolio too");
