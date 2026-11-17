@@ -610,10 +610,9 @@ function viewDashboard() {
       m.gains === null ? "–" : signedMoney(m.gains.gain),
       m.gains === null ? "needs values for two months" : m.gains.rate === null ? "" : `a return of ${percent.format(m.gains.rate)}`),
     tile(["Expenses covered", m.coveredMonths === null ? null
-      : info("expenses covered", `How long the portfolio alone would pay your expenses, ${money(m.expenses)} a month with buffer.`,
-          ["The emergency fund counts your cash accounts only, against the months of expenses you aim for in ", h("a", { href: "#settings" }, "Settings"), "."])],
+      : info("expenses covered", `How long the portfolio alone would pay your expenses, ${money(m.expenses)} a month with buffer.`)],
       m.coveredMonths === null ? "–" : duration(m.coveredMonths),
-      [m.coveredMonths === null ? "needs expenses and a portfolio value" : "by the portfolio", emergencyLine(m.emergency)]),
+      m.coveredMonths === null ? "needs expenses and a portfolio value" : "by the portfolio"),
   );
 
   const parts = [tiles];
@@ -748,18 +747,6 @@ function incomeCard(m) {
   });
   return card("Where the income goes", bar, h("ul", { class: "split-list" }, rows),
     split.over > 0 ? h("p", { class: "muted" }, `Expenses and pay-ins are ${money(split.over)} a month more than the income.`) : null);
-}
-
-// The emergency fund in words, under Expenses covered: how long the cash
-// accounts pay the expenses, against the target in Settings.
-function emergencyLine(e) {
-  if (e === null) return h("div", null, "Emergency fund: add a cash account in ", h("a", { href: "#settings" }, "Settings"));
-  if (e.months === null) return h("div", null, `Emergency fund: ${money(e.cash)} in cash`);
-  const months = e.months >= 1 ? duration(Math.floor(e.months)) : "less than a month";
-  if (e.target === 0) return h("div", null, `Emergency fund: ${months} in cash`);
-  return h("div", { class: e.short > 0 ? "short" : null },
-    `Emergency fund: ${months} in cash, `,
-    e.short > 0 ? `${money(e.short)} short of ${e.target} months` : `the ${e.target} months you aim for`);
 }
 
 // Whether an account has its first value in `month`.
@@ -1388,6 +1375,7 @@ function viewPortfolio() {
         store.accounts.length ? h("a", { class: "label-link", href: "#settings" }, "Accounts and CSV import") : null),
       monthForm),
     returnsCard(store),
+    emergencyCard(store),
     history);
 }
 
@@ -1418,6 +1406,46 @@ function returnsCard(store) {
       h("tbody", null, rows.map(([name, r]) => h("tr", null,
         h("th", { scope: "row" }, name, h("div", { class: "sub" }, `since ${monthLabel(r.since)}`)),
         cell(r.ytd), cell(r.year), cell(r.three), cell(r.five), cell(r.all), cell(r.moneyWeighted)))))));
+}
+
+// The emergency fund: how long the cash accounts' latest values pay this
+// month's expenses, against the months set in Settings. Only once there are
+// accounts: until then, Monthly values asks for them.
+function emergencyCard(store) {
+  if (store.accounts.length === 0) return null;
+  const m = F.metrics(store);
+  const e = m.emergency;
+  const title = ["Emergency fund", info("the emergency fund",
+    `How long your cash accounts alone would pay your expenses${m.expenses > 0 ? `, ${money(m.expenses)} a month with buffer` : ""}.`,
+    ["The months you aim for are set in ", h("a", { href: "#settings" }, "Settings"), "; 0 sets none."])];
+  if (e === null) return card(title, h("p", { class: "muted" }, "Add a cash account, such as Tagesgeld, in ", h("a", { href: "#settings" }, "Settings"), "."));
+
+  const asOf = m.netWorth.length ? `, as of ${monthLabel(m.netWorth.at(-1).month)}` : "";
+  if (e.months === null) {
+    return card(title,
+      h("div", { class: "big" }, money(e.cash)),
+      h("p", { class: "muted" }, `in cash${asOf}`),
+      h("p", { class: "muted" }, store.expenses.length
+        ? [h("a", { href: "#expenses" }, "No expenses count this month"), "."]
+        : [h("a", { href: "#expenses" }, "Add expenses"), " to see how long it lasts."]));
+  }
+
+  // How much of the target the cash covers, with a bar as in Milestones.
+  let target = null;
+  if (e.target > 0) {
+    const share = e.months / e.target;
+    const meter = h("div", { class: "meter", role: "presentation" }, h("div", { class: "meter-fill" }));
+    meter.firstChild.style.width = `${Math.min(100, share * 100)}%`;
+    target = h("div", { class: "reach-row" }, meter,
+      h("span", { class: "num" }, e.short === 0 ? `✓ ${e.target} months reached` : `${percent.format(share)} of ${e.target} months`));
+  }
+  return h("section", { class: e.target > 0 && e.short === 0 ? "card emergency reached" : "card emergency" },
+    h("h2", null, title),
+    h("div", { class: "big" }, e.months >= 1 ? duration(Math.floor(e.months)) : "Less than a month"),
+    target,
+    h("p", { class: "muted" }, `${money(e.cash)} in cash`,
+      e.short > 0 ? h("span", { class: "short" }, `, ${money(e.short)} short`) : null,
+      asOf));
 }
 
 // ---------------------------------------------------------------- forecast

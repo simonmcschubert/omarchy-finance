@@ -1440,8 +1440,20 @@ table.entry th {
   background: var(--bad, var(--red));
 }
 
-/* The emergency fund is short of its target. */
-.tile-detail .short {
+/* ---- emergency fund, on the Portfolio page: a bar for how much of the
+   target the cash covers, as in Milestones. */
+
+.emergency .reach-row {
+  max-width: 480px;
+  margin: 6px 0 4px;
+}
+
+.emergency.reached .meter-fill {
+  background: var(--fg-strong);
+}
+
+/* Short of the target. */
+.emergency .short {
   color: var(--yellow);
 }
 
