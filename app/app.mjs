@@ -873,7 +873,9 @@ function drawChart() {
   const options = {
     view,
     series: m.series,
-    fiNumber: chartGoal(m),
+    // On the path, what FI needs at the latest month's end, as the
+    // projection's goals.
+    fiNumber: view === "path" ? outlook(state.store).fiNumber : chartGoal(m),
     projection: view === "path" ? projection() : null,
     format: money,
     formatSigned: signedMoney,

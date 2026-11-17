@@ -1366,8 +1366,10 @@ export function fiOutlook(store, now = currentMonth()) {
     // the portfolio at the expected return and RETURN_SPREAD points less
     // and more, paying in until retirement. null without an FI number.
     // Otherwise { rates, reach: { low, mid, high }, when each reaches FI
-    // (as milestones()), points: [{ month, low, mid, high, goal }] }. The
-    // points are the months after start the chart shows: until the low
+    // (as milestones()), points: [{ month, low, mid, high, goal }] }, goal
+    // being what FI needs at the end of that month: the FI number of
+    // retiring the month after. The points are the months after start the
+    // chart shows: until the low
     // one reaches FI (or 1.5 times as long as the mid one, or else the high
     // one) and a little after, at least a year, never from retirement on.
     // None when the portfolio is at FI already.
@@ -1383,9 +1385,10 @@ export function fiOutlook(store, now = currentMonth()) {
       const count = reach.mid === start ? 0
         : Math.min(MAX_PROJECTION_MONTHS, Math.max(12, Math.ceil(shown * 1.1)), retirement - 1 - first, results.mid.months.length - 1);
       const lines = Object.fromEntries(GROWTHS.map((g) => [g, inMoney(results[g], kind)]));
+      const target = (k) => (kind === "today" ? goal(false)(first + k + 1) : inflated(goal(false)(first + k + 1), inflation, k));
       const points = [];
       for (let k = 1; k <= count; k++) {
-        points.push({ month: monthFromIndex(first + k), low: lines.low.plans.keep.values[k], mid: lines.mid.plans.keep.values[k], high: lines.high.plans.keep.values[k], goal: lines.mid.goal[k] });
+        points.push({ month: monthFromIndex(first + k), low: lines.low.plans.keep.values[k], mid: lines.mid.plans.keep.values[k], high: lines.high.plans.keep.values[k], goal: target(k) });
       }
       return { rates, reach, points };
     },

@@ -293,7 +293,8 @@ The **Portfolio** chart has two views; the one picked last stays picked.
   dashed line until it reaches the FI number, with a band from 2 points
   below to 2 points above the expected return (6 % to 10 % at 8 %), also up
   to the FI number, and never past retirement. From the latest month on, the
-  FI number is that of retiring in each month, risen by the inflation. The line under the chart
+  FI number is what FI needs at each month's end, that of retiring the month
+  after, risen by the inflation. The line under the chart
   says when each reaches the FI number; its ⓘ, what the FI number is by
   then.
   Its switch shows the projection in today's money instead, as on the

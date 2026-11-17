@@ -766,9 +766,12 @@ test("FI outlook: FI counts at a month's end against the FI number of retiring t
   assert.equal(o.milestones().fi.month, "2029-08");
   assert.equal(o.path().reach.mid, "2029-08");
   assert.equal(o.forecast().plans.fi.fiMonth, "2029-08");
-  // The chart's FI number is that of retiring in each month.
+  // The chart's FI number is what FI needs at each month's end, so the line
+  // reaches it in August 2029 too.
   const points = o.path().points;
-  for (const k of [0, 12, 33, 34, points.length - 1]) assert.equal(points[k].goal, F.fiNumberIn(s, first + k + 1), `month ${k + 1}`);
+  for (const k of [0, 12, 33, 34, points.length - 1]) assert.equal(points[k].goal, F.fiNumberIn(s, first + k + 2), `month ${k + 1}`);
+  assert.equal(points[33].month, "2029-08");
+  assert.ok(points[33].mid >= points[33].goal && points[32].mid < points[32].goal);
 });
 
 test("FI outlook: FI only counts before retirement", () => {
