@@ -24,7 +24,7 @@ misses.
 
 **Retirement month**: January of the year of the retirement age
 (`retirementIndex`). Without a year of birth, retirement and ages are never
-reached. Retire early moves it to the month after FI.
+reached. Retire at FI moves it to the month after FI.
 
 **Budget** (`budget()`): what counts in one month, for a given retirement
 month.
@@ -111,8 +111,20 @@ _high_ projections use 2 points less and more (`RETURN_SPREAD`).
 FI number rising with inflation, and pay-ins staying the same unless they
 rise. **Today's money**: the same amounts with inflation taken out again.
 
-**Plans** (the Forecast page):
-- _Keep investing_ pays in until retirement.
-- _Coast_ pays in until Coast FI, then only the coast pay-in.
-- _Retire early_ pays in until FI and lives off the portfolio from the month
-  after.
+Today's money is the default; the choice is kept in the browser.
+
+**Plans** (the Forecast page, `fiOutlook().plans()`), named by what you do:
+- _Retire at FI_ (“Retire at 53”) pays in until FI and lives off the
+  portfolio from the month after.
+- _Coast_ (“Coast from now”) pays in until Coast FI, then only the coast
+  pay-in until retirement.
+- _Work to 67_ (the retirement age) pays in until retirement.
+
+The low and high growth run each plan with the dates of the expected
+return, so they show what happens to the same plan. A plan **lasts** when
+money is left at the end of age 120 (`SHOWN_AGE`), where the forecast ends.
+
+**Phases**: _Investing_, _Coasting_ and _Retired_. A pension or other
+income that starts, or an expense that ends, is a _step_ inside Retired,
+never a phase: what the portfolio pays a month changes there, and the
+**share** is the part of the spending it pays, the rest coming from income.

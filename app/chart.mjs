@@ -348,143 +348,257 @@ export function renderChart(root, options) {
 }
 
 // ---------------------------------------------------------------- forecast
+// The plans as bars on one age line, and the picked plan's chart under them
+// on the same age line (finance.mjs fiOutlook().plans).
 
-const FORECAST_HEIGHT = 300;
-// Room above the plot for the retirement marker's label.
-const FORECAST_MARGIN = { top: 28, right: 20, bottom: 44, left: 72 };
+const PLAN_ROW = 70; // a plan's row: values above its bar, causes below
+const PLAN_BAR = 28;
+const PLAN_AXIS = 24; // ages above the bars
+const PLAN_CHART = 280;
+const PLAN_MARGIN = { right: 20, top: 16, bottom: 40 };
+// Bar texts use 12px: about this wide per character.
+const BAR_CHAR = 7.3;
 
-// The y-axis reaches up to the highest value until retirement (and at least
-// a bit above the FI number then). Lines that grow beyond it after
-// retirement leave the top of the chart; the tooltip still shows their
-// values. goal: the FI number of each month.
-export function forecastTop(lines, goal, retirementIndex) {
-  const until = retirementIndex >= 0 ? retirementIndex : Infinity;
-  let top = 0;
-  goal.forEach((v, i) => { if (i <= until && v * 1.2 > top) top = v * 1.2; });
-  for (const line of lines) line.values.forEach((v, i) => { if (i <= until && v > top) top = v; });
-  return Math.max(top, 10000);
+// The y-axis's top: the highest value, but never more than twice the
+// highest before the last phase, so that growth late in life doesn't
+// squeeze the years that decide. Lines above it leave the chart; the
+// tooltip still shows them.
+export function forecastTop(values, lastFrom) {
+  let all = 0;
+  let before = 0;
+  values.forEach((v, i) => {
+    if (v > all) all = v;
+    if (i <= lastFrom && v > before) before = v;
+  });
+  return Math.max(Math.min(all, 2 * before) * 1.1, 10000);
 }
 
-// Where a label of `width` goes next to a dot at (cx, cy): above left, above
-// right, below right or below left, whichever first stays inside `bounds`
-// and clear of the boxes in `taken`; when none does, the same moved sideways
-// into `bounds`. Returns { x, y, box }, x and y for a label anchored at its
-// start.
-export function placeLabel(cx, cy, width, bounds, taken) {
-  const height = 12;
-  const spot = ([dx, dy], inside) => {
-    let left = dx < 0 ? cx - 8 - width : cx + 8;
-    if (inside) left = Math.max(bounds.left, Math.min(left, bounds.right - width));
-    const top = dy < 0 ? cy - 8 - height : cy + 8;
-    return { x: left, y: top + height - 2, box: { left, top, right: left + width, bottom: top + height } };
-  };
-  const sides = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
-  const spots = [false, true].flatMap((inside) => sides.map((side) => spot(side, inside)));
-  const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-  const fits = (box) => box.left >= bounds.left && box.right <= bounds.right && box.top >= bounds.top && box.bottom <= bounds.bottom;
-  return spots.find((s) => fits(s.box) && !taken.some((t) => overlaps(s.box, t))) ?? spots[sides.length];
+// The month indexes to label on an age axis: January of every n-th age,
+// n the first of 1, 2, 5, 10, 20 for which the labels get `room` pixels
+// each.
+export function ageTicks(months, ageOf, width, room = 34) {
+  const years = months.length / 12;
+  const every = [1, 2, 5, 10, 20].find((n) => (years / n) * room <= width) ?? 50;
+  const ticks = [];
+  months.forEach((month, i) => { if (month.endsWith("-01") && ageOf(month) % every === 0) ticks.push(i); });
+  return ticks;
 }
 
-// options: { months, lines: [{ key, label, values, mark (index or -1),
-// markLabel }], goal (the FI number of each month), retirementIndex (or
-// -1), format, formatAxis, formatMonth, ageOf(month) }. Lines are drawn in
-// order, so the last one is on top where they overlap.
-export function renderForecastChart(root, options) {
-  const { months, lines, goal, retirementIndex, format, formatAxis, formatMonth, ageOf } = options;
+// The first text that fits in `width` pixels, or "".
+export function fitText(texts, width, charWidth = BAR_CHAR) {
+  return texts.find((t) => t && t.length * charWidth + 14 <= width) ?? "";
+}
+
+// A status icon: lasts (a check), runs out at the low growth (a warning
+// triangle) or at the expected one (a cross).
+function statusIcon(level, cx, cy) {
+  const g = svg("g", { class: `status-icon ${level}`, "aria-hidden": "true" });
+  if (level === "risk") {
+    g.append(svg("path", { class: "shape", d: `M${cx} ${cy - 7.5}l7.5 13.5h-15z` }));
+    g.append(svg("path", { class: "sign", d: `M${cx} ${cy - 2.5}v4.2M${cx} ${cy + 3.6}v.4` }));
+  } else {
+    g.append(svg("circle", { class: "shape", cx, cy, r: 7.5 }));
+    g.append(svg("path", { class: "sign", d: level === "ok" ? `M${cx - 3.4} ${cy + 0.2}l2.3 2.4l4.6-5` : `M${cx - 3} ${cy - 3}l6 6M${cx + 3} ${cy - 3}l-6 6` }));
+  }
+  return g;
+}
+
+// options:
+// - months: the shown months; ageOf(month)
+// - rows: [{ key, name, level ("ok", "risk", "bad", or null), title (what
+//   the icon means), missing (text instead of a bar, for a plan that
+//   doesn't happen), segments: [{ kind ("invest", "coast" or "retired"),
+//   from, to (indexes; to excluded), texts (the amount a month, longest
+//   first), share (retired: the portfolio's part, 0 to 1), end (the value
+//   at its end, or null), step (it splits a phase), cause: { text, income }
+//   or null }], out: { from, text } or null }]
+// - selected: a row's key; onSelect(key), focus (focus the selected row)
+// - chart: { values: { low, mid, high }, rates: { low, high } (labels),
+//   phases: [{ kind, from, to }], marks: [indexes], steps: [indexes],
+//   outs: [indexes] } for the selected plan
+// - format(cents), formatShort(cents), formatAxis(cents), formatMonth(month)
+export function renderForecast(root, options) {
+  const { months, rows, selected, chart: plot, ageOf, format, formatShort, formatAxis, formatMonth } = options;
   root.replaceChildren();
   const width = Math.max(320, Math.round(root.clientWidth || 640));
-  const height = FORECAST_HEIGHT;
-  const margin = FORECAST_MARGIN;
-  const plotW = width - margin.left - margin.right;
-  const plotH = height - margin.top - margin.bottom;
+  const left = width >= 720 ? 200 : 136;
+  const plotW = width - left - PLAN_MARGIN.right;
   const last = months.length - 1;
+  const x = (i) => left + (last === 0 ? plotW / 2 : (Math.min(i, last) * plotW) / last);
+  const ticks = ageTicks(months, ageOf, plotW);
+  const id = ++ids;
 
-  const ticks = niceTicks(0, forecastTop(lines, goal, retirementIndex));
-  const yMax = ticks.at(-1);
-  const x = (i) => margin.left + (last === 0 ? plotW / 2 : (i * plotW) / last);
-  const y = (v) => margin.top + plotH - (v / yMax) * plotH;
-  // Dots stay on the chart; lines above the top leave it (clipped).
-  const yDot = (v) => y(Math.min(v, yMax));
-
-  const chart = svg("svg", {
-    viewBox: `0 0 ${width} ${height}`,
-    width,
-    height,
-    class: "chart",
-    role: "img",
-    tabindex: 0,
-    "aria-label": "Forecast of the portfolio for each plan, by year. Use the arrow keys to read each year.",
-  });
-  const clipId = `chart-clip-${++ids}`;
-  const clip = svg("clipPath", { id: clipId });
-  clip.append(svg("rect", { x: margin.left - 4, y: margin.top - 4, width: plotW + 8, height: plotH + 8 }));
+  // ---- the bars
+  const barsH = PLAN_AXIS + rows.length * PLAN_ROW;
+  const bars = svg("svg", { viewBox: `0 0 ${width} ${barsH}`, width, height: barsH, class: "chart plan-bars", role: "radiogroup", "aria-label": "Plans" });
   const defs = svg("defs");
-  defs.append(clip);
-  chart.append(defs);
-  const inPlot = `url(#${clipId})`;
-
-  for (const tick of ticks) {
-    chart.append(svg("line", { class: "grid", x1: margin.left, x2: width - margin.right, y1: y(tick), y2: y(tick) }));
-    chart.append(text({ class: "axis", x: margin.left - 8, y: y(tick), "text-anchor": "end", "dominant-baseline": "middle" }, formatAxis(tick)));
+  const hatch = svg("pattern", { id: `coast-${id}`, width: 7, height: 7, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
+  hatch.append(svg("rect", { class: "hatch-bg", width: 7, height: 7 }), svg("line", { class: "hatch-line", x1: 0, y1: 0, x2: 0, y2: 7 }));
+  const red = svg("pattern", { id: `out-${id}`, width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(-45)" });
+  red.append(svg("rect", { class: "out-bg", width: 6, height: 6 }), svg("line", { class: "out-line", x1: 0, y1: 0, x2: 0, y2: 6 }));
+  defs.append(hatch, red);
+  bars.append(defs);
+  for (const i of ticks) {
+    bars.append(svg("line", { class: "grid", x1: x(i), x2: x(i), y1: PLAN_AXIS - 6, y2: barsH }));
+    bars.append(text({ class: "axis", x: x(i), y: 14, "text-anchor": "middle" }, `${ageOf(months[i])}`));
   }
+  bars.append(text({ class: "axis", x: left - 10, y: 14, "text-anchor": "end" }, "Age"));
 
-  // A label every 1, 2, 5, 10 or 20 years, at January of years whose age
-  // divides by that, so that the labels have room.
-  const years = months.length / 12;
-  const room = Math.max(2, Math.floor(plotW / 64));
-  const every = [1, 2, 5, 10, 20].find((n) => years / n <= room) ?? 50;
-  months.forEach((month, i) => {
-    if (!month.endsWith("-01") || ageOf(month) % every !== 0) return;
-    chart.append(text({ class: "axis strong", x: x(i), y: height - 22, "text-anchor": "middle" }, `${ageOf(month)}`));
-    chart.append(text({ class: "axis", x: x(i), y: height - 8, "text-anchor": "middle" }, month.slice(0, 4)));
+  const labels = []; // texts under the bars go last, over the next row
+  const groups = [];
+  rows.forEach((row, n) => {
+    const y0 = PLAN_AXIS + n * PLAN_ROW;
+    const by = y0 + 20;
+    const on = row.key === selected;
+    const g = svg("g", { class: `plan-row${on ? " on" : ""}${row.missing ? " missing" : ""}` });
+    g.append(svg("rect", { class: "row-bg", x: 1, y: y0 - 2, width: width - 2, height: PLAN_ROW - 4, rx: 6 }));
+    if (row.level) g.append(statusIcon(row.level, 16, by + PLAN_BAR / 2));
+    g.append(text({ class: "plan-name", x: row.level ? 32 : 12, y: by + PLAN_BAR / 2 + 4.5 }, row.name));
+    if (row.missing) {
+      g.append(text({ class: "plan-missing", x: left + 4, y: by + PLAN_BAR / 2 + 4.5 }, row.missing));
+    } else {
+      g.setAttribute("role", "radio");
+      g.setAttribute("aria-checked", String(on));
+      g.setAttribute("tabindex", on ? "0" : "-1");
+      g.setAttribute("aria-label", `${row.name}: ${row.title}`);
+      g.dataset.key = row.key;
+      const title = svg("title");
+      title.textContent = row.title;
+      g.append(title);
+      groups.push(g);
+    }
+    let valueLeft = Infinity; // values above the bars, from the right, clear of each other
+    const ends = [];
+    for (const seg of row.segments) {
+      const x0 = x(seg.from);
+      const x1 = x(seg.to);
+      const w = Math.max(2, x1 - x0 - 2);
+      if (seg.kind === "retired") {
+        const own = PLAN_BAR * seg.share;
+        if (seg.share < 0.999) g.append(svg("rect", { class: "plan-bar other", x: x0 + 1, y: by, width: w, height: PLAN_BAR - own }));
+        g.append(svg("rect", { class: "plan-bar retired", x: x0 + 1, y: by + PLAN_BAR - own, width: w, height: own }));
+      } else {
+        g.append(svg("rect", { class: `plan-bar ${seg.kind}`, x: x0 + 1, y: by, width: w, height: PLAN_BAR, rx: 3, ...(seg.kind === "coast" ? { fill: `url(#coast-${id})` } : {}) }));
+      }
+      if (seg.step) g.append(svg("line", { class: "notch", x1: x0, x2: x0, y1: by - 3, y2: by + PLAN_BAR + 3 }));
+      const t = fitText(seg.texts, x1 - x0);
+      if (t) g.append(text({ class: `plan-bar-text ${seg.kind}`, x: x0 + 8, y: by + PLAN_BAR / 2 + 4.5 }, t));
+      if (seg.end !== null) ends.push([x1, seg.end]);
+      if (seg.cause) labels.push({ x: x0 + 4, y: by + PLAN_BAR + 14, text: seg.cause.text, class: seg.cause.income ? "plan-cause income" : "plan-cause" });
+    }
+    for (const [x1, value] of ends.reverse()) {
+      const label = formatShort(value);
+      const right = Math.min(x1 - 4, width - 4);
+      if (right > valueLeft - 8) continue;
+      g.append(text({ class: "plan-value", x: right, y: by - 6, "text-anchor": "end" }, label));
+      valueLeft = right - label.length * CHAR_WIDTH;
+    }
+    if (row.out) {
+      // Only the portfolio's part runs out: other income goes on.
+      for (const seg of row.segments) {
+        if (seg.kind !== "retired" || seg.to <= row.out.from) continue;
+        const x0 = x(Math.max(seg.from, row.out.from));
+        const own = PLAN_BAR * seg.share;
+        g.append(svg("rect", { class: "plan-bar out", x: x0, y: by + PLAN_BAR - own, width: Math.max(2, x(seg.to) - x0 - 1), height: own, fill: `url(#out-${id})` }));
+      }
+      const ox = x(row.out.from);
+      const clash = labels.some((l) => l.y === by + PLAN_BAR + 14 && Math.abs(l.x - ox) < l.text.length * CHAR_WIDTH + 8);
+      const outWidth = row.out.text.length * CHAR_WIDTH;
+      labels.push(clash || ox + outWidth > width - 4
+        ? { x: width - 4, y: by + PLAN_BAR + 14, text: row.out.text, class: "plan-out-label", anchor: "end" }
+        : { x: ox, y: by + PLAN_BAR + 14, text: row.out.text, class: "plan-out-label" });
+    }
+    bars.append(g);
   });
-  chart.append(text({ class: "axis", x: margin.left - 8, y: height - 22, "text-anchor": "end" }, "Age"));
+  for (const l of labels) bars.append(text({ class: l.class, x: l.x, y: l.y, ...(l.anchor ? { "text-anchor": l.anchor } : {}) }, l.text));
 
-  // Retirement: a line through the plot, labeled above it.
-  if (retirementIndex >= 0 && retirementIndex <= last) {
-    const rx = x(retirementIndex);
-    chart.append(svg("line", { class: "marker", x1: rx, x2: rx, y1: margin.top - 4, y2: margin.top + plotH }));
-    const right = rx > margin.left + plotW * 0.75;
-    chart.append(text({ class: "marker-label", x: right ? rx - 6 : rx + 6, y: margin.top - 10, "text-anchor": right ? "end" : "start" }, `Retirement at ${ageOf(months[retirementIndex])}`));
+  const pick = (g) => {
+    if (g.getAttribute("aria-checked") === "true") return;
+    options.onSelect(g.dataset.key);
+  };
+  for (const g of groups) {
+    g.addEventListener("click", () => pick(g));
+    g.addEventListener("keydown", (event) => {
+      const k = groups.indexOf(g);
+      const next = { ArrowDown: k + 1, ArrowRight: k + 1, ArrowUp: k - 1, ArrowLeft: k - 1 }[event.key];
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        pick(g);
+      } else if (next !== undefined) {
+        event.preventDefault();
+        pick(groups[(next + groups.length) % groups.length]);
+      }
+    });
   }
 
-  // The FI number rises with inflation; its label says today's, above the
-  // line all along the label.
+  // ---- the picked plan's chart
+  const box = document.createElement("div");
+  box.className = "chart-box";
+  root.append(bars, box);
+  if (!plot) return focusPicked();
+  const height = PLAN_CHART;
+  const plotTop = PLAN_MARGIN.top;
+  const plotH = height - plotTop - PLAN_MARGIN.bottom;
+  const { low, mid, high } = plot.values;
+  const lastPhase = plot.phases.at(-1);
+  const axisTicks = niceTicks(0, forecastTop(mid, lastPhase ? lastPhase.from : last));
+  const yMax = axisTicks.at(-1);
+  const y = (v) => plotTop + plotH - (Math.min(v, yMax * 1.5) / yMax) * plotH;
+  const chart = svg("svg", {
+    viewBox: `0 0 ${width} ${height}`, width, height, class: "chart plan-chart", role: "img", tabindex: 0,
+    "aria-label": "The picked plan's portfolio by year, at the expected return with a band for less and more growth. Use the arrow keys to read each year.",
+  });
+  const clip = svg("clipPath", { id: `plan-clip-${id}` });
+  clip.append(svg("rect", { x: left, y: plotTop - 2, width: plotW, height: plotH + 4 }));
+  const chartDefs = svg("defs");
+  chartDefs.append(clip);
+  chart.append(chartDefs);
+  for (const phase of plot.phases) {
+    chart.append(svg("rect", { class: `phase ${phase.kind}`, x: x(phase.from), y: plotTop, width: Math.max(0, x(phase.to) - x(phase.from)), height: plotH }));
+    if (phase.from > 0) chart.append(svg("line", { class: "phase-edge", x1: x(phase.from), x2: x(phase.from), y1: plotTop, y2: plotTop + plotH }));
+  }
+  for (const tick of axisTicks) {
+    chart.append(svg("line", { class: "grid", x1: left, x2: width - PLAN_MARGIN.right, y1: y(tick), y2: y(tick) }));
+    chart.append(text({ class: "axis", x: left - 8, y: y(tick), "text-anchor": "end", "dominant-baseline": "middle" }, formatAxis(tick)));
+  }
+  for (const i of ticks) {
+    chart.append(text({ class: "axis strong", x: x(i), y: height - 22, "text-anchor": "middle" }, `${ageOf(months[i])}`));
+    chart.append(text({ class: "axis", x: x(i), y: height - 8, "text-anchor": "middle" }, months[i].slice(0, 4)));
+  }
+  chart.append(text({ class: "axis", x: left - 8, y: height - 22, "text-anchor": "end" }, "Age"));
+  const inPlot = `url(#plan-clip-${id})`;
   const points = (values) => values.map((v, i) => [x(i), y(v)]);
-  chart.append(svg("path", { class: "goal", d: linePath(points(goal)), "clip-path": inPlot }));
-  const goalText = `FI number ${format(goal[0])}`;
-  const goalWidth = goalText.length * CHAR_WIDTH;
-  let above = y(goal[0]);
-  for (let i = 0; i <= last && x(i) <= margin.left + 6 + goalWidth; i++) above = Math.min(above, y(goal[i]));
-  chart.append(text({ class: "goal-label", x: margin.left + 6, y: above - 6 }, goalText));
-
-  for (const line of lines) chart.append(svg("path", { class: `line plan-${line.key}`, d: linePath(points(line.values)), "clip-path": inPlot }));
-
-  // A dot where a plan changes course, with what happens there, clear of
-  // the FI number's label and of each other.
-  const taken = [{ left: margin.left + 6, right: margin.left + 6 + goalWidth, top: above - 18, bottom: above - 2 }];
-  const bounds = { left: margin.left, right: width - margin.right, top: margin.top, bottom: margin.top + plotH };
-  for (const line of lines) {
-    if (line.mark < 0 || line.mark > last) continue;
-    const cx = x(line.mark);
-    const cy = yDot(line.values[line.mark]);
-    chart.append(svg("circle", { class: `mark plan-${line.key}`, cx, cy, r: 4.5 }));
-    if (!line.markLabel) continue;
-    const spot = placeLabel(cx, cy, line.markLabel.length * CHAR_WIDTH, bounds, taken);
-    taken.push(spot.box);
-    chart.append(text({ class: "mark-label", x: spot.x, y: spot.y }, line.markLabel));
+  chart.append(svg("path", { class: "band", d: areaPath(points(high), points(low)), "clip-path": inPlot }));
+  chart.append(svg("path", { class: "band-edge", d: linePath(points(low)), "clip-path": inPlot }));
+  for (const phase of plot.phases) {
+    const from = Math.max(0, phase.from - 1);
+    chart.append(svg("path", { class: `line ${phase.kind}`, d: linePath(points(mid.slice(from, phase.to + 1)).map(([, py], k) => [x(from + k), py])), "clip-path": inPlot }));
   }
+  // The band's edges, named where they part.
+  const first = plot.phases[0];
+  const at = Math.max(12, Math.round((first && plot.phases.length > 1 ? first.to : last) * 0.8));
+  if (at < last && high[at] - low[at] > yMax * 0.08) {
+    chart.append(text({ class: "band-label", x: x(at), y: Math.max(plotTop + 10, y(high[at]) - 6), "text-anchor": "middle" }, plot.rates.high));
+    chart.append(text({ class: "band-label", x: x(at), y: Math.min(plotTop + plotH - 4, y(low[at]) + 15), "text-anchor": "middle" }, plot.rates.low));
+  }
+  for (const i of plot.steps) chart.append(svg("line", { class: "step-line", x1: x(i), x2: x(i), y1: plotTop, y2: plotTop + plotH }));
+  for (const i of plot.marks) {
+    if (mid[i] > yMax) continue;
+    const kind = plot.steps.includes(i + 1) ? "step" : plot.phases.find((p) => i >= p.from && i < p.to)?.kind ?? "retired";
+    chart.append(svg("circle", { class: `mark ${kind}`, cx: x(i), cy: y(mid[i]), r: 4.5 }));
+  }
+  for (const i of plot.outs) chart.append(svg("circle", { class: "mark out", cx: x(i), cy: y(0), r: 5 }));
 
-  // Hover layer: a crosshair and one dot per line, a year at a time.
-  const cross = svg("line", { class: "cross", y1: margin.top, y2: margin.top + plotH, visibility: "hidden" });
-  const dots = lines.map((line) => svg("circle", { class: `dot plan-${line.key}`, r: 4, visibility: "hidden" }));
-  const hit = svg("rect", { class: "hit", x: margin.left - 12, y: 0, width: plotW + 24, height });
+  // Hover: a crosshair, a dot on each line, a year at a time.
+  const cross = svg("line", { class: "cross", y1: plotTop, y2: plotTop + plotH, visibility: "hidden" });
+  const lines = [["high", high, plot.rates.high], ["mid", mid, plot.rates.mid], ["low", low, plot.rates.low]];
+  const dots = lines.map(([kind]) => svg("circle", { class: `dot ${kind}`, r: 4, visibility: "hidden" }));
+  const hit = svg("rect", { class: "hit", x: left - 12, y: 0, width: plotW + 24, height });
   chart.append(cross, ...dots, hit);
-
   const tip = document.createElement("div");
   tip.className = "tip";
   tip.hidden = true;
-  root.append(chart, tip);
+  box.append(chart, tip);
 
   let current = -1;
   function show(i) {
@@ -492,49 +606,43 @@ export function renderForecastChart(root, options) {
     for (const el of [cross, ...dots]) el.setAttribute("visibility", "visible");
     cross.setAttribute("x1", x(current));
     cross.setAttribute("x2", x(current));
-    lines.forEach((line, n) => {
+    lines.forEach(([, values], n) => {
       dots[n].setAttribute("cx", x(current));
-      dots[n].setAttribute("cy", yDot(line.values[current]));
+      dots[n].setAttribute("cy", y(Math.min(values[current], yMax)));
     });
-
     const title = document.createElement("div");
     title.className = "tip-title";
     title.textContent = `${formatMonth(months[current])} · age ${ageOf(months[current])}`;
     tip.replaceChildren(title);
-    const rows = [...lines].reverse().map((line) => [`plan-${line.key}`, line.values[current], line.label]);
-    rows.push(["goal", goal[current], "FI number"]);
-    for (const [kind, value, name] of rows) {
+    for (const [kind, values, rate] of lines) {
       const row = document.createElement("div");
       row.className = "tip-row";
       const key = document.createElement("span");
-      key.className = `key ${kind}`;
+      key.className = `key growth-${kind}`;
       const strong = document.createElement("strong");
-      strong.textContent = format(value);
+      strong.textContent = format(values[current]);
       const label = document.createElement("span");
-      label.textContent = name;
+      label.textContent = rate;
       row.append(key, strong, label);
       tip.append(row);
     }
     tip.hidden = false;
     const px = (x(current) / width) * chart.getBoundingClientRect().width;
-    const flip = px > root.clientWidth / 2;
+    const flip = px > box.clientWidth / 2;
     tip.style.left = flip ? "" : `${px + 12}px`;
-    tip.style.right = flip ? `${root.clientWidth - px + 12}px` : "";
+    tip.style.right = flip ? `${box.clientWidth - px + 12}px` : "";
   }
   function hide() {
     for (const el of [cross, ...dots]) el.setAttribute("visibility", "hidden");
     tip.hidden = true;
     current = -1;
   }
-  // Whole years from the start, and the last month.
   const snap = (i) => Math.min(last, Math.round(i / 12) * 12);
-  function nearest(event) {
-    const box = chart.getBoundingClientRect();
-    const px = ((event.clientX - box.left) / box.width) * width;
-    return last === 0 ? 0 : snap(((px - margin.left) / plotW) * last);
-  }
-
-  hit.addEventListener("pointermove", (event) => show(nearest(event)));
+  hit.addEventListener("pointermove", (event) => {
+    const rect = chart.getBoundingClientRect();
+    const px = ((event.clientX - rect.left) / rect.width) * width;
+    show(last === 0 ? 0 : snap(((px - left) / plotW) * last));
+  });
   hit.addEventListener("pointerleave", hide);
   chart.addEventListener("focus", () => show(0));
   chart.addEventListener("blur", hide);
@@ -544,4 +652,9 @@ export function renderForecastChart(root, options) {
     event.preventDefault();
     show(current === -1 ? 0 : snap(current + step));
   });
+  return focusPicked();
+
+  function focusPicked() {
+    if (options.focus) groups.find((g) => g.dataset.key === selected)?.focus();
+  }
 }
