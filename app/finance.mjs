@@ -4,7 +4,7 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 12;
+export const VERSION = 13;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
@@ -26,6 +26,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   birthYear: null, // not set until entered; the forecast needs it
   retirementAge: 67,
   emergencyMonths: 6, // the emergency fund to keep in cash, in months of expenses
+  // What is paid in a month from now on, in cents, for the investment rate
+  // and every projection; null: the average pay-in of the last 12 months.
+  futurePayIn: null,
 });
 
 // What the birth year and the retirement age may be.
@@ -58,7 +61,7 @@ export function emptyStore() {
 // ---------------------------------------------------------------- file format
 
 const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events"];
-const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge", "emergencyMonths"];
+const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge", "emergencyMonths", "futurePayIn"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths", "from", "until"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active", "essential"];
 const ACCOUNT_KEYS = ["id", "name", "kind"];
@@ -212,8 +215,18 @@ function upgradeFromVersion9(value) {
 function upgradeFromVersion11(value) {
   const next = { ...value, version: 12 };
   if (isObject(value.settings)) {
-    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "emergencyMonths"), "settings");
+    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "emergencyMonths" && key !== "futurePayIn"), "settings");
     next.settings = { ...value.settings, emergencyMonths: DEFAULT_SETTINGS.emergencyMonths };
+  }
+  return next;
+}
+
+// Version 12 had no future pay-in: projections go on with the average.
+function upgradeFromVersion12(value) {
+  const next = { ...value, version: 13 };
+  if (isObject(value.settings)) {
+    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "futurePayIn"), "settings");
+    next.settings = { ...value.settings, futurePayIn: DEFAULT_SETTINGS.futurePayIn };
   }
   return next;
 }
@@ -255,6 +268,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 9) value = upgradeFromVersion9(value);
     if (isObject(value) && value.version === 10) value = upgradeFromVersion10(value);
     if (isObject(value) && value.version === 11) value = upgradeFromVersion11(value);
+    if (isObject(value) && value.version === 12) value = upgradeFromVersion12(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -262,7 +276,7 @@ export function parseStore(value) {
     if (value.version !== VERSION) throw new Error(`unsupported version ${JSON.stringify(value.version)}`);
 
     checkKeys(value.settings, SETTINGS_KEYS, "settings");
-    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, inflation, birthYear, retirementAge, emergencyMonths } = value.settings;
+    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, inflation, birthYear, retirementAge, emergencyMonths, futurePayIn } = value.settings;
     if (typeof withdrawalRate !== "number" || !(withdrawalRate > 0 && withdrawalRate <= 100)) {
       throw new Error("settings.withdrawalRate must be above 0 and at most 100");
     }
@@ -287,6 +301,9 @@ export function parseStore(value) {
     }
     if (!isWholeIn(emergencyMonths, EMERGENCY_MONTHS)) {
       throw new Error(`settings.emergencyMonths must be a whole number from ${EMERGENCY_MONTHS.min} to ${EMERGENCY_MONTHS.max}`);
+    }
+    if (futurePayIn !== null && !isCents(futurePayIn, { min: 0 })) {
+      throw new Error("settings.futurePayIn must be null or a number of cents, not negative");
     }
 
     checkKeys(value.categories, KINDS, "categories");
@@ -665,6 +682,17 @@ export function averagePayIn(series, window = 12) {
   return { average: sum(recent.map((m) => m.payIn)) / recent.length, months: recent.length };
 }
 
+// What is paid in a month from the latest month on, for the investment
+// rate and every projection: the amount set in Settings, or else the
+// average pay-in of the portfolioSeries `series`. Returns { amount, months }
+// where months is how many months the average is of, null for the amount
+// set; null without either.
+export function futurePayIn(settings, series) {
+  if (settings.futurePayIn !== null) return { amount: settings.futurePayIn, months: null };
+  const average = averagePayIn(series);
+  return average && { amount: average.average, months: average.months };
+}
+
 // The longest projection: 100 years.
 export const MAX_PROJECTION_MONTHS = 1200;
 
@@ -675,7 +703,7 @@ export function monthlyRate(percent) {
 }
 
 // Projections are in the money of each month. Pay-ins stay as they are:
-// the average they come from rises on its own when they do. Expenses and
+// the average they may come from rises on its own when they do. Expenses and
 // the FI number rise by the inflation: `amount` (today's) `months` from now.
 export function inflated(amount, inflation, months) {
   return amount * (1 + monthlyRate(inflation)) ** months;
@@ -1020,22 +1048,22 @@ export function metrics(store, now = currentMonth()) {
   const series = portfolioSeries(store);
   const worth = netWorthSeries(store);
   const last = series.at(-1) ?? null;
-  const payIn = averagePayIn(series);
+  const payIn = futurePayIn(store.settings, series);
   // Retiring in a month after the latest one: the FI number of that month.
   const from = last ? monthIndex(last.month) : nowIndex;
   const goal = (options) => (n) => fiNumberIn(store, Math.max(from + n, nowIndex), options);
   const fiNumber = fiNumberIn(store, nowIndex);
   // The planned one-offs n months after the latest month.
   const oneOffs = (n) => oneOffsIn(store, from + n);
-  // From the latest month on, with the average pay-in of the last 12 months.
-  const ahead = last && fiNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, goal(), inflation, oneOffs) : null;
+  // From the latest month on, with the future pay-in.
+  const ahead = last && fiNumber > 0 ? projectToGoal(last.value, payIn.amount, expectedReturn, goal(), inflation, oneOffs) : null;
   // Lean FI: the same for the essential expenses only.
   const essential = store.expenses.some((item) => item.active !== false && item.essential);
   let lean = null;
   if (essential) {
     const leanExpenses = needIn(store, nowIndex, nowIndex, { essential: true });
     const leanNumber = fiNumberIn(store, nowIndex, { essential: true });
-    const leanAhead = last && leanNumber > 0 ? projectToGoal(last.value, payIn.average, expectedReturn, goal({ essential: true }), inflation, oneOffs) : null;
+    const leanAhead = last && leanNumber > 0 ? projectToGoal(last.value, payIn.amount, expectedReturn, goal({ essential: true }), inflation, oneOffs) : null;
     lean = {
       expenses: leanExpenses,
       fiNumber: leanNumber,
@@ -1070,8 +1098,9 @@ export function metrics(store, now = currentMonth()) {
       : null,
     latestMonth: last ? last.month : null,
     portfolio: last ? last.value : null,
+    // What is paid in a month from now on (futurePayIn).
     payIn,
-    investmentRate: payIn && income > 0 ? payIn.average / income : null,
+    investmentRate: payIn && income > 0 ? payIn.amount / income : null,
     fiProgress: last && fiNumber > 0 ? last.value / fiNumber : null,
     // Months until the portfolio reaches the FI number of that month (0: it
     // has), and the projected value of each; null without a portfolio and
@@ -1088,13 +1117,12 @@ export function metrics(store, now = currentMonth()) {
   };
 }
 
-// Where the monthly income goes: expenses with the buffer, the average
-// monthly pay-in (withdrawals count as nothing invested), and what is left
-// over. over: how much more than the income those two take. null without
+// Where the monthly income goes: expenses with the buffer, the future
+// pay-in (withdrawals count as nothing invested), and what is left over. over: how much more than the income those two take. null without
 // income.
 export function incomeSplit(m) {
   if (!(m.income > 0)) return null;
-  const invested = Math.max(0, m.payIn?.average ?? 0);
+  const invested = Math.max(0, m.payIn?.amount ?? 0);
   const rest = m.income - m.expenses - invested;
   return { expenses: m.expenses, invested, leftOver: Math.max(0, rest), over: Math.max(0, -rest) };
 }
@@ -1276,16 +1304,16 @@ export function forecast(params) {
   };
 }
 
-// The average pay-in that forecasts go on with: of the last 12 months, in
+// The pay-in that forecasts go on with: the future pay-in (futurePayIn), in
 // whole cents, and never a withdrawal. 0 without pay-ins.
 export function forecastPayIn(m) {
-  return m.payIn ? Math.max(0, Math.round(m.payIn.average)) : 0;
+  return m.payIn ? Math.max(0, Math.round(m.payIn.amount)) : 0;
 }
 
 // forecast() params for a store and its metrics, without the growth: from
 // the latest month (this month without one) and its portfolio, with the
 // expenses, income and FI numbers month by month and the planned one-offs,
-// investing the average pay-in (forecastPayIn) and nothing after Coast FI.
+// investing the future pay-in (forecastPayIn) and nothing after Coast FI.
 export function forecastParams(store, m, now = currentMonth()) {
   const { birthYear, retirementAge, inflation } = store.settings;
   const nowIndex = monthIndex(now);
@@ -1306,7 +1334,7 @@ export function forecastParams(store, m, now = currentMonth()) {
 }
 
 // Coast FI as the Forecast page's Coast plan has it at the expected return,
-// investing the average pay-in until then and nothing after. null without a
+// investing the future pay-in until then and nothing after. null without a
 // year of birth or an FI number, and once retirement has started. Otherwise
 // { fiNumber: what the portfolio needs in the latest month (forecast's
 // coastNumber), fiAtRetirement, progress: the portfolio ÷ that, month: when
