@@ -46,7 +46,7 @@ the data.
 
 ![The update button: check, Update, Restart to update, Updating, Up to date](docs/update.png)
 
-Settings › Updates chooses which updates the button offers. **Stable**, the
+Settings › General › Updates chooses which updates the button offers. **Stable**, the
 default, offers releases. **Preview** offers every change on `main` as soon
 as CI has passed for it, days or weeks before it is released: new features
 first, and now and then a new bug. A preview is named by its commit, such as
@@ -56,7 +56,7 @@ GitHub list the changes. Back on Stable, Finance keeps the version it has
 until a release is newer. It never goes back to an older version, which
 could not read data saved by a newer one.
 
-![Settings › Updates: Stable or Preview](docs/update-channel.png)
+![Settings › General › Updates: Stable or Preview](docs/update-channel.png)
 
 Looking for updates asks the repository Finance was cloned from (GitHub) for
 its tags, and on Preview for its `preview` branch. Nothing about the data is
@@ -99,15 +99,9 @@ Finance window's browser profile. The data file stays.
   [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
 - **Forecast**: how the portfolio could grow until retirement, and whether
   it lasts after, in three plans and at three growth rates (6, 8 and 10 % a
-  year before inflation, by default), with planned one-offs. See
-  [Forecast](#forecast).
-- **Settings**:
-  - Currency (default euro). It only changes how amounts are shown; nothing
-    is converted.
-  - Number format for amounts and percentages: `1.000.000,00` (default),
-    with the currency sign after the amount (`1.234,56 €`), or
-    `1,000,000.00`, with it before (`€1,234.56`). Amounts can be typed
-    either way. Dates follow the system language.
+  year before inflation, by default), with planned one-offs. It only shows:
+  what it goes on is set in Settings. See [Forecast](#forecast).
+- **Settings**, in three tabs. **Data**, what the numbers go on:
   - Safe withdrawal rate (default 4 %) and a buffer on expenses for irregular
     costs (default 10 %).
   - Expected return (default 8 %): the portfolio's yearly return before
@@ -129,12 +123,12 @@ Finance window's browser profile. The data file stays.
   - Rise with inflation (off by default): off, every pay-in stays the same
     amount of money for good. On, pay-ins are in today's money like your
     expenses, and the projections raise them by the inflation.
-  - Year of birth and the official retirement age (default 67: when the
-    state pension starts without deductions, not when you plan to stop
-    working), for the forecast. The forecast needs the year of birth; it is
-    empty until entered. Ages and retirement start in January of their year.
+  - After Coast FI, per month (default 0): what the Forecast's Coast plan
+    still pays in once Coast FI is reached. It stays the same amount of
+    money, also with rising pay-ins.
   - Emergency fund (default 6): how many months of expenses to keep in
     cash accounts; 0 sets no target.
+  - Planned one-offs; see [Forecast](#forecast).
   - Categories, one list for expenses and one for income. A new data file
     starts with a few common ones. Renaming a category renames it on every
     expense or income that has it; deleting one leaves them without a
@@ -142,10 +136,24 @@ Finance window's browser profile. The data file stays.
   - Accounts, each with what it holds; see
     [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
     Deleting one deletes its monthly values too.
-  - Import past months from CSV, and export all monthly values as CSV.
+
+  **General**, what seldom changes:
+  - Currency (default euro). It only changes how amounts are shown; nothing
+    is converted.
+  - Number format for amounts and percentages: `1.000.000,00` (default),
+    with the currency sign after the amount (`1.234,56 €`), or
+    `1,000,000.00`, with it before (`€1,234.56`). Amounts can be typed
+    either way. Dates follow the system language.
+  - Year of birth and the official retirement age (default 67: when the
+    state pension starts without deductions, not when you plan to stop
+    working), for the forecast. The forecast needs the year of birth; it is
+    empty until entered. Ages and retirement start in January of their year.
   - The [lock](#lock): on or off.
   - Where the data file and its daily backups are, and which updates to
     offer.
+
+  **Export/Import**: import past months from CSV, and export all monthly
+  values as CSV.
 
 The pages keep their text short. An ⓘ next to a number, a column or a field
 explains it: what it means, how it is worked out, and what is assumed. Click
@@ -173,8 +181,8 @@ to the page, and not to other programs on the computer.
 
 The lock is on once `setup` has installed its polkit action. The fingerprint
 needs Omarchy's fingerprint setup (Omarchy menu › Setup › Security ›
-Fingerprint); without it, the dialog asks for the password. Settings › Lock
-turns the lock off, after the same dialog, and on again. If the dialog never
+Fingerprint); without it, the dialog asks for the password. Settings ›
+General › Lock turns the lock off, after the same dialog, and on again. If the dialog never
 appears, `sudo rm /usr/share/polkit-1/actions/io.github.simonmcschubert.omarchy-finance.policy`
 turns the lock off until `setup` runs again.
 
@@ -356,7 +364,7 @@ tile for each answers its question:
 | Plan | Invests | Its tile says |
 | --- | --- | --- |
 | Keep investing | until retirement | what the portfolio is worth when retirement starts |
-| Coast | until Coast FI, then only the amount set for after it (default 0) | when Coast FI is |
+| Coast | until Coast FI, then only the amount set for after it in Settings (default 0) | when Coast FI is |
 | Retire early | until the portfolio reaches the FI number, then lives off it | when that is |
 
 Retirement starts in January of the year you reach the retirement age; for
@@ -401,7 +409,7 @@ not in the data file.
   when it is entered under Income, from its age, and the FI number covers
   the years until it starts. Taxes are left out.
 
-**Planned one-offs**, at the bottom of the page, are money that comes in
+**Planned one-offs**, in Settings › Data, are money that comes in
 or goes out once in a month to come: an inheritance, a house deposit, a
 car, a sabbatical (what you live on then, and the pay-ins you skip). Every
 plan gets them in their month, as do Time to FI and the Path to FI chart;
@@ -409,12 +417,12 @@ Coast FI counts on those still to come before retirement. Amounts are in
 today's money and rise with inflation, like expenses. They are saved; a
 one-off that has happened goes under Portfolio.
 
-The amounts typed on the page are not saved; the year of birth and the
-retirement age are in Settings.
+The page has nothing to fill in: the amount after Coast FI, the planned
+one-offs, the year of birth and the retirement age are in Settings.
 
 ### Importing past months
 
-Settings → **Import past months from CSV**: choose a file or paste rows
+Settings › Export/Import → **Import past months from CSV**: choose a file or paste rows
 copied from a spreadsheet. One row per account and month:
 
 ```csv
@@ -441,7 +449,7 @@ problem.
 
 ### Exporting
 
-Settings → **Export CSV** saves every monthly value to
+Settings › Export/Import → **Export CSV** saves every monthly value to
 `finance-portfolio-<date>.csv` in the same columns, so the import reads it
 back. Each row's date is the last day of its month. Amounts have two
 decimals. Where the system language writes a decimal comma (German, for
@@ -461,7 +469,7 @@ was, as `backups/finance-<date>.json` next to it (for example
 `finance-2026-11-16.json`), and keeps the copies of the last 30 days with
 changes. A bad import or a slip can be undone by copying that day's file
 over `finance.json`; open windows show it once they get focus. Settings ›
-Data file shows where the copies are. A copy that cannot be written is
+General › Data file shows where the copies are. A copy that cannot be written is
 logged, and the change is still saved.
 
 If the file cannot be read, Finance shows an error and saves nothing until the

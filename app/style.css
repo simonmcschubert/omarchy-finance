@@ -201,6 +201,13 @@ nav a.active {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
+/* The tabs of Settings, over a line. */
+nav.tabs {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 16px;
+}
+
 /* The update button (update.mjs), at the right end of the header. */
 .update {
   margin-left: auto;
@@ -1074,17 +1081,6 @@ form.inline input {
   margin: 12px 0 4px;
 }
 
-.forecast-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: end;
-}
-
-.forecast-form input {
-  width: 160px;
-}
-
 /* A label over a group of buttons, as over a text field. */
 .field {
   display: flex;
@@ -1439,13 +1435,26 @@ table.entry th {
   margin-top: 16px;
 }
 
+/* What the Coast plan pays in after Coast FI, under the pay-ins. */
+.coast-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  margin-top: 16px;
+}
+
+.coast-form input {
+  width: 160px;
+}
+
 @media (max-width: 720px) {
   .payin-form {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
-/* ---- planned one-offs on the Forecast page */
+/* ---- planned one-offs in Settings */
 
 .event-form {
   display: grid;
