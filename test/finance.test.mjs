@@ -1448,6 +1448,64 @@ test("forecast: Coast FI is the first month from which the portfolio reaches the
   close(smaller.values[j + 1], smaller.values[j] * (1 + r) + 200 * EUR, "after Coast FI, the smaller amount");
 });
 
+test("forecast: the Coast FI number is what the portfolio needs at the start for Coast FI then", () => {
+  const r = monthly(5);
+  const months = F.monthIndex("2056-12") - F.monthIndex("2026-10");
+  const f = F.forecast(plan());
+  close(f.coastNumber, (600000 * EUR) / (1 + r) ** months, "grown to the end of 2056, it is the FI number");
+  // Coast FI is at the start from that value on, and not a little below it.
+  assert.equal(F.forecast(plan({ value: f.coastNumber })).plans.coast.coastMonth, "2026-10");
+  assert.ok(F.forecast(plan({ value: f.coastNumber * 0.999 })).plans.coast.coastMonth > "2026-10");
+  // What is paid in after Coast FI, and one-offs to come, lower it.
+  assert.ok(F.forecast(plan({ coastContribution: 200 * EUR })).coastNumber < f.coastNumber);
+  const oneOffs = (index) => (index === F.monthIndex("2040-01") ? 300000 * EUR : index === F.monthIndex("2028-01") ? -20000 * EUR : 0);
+  close(F.forecast({ ...plan({ growth: 0 }), oneOffs }).coastNumber, 320000 * EUR, "600,000 less the inheritance, plus the deposit");
+  assert.equal(F.forecast({ ...plan({ growth: 0 }), oneOffs: () => 700000 * EUR }).coastNumber, 0, "one-offs alone reach it");
+  assert.equal(F.forecast(plan({ birthYear: 1950 })).coastNumber, null, "retired already");
+});
+
+test("Coast FI on the dashboard: the Forecast page's Coast plan at the expected return", () => {
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, expectedReturn: 5, inflation: 0, birthYear: 1990 },
+    expenses: [{ id: "rent", name: "Rent", category: "", amount: 2000 * EUR, everyMonths: 1, active: true }],
+    accounts: [{ id: "a", name: "A" }],
+    records: [{ month: "2026-10", account: "a", value: 50000 * EUR, payIn: 1000 * EUR }],
+  });
+  const m = F.metrics(s, "2026-11");
+  const coast = F.coastFi(s, m, "2026-11");
+  // The same as plan(): 50,000 in October 2026, 1,000 a month, 5 %, FI at
+  // 600,000, born 1990, retiring at 67.
+  const f = F.forecast(plan());
+  assert.equal(coast.month, f.plans.coast.coastMonth);
+  assert.equal(coast.months, F.monthIndex(f.plans.coast.coastMonth) - F.monthIndex("2026-10"));
+  close(coast.fiNumber, f.coastNumber, "Coast FI number");
+  close(coast.progress, (50000 * EUR) / f.coastNumber, "progress");
+  close(coast.fiAtRetirement, 600000 * EUR, "the FI number when retirement starts");
+  // The forecast params are the dashboard's: the average pay-in, nothing
+  // after Coast FI.
+  const params = F.forecastParams(s, m, "2026-11");
+  assert.equal(params.contribution, 1000 * EUR);
+  assert.equal(params.coastContribution, 0);
+  assert.equal(params.start, "2026-10");
+
+  const reached = { ...s, records: [{ ...s.records[0], value: 200000 * EUR }] };
+  const now = F.coastFi(reached, F.metrics(reached, "2026-11"), "2026-11");
+  assert.equal(now.months, 0);
+  assert.ok(now.progress > 1);
+
+  const empty = { ...s, records: [] };
+  const none = F.coastFi(empty, F.metrics(empty, "2026-11"), "2026-11");
+  assert.ok(none.fiNumber > 0, "what it needs, without a portfolio too");
+  assert.deepEqual([none.progress, none.month, none.months], [null, null, null]);
+
+  const unborn = { ...s, settings: { ...s.settings, birthYear: null } };
+  assert.equal(F.coastFi(unborn, F.metrics(unborn, "2026-11"), "2026-11"), null, "without a year of birth");
+  const retired = { ...s, settings: { ...s.settings, birthYear: 1950 } };
+  assert.equal(F.coastFi(retired, F.metrics(retired, "2026-11"), "2026-11"), null, "past the retirement age");
+  const nothing = { ...s, expenses: [] };
+  assert.equal(F.coastFi(nothing, F.metrics(nothing, "2026-11"), "2026-11"), null, "without an FI number");
+});
+
 test("forecast: retire at FI takes out expenses from the month after FI", () => {
   const r = monthly(5);
   const f = F.forecast(plan());
