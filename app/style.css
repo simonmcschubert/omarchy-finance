@@ -297,18 +297,39 @@ main > div {
   background: var(--accent);
 }
 
-.meter {
-  position: relative;
+/* Milestones on the dashboard: a row each, with a bar for how much of it
+   the portfolio has. */
+.milestones tbody th {
+  font-weight: 600;
 }
 
-/* Lean FI on the way to FI. */
-.meter-mark {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  margin-left: -1px;
-  background: var(--fg);
+.milestones td.reach {
+  width: 36%;
+}
+
+.reach-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.reach-row .meter {
+  flex: 1;
+  min-width: 40px;
+  margin: 0;
+}
+
+.reach-row .num {
+  min-width: 4.5em;
+}
+
+.milestones tr.reached .meter-fill {
+  background: var(--fg-strong);
+}
+
+.milestones .notes {
+  margin-top: 10px;
+  font-size: 12px;
 }
 
 /* ---- category bars */
@@ -863,10 +884,49 @@ label {
   gap: 8px;
 }
 
-.item-form .check input {
-  width: auto;
+/* Checkboxes drawn here, so they stand out in every theme, grey ones too:
+   a box in the text color, filled with a tick when checked. */
+.check {
+  color: var(--fg);
+}
+
+.check input[type="checkbox"] {
+  appearance: none;
+  flex: none;
+  display: grid;
+  place-content: center;
+  width: 18px;
+  height: 18px;
   margin: 0;
-  accent-color: var(--accent);
+  padding: 0;
+  border: 2px solid var(--fg);
+  border-radius: 4px;
+  background: var(--sunken);
+  cursor: pointer;
+}
+
+.check input[type="checkbox"]::before {
+  content: "";
+  width: 9px;
+  height: 5px;
+  margin-top: -3px;
+  border: solid var(--sunken);
+  border-width: 0 0 2px 2px;
+  transform: rotate(-45deg);
+  visibility: hidden;
+}
+
+.check input[type="checkbox"]:checked {
+  border-color: var(--fg-strong);
+  background: var(--fg-strong);
+}
+
+.check input[type="checkbox"]:checked::before {
+  visibility: visible;
+}
+
+.check input[type="checkbox"]:focus-visible {
+  outline-offset: 2px;
 }
 
 .badge {
@@ -1241,11 +1301,6 @@ table.entry th {
   flex-direction: row;
   align-items: center;
   gap: 8px;
-}
-
-.helper-form .check input {
-  margin: 0;
-  accent-color: var(--accent);
 }
 
 .helper-result {

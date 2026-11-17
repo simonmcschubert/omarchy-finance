@@ -86,8 +86,9 @@ The data file stays.
 
 ## Use
 
-- **Dashboard**: the numbers on the way to FI, the portfolio's history or
-  its path to FI, the net worth, and where the income goes. See
+- **Dashboard**: the numbers on the way to FI, the milestones (Coast FI,
+  Lean FI and FI), the portfolio's history or its path to FI, the net
+  worth, and where the income goes. See
   [Dashboard numbers](#dashboard-numbers).
 - **Expenses** and **Income**: regular payments, from now or a month to
   come, until they end. See [Expenses and income](#expenses-and-income).
@@ -233,10 +234,6 @@ from the middle of their month.
 | Portfolio | Sum of the invested accounts in the latest month, and its change since the month before |
 | Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins and one-offs. The return is that gain ÷ (the value 12 months ago + each pay-in and one-off for the part of the 12 months it was invested, from the middle of its month) |
 | Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them. Under it, the emergency fund: the latest values of the cash accounts ÷ monthly expenses, and how much is missing to the months set in Settings |
-| FI number | What the portfolio would need when retiring now. What it pays a month: the expenses that count then, plus the buffer, less the income that does. Once nothing starts or ends any more, that amount × 12 ÷ withdrawal rate (× 25 at 4 %); until then, what it pays on top of that, month by month, such as bridging the years until a pension starts. Never more than the highest monthly amount × 12 ÷ withdrawal rate. Without starts and ends: monthly expenses × 12 ÷ withdrawal rate |
-| FI reached | Portfolio ÷ FI number |
-| Time to FI | Months until the portfolio reaches the FI number of that month (for retiring then): from the latest month it grows by the expected return (compounded monthly) and gets the average monthly pay-in each month, while the FI number rises by the inflation. Years from two years on; nothing beyond 100 years |
-| Lean FI | The same three for the essential expenses only, with the buffer: the FI number for a lean budget, how much of it the portfolio reaches, and in how long. Shown under the FI numbers once an active expense is essential; the bar under FI reached marks it |
 
 With less than 12 months of history, the average uses the months there
 are, and so do the gains, from the first month on.
@@ -244,6 +241,27 @@ are, and so do the gains, from the first month on.
 When last month has no values yet, the Portfolio tile says so ("Okt. 2026
 not entered yet", or how many months are missing) and links to the first
 month without values.
+
+**Milestones** lists the milestones on the way to FI, in the order the
+portfolio reaches them. Each says what the portfolio needs (and how much
+is still to go), how much of it the portfolio has, and when it gets there,
+with your age then.
+
+| Milestone | Needs |
+| --- | --- |
+| FI | The FI number: what the portfolio would need when retiring now. What it pays a month: the expenses that count then, plus the buffer, less the income that does. Once nothing starts or ends any more, that amount × 12 ÷ withdrawal rate (× 25 at 4 %); until then, what it pays on top of that, month by month, such as bridging the years until a pension starts. Never more than the highest monthly amount × 12 ÷ withdrawal rate. Without starts and ends: monthly expenses × 12 ÷ withdrawal rate |
+| Lean FI | The same for the essential expenses only, with the buffer: the FI number for a lean budget. Shown once an active expense is essential |
+| Coast FI | What the portfolio needs now to grow to the FI number by the retirement age without another pay-in, at the expected return and with the planned one-offs: as the Coast plan on the Forecast page counts it. Shown with a year of birth, until retirement |
+
+How much it has is the portfolio ÷ what it needs. When, for FI and Lean
+FI, is Time to FI: the months until the portfolio reaches the FI number of
+that month (for retiring then). From the latest month it grows by the
+expected return (compounded monthly) and gets the average monthly pay-in
+each month, while the FI number rises by the inflation. Years from two
+years on; nothing beyond 100 years. For Coast FI, it is the first month
+from which the portfolio, with the same pay-ins until then and none after,
+grows to the FI number by the retirement age: the month the Forecast page's
+Coast tile names, for the average pay-in and nothing after Coast FI.
 
 The **Portfolio** chart has two views; the one picked last stays picked.
 

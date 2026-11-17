@@ -1171,7 +1171,8 @@ export function ageIn(month, birthYear) {
 //
 // Returns { months: shown months from start on, retirement: its first
 // month, goal: the FI number of each shown month, fiAtRetirement: the FI
-// number when retirement starts (null if it has already), plans: { keep,
+// number when retirement starts (null if it has already), coastNumber (see
+// the return), plans: { keep,
 // coast, fi } } where each plan is { values: one per shown
 // month, coastMonth, fiMonth (when reached, or null), atRetirement (value
 // when retirement starts, or null if it has already), runsOut (the first
@@ -1266,7 +1267,65 @@ export function forecast(params) {
     retirement: monthFromIndex(retirement),
     goal: goals,
     fiAtRetirement: first < retirement ? fiAtRetirement : null,
+    // What the portfolio needs at the end of `start` for Coast FI then:
+    // grown to when retirement starts, with coastContribution and the
+    // one-offs, it reaches fiAtRetirement. 0 when those reach it on their
+    // own; null if retirement has started.
+    coastNumber: first < retirement ? Math.max(0, (fiAtRetirement - grown(0, first, coastContribution)) / (1 + rate) ** (retirement - 1 - first)) : null,
     plans: Object.fromEntries(PLANS.map((plan) => [plan, run(plan)])),
+  };
+}
+
+// The average pay-in that forecasts go on with: of the last 12 months, in
+// whole cents, and never a withdrawal. 0 without pay-ins.
+export function forecastPayIn(m) {
+  return m.payIn ? Math.max(0, Math.round(m.payIn.average)) : 0;
+}
+
+// forecast() params for a store and its metrics, without the growth: from
+// the latest month (this month without one) and its portfolio, with the
+// expenses, income and FI numbers month by month and the planned one-offs,
+// investing the average pay-in (forecastPayIn) and nothing after Coast FI.
+export function forecastParams(store, m, now = currentMonth()) {
+  const { birthYear, retirementAge, inflation } = store.settings;
+  const nowIndex = monthIndex(now);
+  return {
+    start: m.latestMonth ?? now,
+    value: m.portfolio ?? 0,
+    expenses: m.expenses,
+    fiNumber: m.fiNumber,
+    need: (index, retirement) => needIn(store, index, retirement),
+    goal: (index) => fiNumberIn(store, Math.max(index, nowIndex)),
+    oneOffs: (index) => oneOffsIn(store, index),
+    birthYear,
+    retirementAge,
+    inflation,
+    contribution: forecastPayIn(m),
+    coastContribution: 0,
+  };
+}
+
+// Coast FI as the Forecast page's Coast plan has it at the expected return,
+// investing the average pay-in until then and nothing after. null without a
+// year of birth or an FI number, and once retirement has started. Otherwise
+// { fiNumber: what the portfolio needs in the latest month (forecast's
+// coastNumber), fiAtRetirement, progress: the portfolio ÷ that, month: when
+// it is reached (null if not before retirement), months: from the latest
+// month on (0: reached) }; progress, month and months null without a
+// portfolio.
+export function coastFi(store, m = metrics(store), now = currentMonth()) {
+  if (store.settings.birthYear === null || !(m.fiNumber > 0)) return null;
+  const params = forecastParams(store, m, now);
+  const result = forecast({ ...params, growth: store.settings.expectedReturn });
+  if (result.coastNumber === null) return null;
+  const { coastMonth } = result.plans.coast;
+  const known = m.portfolio !== null;
+  return {
+    fiNumber: result.coastNumber,
+    fiAtRetirement: result.fiAtRetirement,
+    progress: known ? (result.coastNumber > 0 ? m.portfolio / result.coastNumber : 1) : null,
+    month: known ? coastMonth : null,
+    months: known && coastMonth !== null ? monthIndex(coastMonth) - monthIndex(params.start) : null,
   };
 }
 
