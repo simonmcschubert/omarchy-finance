@@ -177,7 +177,8 @@ Finance locks again after 20 minutes without use (keys, clicks, scrolling),
 when the computer sleeps, with `Ctrl+L` or the padlock at the right end of the
 top bar, and when its server restarts, after an update for example. While it
 is locked, the page forgets the data, and the server gives it to no one: not
-to the page, and not to other programs on the computer.
+to the page, and not to other programs on the computer. To unlock it, press
+`Ctrl+L` again, or **Unlock**.
 
 The lock is on once `setup` has installed its polkit action. Until then, its
 box in Settings › General › Lock is greyed out and names the command. The fingerprint

@@ -639,10 +639,13 @@ addEventListener("hashchange", () => {
 // Ctrl+1 to Ctrl+6 open the views. Matched by key position, not by the
 // character, so it works the same on every keyboard layout.
 addEventListener("keydown", (event) => {
-  // Ctrl+L locks Finance, when the lock is on.
-  if (event.code === "KeyL" && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && state.lock.enabled && !state.lock.locked) {
+  // Ctrl+L locks Finance, when the lock is on, and unlocks it again. A held
+  // key repeats: that neither unlocks what it just locked nor locks again.
+  if (event.code === "KeyL" && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && state.lock.enabled) {
     event.preventDefault();
-    lockNow();
+    if (event.repeat) return;
+    if (state.lock.locked) unlock();
+    else lockNow();
     return;
   }
   // Ctrl+Shift+H hides or shows the amounts.
@@ -714,14 +717,15 @@ const sentence = (text) => {
 };
 
 // All the page shows while Finance is locked. Opening Finance asks straight
-// away; after that, Unlock (or Enter) asks.
+// away; after that, Unlock (Enter, or Ctrl+L as anywhere) asks.
 function viewLocked() {
   const { asking, error } = state.lock;
   return h("div", { class: "lock-view" },
     h("section", { class: "card lock-card" },
       icon(PADLOCK, "lock-icon"),
       h("h2", null, "Finance is locked"),
-      h("button", { type: "button", class: "primary", id: "unlock", disabled: Boolean(asking), onclick: unlock }, asking ? "Unlocking…" : "Unlock"),
+      h("button", { type: "button", class: "primary", id: "unlock", disabled: Boolean(asking), title: "Unlock (Ctrl+L)", "aria-keyshortcuts": "Control+L", onclick: unlock },
+        asking ? "Unlocking…" : "Unlock"),
       h("p", { class: error ? "lock-error" : "muted", role: "status" }, error ? sentence(error) : asking ? "Confirm in the dialog." : "")));
 }
 
@@ -1952,7 +1956,7 @@ function lockCard() {
   lockChoice = { box, note };
   renderLockChoice();
   return card(["Lock", info("the lock",
-      `Finance asks for your fingerprint, or your password, when it opens. It locks again after ${state.lock.idleMinutes} minutes without use, when the computer sleeps, and with Ctrl+L.`,
+      `Finance asks for your fingerprint, or your password, when it opens. It locks again after ${state.lock.idleMinutes} minutes without use, when the computer sleeps, and with Ctrl+L, which also unlocks it.`,
       "While it is locked it shows nothing, and other programs on this computer can't read the data through it either.")],
     h("div", { class: "check-row" }, h("label", { class: "check" }, box, "Lock Finance")),
     note);
