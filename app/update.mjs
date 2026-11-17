@@ -153,18 +153,12 @@ export function startUpdates(root, { saving }) {
     group.setAttribute("role", "group");
     group.setAttribute("aria-label", "Updates");
     group.append(...buttons.map(([, button]) => button));
-    const about = Object.assign(document.createElement("p"), {
-      className: "muted",
-      textContent: "Stable offers releases, with release notes on GitHub. Preview offers every change as soon as its tests pass, " +
-        "before it is released: new features first, and now and then a new bug. " +
-        "Back on Stable, Finance keeps the version it has until a release is newer, so it never goes back to an older one.",
-    });
     const note = document.createElement("p");
     note.setAttribute("role", "status");
     choice = { buttons, note };
     renderChoice();
     const box = document.createElement("div");
-    box.append(group, about, note);
+    box.append(group, note);
     return box;
   }
 
