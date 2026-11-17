@@ -2,7 +2,7 @@
 // time, and saves every change straight away.
 
 import * as F from "./finance.mjs";
-import { goalVisible, renderChart, renderForecastChart } from "./chart.mjs";
+import { goalVisible, renderChart, renderForecast } from "./chart.mjs";
 import { startUpdates } from "./update.mjs";
 
 // ---------------------------------------------------------------- formatting
@@ -238,9 +238,9 @@ function setChartView(view) {
 const MONEY_KEY = "finance.money";
 function savedMoney() {
   try {
-    return localStorage.getItem(MONEY_KEY) === "today" ? "today" : "nominal";
+    return localStorage.getItem(MONEY_KEY) === "nominal" ? "nominal" : "today";
   } catch {
-    return "nominal";
+    return "today";
   }
 }
 function setMoney(money) {
@@ -252,6 +252,24 @@ function setMoney(money) {
   }
 }
 const inTodaysMoney = () => state.money === "today";
+
+// The plan picked on the forecast page, remembered in this browser.
+const PLAN_KEY = "finance.forecastPlan";
+function savedPlan() {
+  try {
+    return localStorage.getItem(PLAN_KEY) ?? "fi";
+  } catch {
+    return "fi";
+  }
+}
+function setPlan(plan) {
+  state.forecast.plan = plan;
+  try {
+    localStorage.setItem(PLAN_KEY, plan);
+  } catch {
+    // remembered until the window closes
+  }
+}
 
 const HIDE_KEY = "finance.hideAmounts";
 function savedHidden() {
@@ -325,9 +343,8 @@ const state = {
   money: savedMoney(), // "nominal" (the money of each year) | "today"
   hideAmounts: savedHidden(), // amounts as dots, for sharing the screen
   settingsTab: "data", // the tab of Settings on show: a key of SETTINGS_TABS
-  // On the forecast page. growth: "low", "mid" or "high", the expected
-  // return and RETURN_SPREAD around it.
-  forecast: { growth: "mid" },
+  // On the forecast page: the plan picked, "fi", "coast" or "keep".
+  forecast: { plan: savedPlan() },
   focus: null, // selector to focus after the next render
   // The lock (server.py, Lock). asking: what waits for the server, "unlock",
   // "on" or "off". lost: a change was refused because Finance had locked.
@@ -1173,7 +1190,6 @@ function readNumber(text, decimals = 4) {
 function pensionCard() {
   const store = state.store;
   const g = F.GERMANY_2026;
-  const regularAge = store.settings.retirementAge;
   const existing = store.income.find((item) => item.name === PENSION_NAME) ?? null;
   const result = h("p", { class: "helper-result", "aria-live": "polite" });
   const read = (form) => {
@@ -1183,10 +1199,13 @@ function pensionCard() {
     const pointValue = F.parseMoney(data.get("pointValue"));
     const ageText = String(data.get("startAge")).trim();
     const startAge = Number(ageText);
+    const regularText = String(data.get("regularAge")).trim();
+    const regularAge = Number(regularText);
     const deductions = readNumber(data.get("deductions"), 2);
     if (points === null) return { error: "Rentenpunkte so far: enter a number, such as 25,5." };
     if (more === null) return { error: "More points: enter a number, or 0." };
     if (!pointValue.ok || pointValue.cents <= 0) return { error: "Value of a point: enter an amount." };
+    if (!/^[0-9]+$/.test(regularText) || regularAge < F.RETIREMENT_AGES.min || regularAge > F.RETIREMENT_AGES.max) return { error: `Regular age: enter whole years from ${F.RETIREMENT_AGES.min} to ${F.RETIREMENT_AGES.max}.` };
     if (!/^[0-9]+$/.test(ageText) || startAge < regularAge - 4 || startAge > F.AGES.max) return { error: `Starts at age: from ${regularAge - 4} on.` };
     if (deductions === null || deductions >= 100) return { error: "Health and care insurance: enter a percentage." };
     return { startAge, ...F.statePension({ points: points + more, pointValue: pointValue.cents, startAge, regularAge, deductions }) };
@@ -1219,8 +1238,10 @@ function pensionCard() {
       "About 1 a year at the average wage, 51.944 € in 2026."),
     field("Value of a point", h("input", { name: "pointValue", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.pointValue) }),
       "42,52 € from July 2026. In the forecast, the pension rises with inflation, as pensions about do."),
-    field("Starts at age", h("input", { name: "startAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.from?.age ?? regularAge) }),
-      `The regular age is your retirement age in Settings, ${regularAge}. Each month earlier costs 0,3 %, at most 4 years early (63 with 35 years of contributions); each month later adds 0,5 %.`),
+    field("Regular age", h("input", { name: "regularAge", inputmode: "numeric", autocomplete: "off", value: String(g.regularAge) }),
+      `When the pension starts without deductions: ${g.regularAge} for everyone born in 1964 or later.`),
+    field("Starts at age", h("input", { name: "startAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.from?.age ?? g.regularAge) }),
+      "Each month before the regular age costs 0,3 %, at most 4 years early (63 with 35 years of contributions); each month after it adds 0,5 %."),
     field("Health and care insurance (%)",
       h("input", { name: "deductions", inputmode: "decimal", autocomplete: "off", value: plain.format(g.pensionerRate + g.extraRate / 2 + g.careRateChildless) }),
       "Pensioners pay half the general and the extra health rate (7,3 % + about 1,45 %) and the whole care rate (3,6 %, 4,2 % without children).",
@@ -1230,10 +1251,13 @@ function pensionCard() {
   return h("section", { class: "card" },
     h("details", null,
       h("summary", null, h("h2", null, "State pension (Germany)")),
-      h("p", null, "From your Renteninformation, enter the Rentenpunkte (Entgeltpunkte) you have so far, not its pension at ", regularAge,
-        ": that assumes you pay in until then."),
+      h("p", null, "From your Renteninformation, enter the Rentenpunkte (Entgeltpunkte) you have so far, not its pension at the regular age: that assumes you pay in until then."),
       form, result));
 }
+
+// When the state pension starts: as entered with the pension helper, or the
+// regular age.
+const pensionAge = (store) => store.income.find((item) => item.name === PENSION_NAME)?.from?.age ?? F.GERMANY_2026.regularAge;
 
 // Germany: health and care insurance at the minimum, as a voluntary member,
 // from retirement until the pension starts.
@@ -1280,7 +1304,7 @@ function healthCard() {
     field("Zusatzbeitrag (%)", h("input", { name: "extra", inputmode: "decimal", autocomplete: "off", value: plain.format(g.extraRate) }),
       "Your insurer's extra rate, 2,9 % on average in 2026, on top of the general rate of 14 % (without sick pay) and care insurance."),
     field("Until age (the pension starts)",
-      h("input", { name: "untilAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.until?.age ?? store.settings.retirementAge) }),
+      h("input", { name: "untilAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.until?.age ?? pensionAge(store)) }),
       "From the pension on, insured as a pensioner (KVdR, after 9/10 of the second half of your working life insured), only the pension counts; that is in the pension helper under Income."),
     h("label", { class: "check" }, h("input", { type: "checkbox", name: "childless", checked: true }), "No children (care insurance 4,2 % instead of 3,6 %)"),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, existing ? `Update ${HEALTH_NAME}` : "Add as expense")));
@@ -1345,7 +1369,7 @@ function viewItems(kind) {
       const until = readBound(data, "until", "Ends");
       if (!error) error = from.error ?? until.error ?? null;
       if (!error) {
-        // Retirement moves (Retire early starts it at FI), so only fixed
+        // Retirement moves (Retire at FI starts it at FI), so only fixed
         // starts and ends can be compared.
         const atRetirement = (bound) => bound?.at === "retirement";
         const window = F.itemWindow({ from: from.bound, until: until.bound }, birthYear, retirement);
@@ -1681,233 +1705,147 @@ function emergencyCard(store) {
 
 // ---------------------------------------------------------------- forecast
 
-// The plans' names, on the chart and on their tiles.
-const PLAN_LABELS = { keep: "Keep investing", coast: "Coast", fi: "Retire early" };
+// The phases, as the key above the bars names them.
+const PHASE_NAMES = { invest: "Investing", coast: "Coasting", retired: "Retired", other: "Other income" };
 
-// What the forecast starts from, and what is paid in: the FI outlook's, with
-// the future pay-in in whole cents and never a withdrawal, and the coast
-// pay-in from Settings.
-function forecastBase(store) {
+// The plans, as the bars and the chart show them: names by what you do,
+// whether the money lasts, and the phases with their amounts. null without
+// a year of birth.
+function forecastPlans(store) {
+  const { birthYear, retirementAge } = store.settings;
   const o = outlook(store);
-  const params = {
-    start: o.start,
-    value: o.value,
-    fiNumber: o.fiNumber,
-    inflation: store.settings.inflation,
-    contribution: o.payIn.invested,
-    coastContribution: store.settings.coastPayIn,
+  const result = o.plans(inTodaysMoney() ? "today" : "nominal");
+  if (!result) return null;
+  const { months } = result;
+  const index = (month) => F.monthIndex(month) - F.monthIndex(months[0]);
+  const age = (month) => F.ageIn(month, birthYear);
+  const low = percentUnit.format(o.rates.low);
+  const perMonth = (cents, sign) => `${sign}${money(cents)}/month`;
+
+  const name = (plan) => {
+    if (o.retired) return "Retired";
+    if (plan.key === "keep") return `Work to ${retirementAge}`;
+    if (plan.key === "coast") {
+      if (plan.retires === null) return "Coast";
+      return plan.stopInvesting === null ? "Coast from now" : `Coast from ${age(F.addMonths(plan.stopInvesting, 1))}`;
+    }
+    if (plan.retires === null) return "Retire at FI";
+    return plan.retires === months[1] ? "Retire now" : `Retire at ${age(plan.retires)}`;
   };
-  // The plans at a growth ("low", "mid" or "high"), in the money the
-  // switch says or in "nominal" money.
-  const plans = (growth, money = inTodaysMoney() ? "today" : "nominal") =>
-    o.forecast({ growth, coastContribution: params.coastContribution, money });
-  // Retired already: every plan lives off the portfolio from the start, so
-  // they are one.
-  return { o, params, plans, retired: o.retired };
+  // Lasts to SHOWN_AGE, even at the low growth; runs out at the low
+  // growth only; or at the expected return too.
+  const status = (plan) => {
+    const { low: atLow, mid: atMid } = plan.runsOut;
+    if (atMid !== null) return { level: "bad", title: `Runs out at ${age(atMid)}`, out: { from: index(atMid), text: `Empty at ${age(atMid)}` } };
+    if (atLow !== null) return { level: "risk", title: `Runs out at ${age(atLow)} if growth is ${low}`, out: { from: index(atLow), text: `${low}: empty at ${age(atLow)}` } };
+    return { level: "ok", title: `Lasts to ${F.SHOWN_AGE}, even at ${low} growth`, out: null };
+  };
+  // What starts a step while retired: an income that starts (a pension),
+  // or later also an expense or income that starts or ends.
+  const cause = (step, first) => {
+    const income = step.changes.find((c) => c.kind === "income" && c.starts);
+    if (income) return { text: `+ ${income.name}`, income: true };
+    const other = first ? null : step.changes[0];
+    return other ? { text: `${other.name} ${other.starts ? "starts" : "ends"}`, income: false } : null;
+  };
+  const segments = (plan) => plan.phases.flatMap((phase) => {
+    if (phase.kind === "retired") {
+      return phase.steps.map((step, k) => ({
+        kind: "retired", from: step.from, to: step.to, share: step.share, step: k > 0, cause: cause(step, k === 0),
+        texts: [step.amount > 0 ? perMonth(step.amount, "−") : perMonth(0, ""), step.amount > 0 ? `−${money(step.amount)}` : money(0)],
+        end: plan.values.mid[Math.min(step.to, months.length) - 1],
+      }));
+    }
+    const amounts = phase.steps.map((step) => step.amount);
+    const sign = (cents) => (cents > 0 ? "+" : "");
+    const all = `${sign(amounts[0])}${amounts.map(money).join(" → ")}/month`;
+    return [{
+      kind: phase.kind, from: phase.from, to: phase.to, share: 1, step: false, cause: null,
+      texts: [all, `${sign(amounts[0])}${amounts.map(money).join(" → ")}`, `${sign(amounts[0])}${money(amounts[0])}`],
+      end: plan.values.mid[phase.to - 1],
+    }];
+  });
+  const rows = result.plans.map((plan) => {
+    const missing = plan.retires === null;
+    const s = missing ? { level: null, title: "", out: null } : status(plan);
+    return { key: plan.key, name: name(plan), level: s.level, title: s.title, out: s.out, missing: missing ? `Not before ${retirementAge}` : null, segments: missing ? [] : segments(plan), plan };
+  });
+  return { result, rows, o };
 }
 
 function viewForecast() {
   const store = state.store;
-  const { birthYear, retirementAge } = store.settings;
   const missing = [];
-  if (birthYear === null) missing.push(h("li", null, "your year of birth, in ", settingsLink("general")));
+  if (store.settings.birthYear === null) missing.push(h("li", null, "your year of birth, in ", settingsLink("general")));
   if (F.counted(store.expenses).length === 0) missing.push(h("li", null, "your ", h("a", { href: "#expenses" }, "expenses"), ", for the FI number"));
   if (missing.length) {
     return h("div", null, card("Forecast",
       h("p", null, "How your portfolio could grow until you retire, and whether it lasts after. The forecast needs:"),
       h("ul", null, missing)));
   }
-
-  const { params, retired } = forecastBase(store);
-  const rates = F.growthRates(store.settings.expectedReturn);
-  const inflation = percentUnit.format(params.inflation);
-  const retirementYear = birthYear + retirementAge;
-  // What the portfolio pays when retirement starts, in today's money and
-  // with inflation by then.
-  const retirementIndex = retirementYear * 12;
-  const paysThen = F.budget(store, retirementIndex, retirementIndex).need;
-  const paysNow = F.budget(store, thisMonth(), Math.min(retirementIndex, thisMonth())).need;
-  const then = (amount) => money(F.inflated(amount, params.inflation, retirementIndex - 1 - F.monthIndex(params.start)));
-
-  // The growth buttons stay when the results redraw, and change in place: a
-  // click on one that starts while a field's change redraws the results
-  // still lands.
-  const growth = state.forecast.growth;
-  const growthButton = (g) =>
-    h("button", { type: "button", class: g === growth ? "seg active" : "seg", "aria-pressed": String(g === growth), "data-growth": g,
-      onclick: () => { state.forecast.growth = g; updateForecast(); } }, percentUnit.format(rates[g]));
-  const growthField = h("div", { class: "forecast-switches" },
-    h("div", { class: "field" },
-      h("span", { id: "forecast-growth" }, "Growth a year"),
-      h("div", { class: "segmented", role: "group", "aria-labelledby": "forecast-growth" }, F.GROWTHS.map(growthButton))),
-    h("div", { class: "field" }, h("span", null, "Amounts in"), moneySwitch(updateForecast)));
-
+  const { result, o } = forecastPlans(store);
+  const kinds = new Set(result.plans.flatMap((plan) => plan.phases.map((phase) => phase.kind)));
+  const other = result.plans.some((plan) => plan.phases.some((phase) => phase.steps.some((step) => step.share !== undefined && step.share < 0.999)));
+  const keyItem = (kind) => h("span", { class: `phase-key ${kind}` }, PHASE_NAMES[kind]);
+  const { inflation } = store.settings;
+  const rate = (g) => percentUnit.format(o.rates[g]);
+  const about = info("the forecast",
+    h("ul", null,
+      h("li", null, `Each plan at the expected return, ${rate("mid")} a year before inflation. The band and the ${rate("low")} result keep the same plan, with ${rate("low")} to ${rate("high")} growth.`),
+      h("li", null, "Growth is the same every year. Real markets are not, and bad years right after you stop working hurt most."),
+      h("li", null, `Amounts a month are as you entered them: pay-ins as in `, settingsLink("data"), ", and what the portfolio pays in today's money, the expenses with buffer less the income that counts then."),
+      h("li", null, `Expenses rise by ${percentUnit.format(inflation)} inflation a year. Today's money takes it out of the portfolio's values again: what they would buy now.`),
+      h("li", null, store.records.length ? `It starts from the portfolio in ${monthLabel(o.start)}, ${money(o.value)}.` : "It starts from 0, as there are no broker values yet."),
+      h("li", null, `Planned one-offs count in their month. A plan lasts when money is left at ${F.SHOWN_AGE}. Taxes are left out.`)));
   return h("div", null,
-    card("Forecast",
-      retired
-        ? h("p", null, `Retired: the portfolio pays ${money(paysNow)} a month, rising by ${inflation} a year.`,
-            info("retirement", `You have reached your retirement age, ${retirementAge}, so the portfolio pays your expenses with buffer from now on, less the income that goes on, such as a pension.`))
-        : h("p", null, `Retirement in ${retirementYear}, at ${retirementAge}: then the portfolio pays ${money(paysThen)} a month in today's money, ${then(paysThen)} by then.`,
-            info("retirement", "From retirement on, the portfolio pays your expenses with buffer, less the income that goes on, such as a pension.",
-              `With ${inflation} inflation a year, ${money(paysThen)} today is ${then(paysThen)} by ${retirementYear}.`,
-              ["Retirement starts in January of the year you reach the retirement age set in ", settingsLink("general"), "."])),
-      h("div", { class: "forecast-controls" }, growthField)),
-    h("div", { id: "forecast-results", class: "stack" }, forecastResults()));
+    h("section", { class: "card forecast" },
+      h("div", { class: "card-head" },
+        h("h2", null, "Plans", about),
+        h("div", { class: "phase-keys" }, [...["invest", "coast", "retired"].filter((k) => kinds.has(k)).map(keyItem), other ? keyItem("other") : null]),
+        moneySwitch(drawForecast)),
+      h("div", { id: "forecast-chart", class: "forecast-box" })));
 }
 
-// What every plan invests a month until it changes course, and where that
-// comes from (the FI outlook's payIn), for the forecast's ⓘ.
-function investedNote(payIn, contribution) {
-  const settings = h("a", { href: "#settings" }, "Settings");
-  const invests = `Every plan invests ${money(contribution)} a month until it changes course: `;
-  const plan = payInPlanText(payIn);
-  const then = plan ? ` ${plan}` : "";
-  if (payIn.amount === null) return [invests, `there are no pay-ins yet.${then} You can plan your pay-ins in `, settings, "."];
-  if (payIn.months === null) return [invests, "your own future pay-in from ", settings, `.${then}`];
-  const average = payIn.withdrawal
-    ? `your average of ${payInMonths(payIn.months)} is a withdrawal of ${money(-payIn.amount)} a month, which counts as 0`
-    : `the average pay-in of ${payInMonths(payIn.months)}`;
-  return [invests, `${average}.${then} You can plan your pay-ins in `, settings, "."];
-}
-
-// Redraws the results only, so the switches keep their focus.
-function updateForecast() {
-  const box = document.getElementById("forecast-results");
-  if (!box) return render();
-  box.replaceChildren(...forecastResults());
-  const growth = state.forecast.growth;
-  for (const button of document.querySelectorAll("[data-growth]")) {
-    button.classList.toggle("active", button.dataset.growth === growth);
-    button.setAttribute("aria-pressed", String(button.dataset.growth === growth));
-  }
+// Draws the bars and the picked plan's chart; with focus, focuses the
+// picked plan's bar (after a pick by keyboard or click).
+function drawForecast(focus = false) {
+  const box = document.getElementById("forecast-chart");
+  if (!box) return;
   for (const button of document.querySelectorAll("[data-money]")) {
     button.classList.toggle("active", button.dataset.money === state.money);
     button.setAttribute("aria-pressed", String(button.dataset.money === state.money));
   }
-  drawForecast();
-}
-
-// At the chosen growth: a tile per plan with its answer, the chart, and
-// notes.
-function forecastResults() {
   const store = state.store;
-  const { birthYear, retirementAge, expectedReturn, inflation, withdrawalRate } = store.settings;
-  const { o, params, plans, retired } = forecastBase(store);
-  const rates = F.growthRates(expectedReturn);
-  const growth = state.forecast.growth;
-  const result = plans(growth);
-  // A plan that lasts here may run out at the lowest growth: the tile says so.
-  const low = plans("low", "nominal");
-  const age = (month) => F.ageIn(month, birthYear);
-  const when = (month) => (month === params.start ? "Now" : `At ${age(month)}, in ${month.slice(0, 4)}`);
-  const goalIn = (month) => result.goal[F.monthIndex(month) - F.monthIndex(params.start)];
-
-  const planTile = (plan, label, value, detail) => {
-    const { runsOut } = result.plans[plan];
-    const lowRunsOut = low.plans[plan].runsOut;
-    return h("div", { class: "tile plan" },
-      h("div", { class: "tile-label" }, h("span", { class: `key plan-${plan}` }), label),
-      h("div", { class: "tile-value" }, value),
-      h("div", { class: "tile-detail" }, detail),
-      runsOut === null ? h("div", { class: "status" }, "Money lasts") : h("div", { class: "status bad" }, `Money runs out at ${age(runsOut)}`),
-      runsOut === null && lowRunsOut !== null
-        ? h("div", { class: "status-note" }, `At ${percentUnit.format(rates.low)} growth, it runs out at ${age(lowRunsOut)}.`)
-        : null);
-  };
-
-  let tiles;
-  if (retired) {
-    tiles = [planTile("keep", "Living off the portfolio", money(params.value),
-      `now, taking out ${money(F.budget(store, F.monthIndex(params.start) + 1).need)} a month, rising by ${percentUnit.format(inflation)} a year.`)];
-  } else {
-    const { coastMonth } = result.plans.coast;
-    const { fiMonth } = result.plans.fi;
-    const fiThen = money(result.fiAtRetirement);
-    const coasting = params.coastContribution > 0 ? `invest only ${money(params.coastContribution)} a month` : "stop investing";
-    tiles = [
-      planTile("keep", PLAN_LABELS.keep, money(result.plans.keep.atRetirement),
-        `at ${retirementAge}, investing ${money(params.contribution)} a month${o.payIn.changes.length ? ", then as planned," : ""} until then.`),
-      planTile("coast", PLAN_LABELS.coast, coastMonth === null ? `Not before ${retirementAge}` : when(coastMonth),
-        coastMonth === null
-          ? `the portfolio does not reach the FI number by ${retirementAge}, even investing until then.`
-          : `you can ${coasting}: the portfolio still grows to the FI number by ${retirementAge}, ${fiThen} by then.`),
-      planTile("fi", PLAN_LABELS.fi, fiMonth === null ? `Not before ${retirementAge}` : when(fiMonth),
-        fiMonth === null
-          ? `the portfolio does not reach the FI number before then.`
-          : fiMonth === params.start
-            ? `you can stop working: the portfolio is above the FI number, ${money(params.fiNumber)}, and pays your expenses from now on.`
-            : `you can stop working: the portfolio reaches the FI number, ${money(goalIn(fiMonth))} by then, and pays your expenses from then on.`),
-    ];
-  }
-
-  const key = (kind, label) => h("span", null, h("span", { class: `key ${kind}` }), label);
-  // What the forecast assumes: a short line under the chart, the rest in
-  // its ⓘ.
-  const assumptions = info("the forecast",
-    h("ul", null,
-      h("li", null, "Growth is before inflation: the expected return set in ", settingsLink("data"),
-        `, or ${F.RETURN_SPREAD} points less or more. Real markets do not grow the same every year, and bad years right after you start living off the portfolio hurt most.`),
-      h("li", null, inTodaysMoney()
-        ? `Amounts are in today's money: what they would buy now, with ${percentUnit.format(inflation)} inflation a year taken out. So the FI number stays about the same, and what is invested ${o.payIn.rises ? "does too" : "shrinks a little each year"}.`
-        : o.payIn.rises
-          ? `Amounts are in the money of each year: expenses, the FI number and what is invested rise by ${percentUnit.format(inflation)} a year.`
-          : `Amounts are in the money of each year: expenses and the FI number rise by ${percentUnit.format(inflation)} a year. What is invested stays the same.`),
-      h("li", null, store.records.length
-        ? `It starts from the portfolio in ${monthLabel(params.start)}, ${money(params.value)}.`
-        : "It starts from 0, as there are no broker values yet."),
-      retired ? null : h("li", null, investedNote(o.payIn, params.contribution)),
-      retired ? null : h("li", null, `After Coast FI, Coast pays in ${params.coastContribution > 0 ? `${money(params.coastContribution)} a month` : "nothing"}, as set in `, settingsLink("data"), "."),
-      h("li", null, "Planned one-offs, set in ", settingsLink("data"), ", count in their month."),
-      h("li", null, "Expenses and income with a start or an end count only in their months; for Retire early, retirement starts the month after FI. ",
-        "Income that goes on after retirement, such as a pension, lowers what the portfolio pays: the FI number is what it pays for good once nothing changes any more, ",
-        `× ${plain.format(100 / withdrawalRate)}, plus what it pays on top until then, such as bridging the years until the pension.`),
-      h("li", null, `Money lasts when some is still left at age ${F.LASTS_AGE}. Taxes are left out.`)),
-    ["The ", h("a", { href: "#income" }, "Income"), " and ", h("a", { href: "#expenses" }, "Expenses"), " pages help with the state pension and health insurance."]);
-  const chartCard = h("section", { class: "card" },
-    h("div", { class: "card-head" },
-      h("h2", null, `At ${percentUnit.format(rates[growth])} growth a year${inTodaysMoney() ? ", in today's money" : ""}`),
-      h("div", { class: "legend" },
-        retired ? key("plan-keep", "Portfolio") : F.PLANS.map((plan) => key(`plan-${plan}`, PLAN_LABELS[plan])),
-        key("goal", "FI number"))),
-    h("div", { id: "forecast-chart", class: "chart-box" }),
-    h("p", { class: "chart-note muted" }, "Growth before inflation, taxes left out.", assumptions));
-
-  return [h("div", { class: "tiles plan-tiles" }, tiles), chartCard];
-}
-
-function drawForecast() {
-  const box = document.getElementById("forecast-chart");
-  if (!box) return;
-  const { birthYear } = state.store.settings;
-  const { params, plans, retired } = forecastBase(state.store);
-  const result = plans(state.forecast.growth);
-  const first = F.monthIndex(result.months[0]);
-  const index = (month) => (month === null ? -1 : F.monthIndex(month) - first);
-  const age = (month) => F.ageIn(month, birthYear);
-  const { coastMonth } = result.plans.coast;
-  const { fiMonth } = result.plans.fi;
-  const line = (plan, label, mark, markLabel) => ({ key: plan, label, values: result.plans[plan].values, mark: index(mark), markLabel });
-  // Keep investing last, on top: until the others change course, they
-  // share its line.
-  const lines = retired
-    ? [line("keep", "Portfolio", null)]
-    : [
-        line("fi", PLAN_LABELS.fi, fiMonth, fiMonth && `Retire at ${age(fiMonth)}`),
-        line("coast", PLAN_LABELS.coast, coastMonth,
-          coastMonth && `${params.coastContribution > 0 ? "Invest less" : "Stop investing"} at ${age(coastMonth)}`),
-        line("keep", PLAN_LABELS.keep, null),
-      ];
+  const plans = forecastPlans(store);
+  if (!plans) return;
+  const { result, rows, o } = plans;
+  const available = rows.filter((row) => !row.missing);
+  const picked = available.find((row) => row.key === state.forecast.plan) ?? available[0];
+  const { plan } = picked;
+  const index = (month) => F.monthIndex(month) - F.monthIndex(result.months[0]);
+  const last = result.months.length - 1;
+  // Steps while retired (a pension starts) get a line and a dot; pay-in
+  // changes stay inside their phase, as on the bars.
+  const steps = plan.phases.filter((phase) => phase.kind === "retired").flatMap((phase) => phase.steps.slice(1).map((step) => step.from));
+  const marks = [...plan.phases.map((phase) => Math.min(phase.to, last + 1) - 1), ...steps.map((i) => i - 1)];
+  const outs = [plan.runsOut.low, plan.runsOut.mid].filter((month) => month !== null).map(index);
+  const rate = (g) => percentUnit.format(o.rates[g]);
+  const short = (cents) => axisMoney(Math.abs(cents) >= 100000000 ? cents : Math.round(cents / 100000) * 100000);
   drawResizing(box, () =>
-    renderForecastChart(box, {
+    renderForecast(box, {
       months: result.months,
-      lines,
-      goal: result.goal,
-      retirementIndex: index(result.retirement),
+      rows,
+      selected: picked.key,
+      focus,
+      onSelect: (key) => { setPlan(key); drawForecast(true); },
+      chart: { values: plan.values, rates: { low: rate("low"), mid: rate("mid"), high: rate("high") }, phases: plan.phases, marks, steps, outs },
+      ageOf: (month) => F.ageIn(month, store.settings.birthYear),
       format: money,
+      formatShort: short,
       formatAxis: axisMoney,
       formatMonth: monthLabel,
-      ageOf: age,
     }));
+  focus = false;
 }
 
 // ---------------------------------------------------------------- settings
@@ -2010,8 +1948,8 @@ function generalForm(store) {
       h("select", { name: "numberFormat", value: numberFormat }, F.NUMBER_FORMATS.map((f) => h("option", { value: f }, f))),
       "How amounts and percentages are shown. Amounts can be typed either way."),
     field("Year of birth", h("input", { name: "birthYear", inputmode: "numeric", autocomplete: "off", value: birthYear === null ? "" : String(birthYear), placeholder: "1990" })),
-    field("Official retirement age", h("input", { name: "retirementAge", inputmode: "numeric", autocomplete: "off", value: String(retirementAge), required: true }),
-      "When the state pension starts without deductions: 67 in Germany for everyone born in 1964 or later. Not when you plan to stop working: the forecast works that out.",
+    field("Retirement age", h("input", { name: "retirementAge", inputmode: "numeric", autocomplete: "off", value: String(retirementAge), required: true }),
+      "The age you stop working at the latest. For employees usually when the state pension starts without deductions: 67 in Germany for everyone born in 1964 or later. The forecast works out when you could stop sooner.",
       "Retirement starts in January of the year you reach it."),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, "Save")));
 }
@@ -2181,7 +2119,7 @@ function payInsCard(store) {
 
   return card(["Future pay-ins", info("future pay-ins",
       "What you pay in a month from now on, for the investment rate, the milestones, the Path to FI chart and the forecast.",
-      "Now is the average of your pay-ins under Portfolio, or an amount of your own. Add the changes you know of, such as a raise, a sabbatical or part-time: each holds until the next one. Pay-ins stop at retirement, and for Retire early at FI.",
+      "Now is the average of your pay-ins under Portfolio, or an amount of your own. Add the changes you know of, such as a raise, a sabbatical or part-time: each holds until the next one. Pay-ins stop at retirement, or at FI when you retire then.",
       "A change that has started is what you pay in now, until you delete it.")],
     h("div", { class: "table-wrap" }, h("table", null,
       h("thead", null, h("tr", null, h("th", null, "From"), h("th", { class: "num" }, "A month"), h("th"))),

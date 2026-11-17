@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { forecastTop, goalVisible, niceTicks, placeLabel } from "../app/chart.mjs";
+import { ageTicks, fitText, forecastTop, goalVisible, niceTicks } from "../app/chart.mjs";
 
 test("niceTicks: even steps around the data, the top tick close above it", () => {
   assert.deepEqual(niceTicks(0, 5003500), [0, 2000000, 4000000, 6000000]);
@@ -23,26 +23,27 @@ test("goalVisible: the history view shows the FI number once the data reaches it
   assert.equal(goalVisible([{ value: 900, invested: 1000 }], 1000), true);
 });
 
-test("forecastTop: room for the rising FI number until retirement, not after", () => {
-  const goal = [1000000, 1500000, 2000000, 9000000];
-  const lines = [{ values: [500000, 900000, 1300000, 50000000] }];
-  assert.equal(forecastTop(lines, goal, 2), 2400000, "1.2 × the FI number when retirement starts");
-  assert.equal(forecastTop([{ values: [500000, 3000000, 0, 0] }], goal, 2), 3000000, "a plan above it");
-  assert.equal(forecastTop(lines, goal, -1), 50000000, "retired already: everything counts");
+test("forecastTop: the highest value, but at most twice the highest before the last phase", () => {
+  assert.equal(Math.round(forecastTop([1e6, 5e6, 3e6, 4e6], 3)), 5.5e6, "all of it, with room");
+  assert.equal(Math.round(forecastTop([1e6, 5e6, 3e7, 9e8], 1)), 1.1e7, "late growth leaves the top");
+  assert.equal(forecastTop([0, 0], 1), 10000, "a floor for an empty portfolio");
 });
 
-test("placeLabel: above left of the dot, unless that is taken or off the plot", () => {
-  const bounds = { left: 0, right: 500, top: 0, bottom: 300 };
-  const free = placeLabel(200, 150, 60, bounds, []);
-  assert.deepEqual([free.x, free.box.right, free.box.bottom <= 142], [132, 192, true]);
-  const taken = placeLabel(200, 150, 60, bounds, [free.box]);
-  assert.deepEqual([taken.x, taken.box.bottom <= 142], [208, true], "above right");
-  assert.equal(placeLabel(30, 150, 60, bounds, []).x, 38, "no room on the left");
-  const top = placeLabel(200, 10, 60, bounds, []);
-  assert.ok(top.box.top >= 18, "below, near the top");
-  // No room on either side: above it, moved into the plot.
-  const narrow = placeLabel(50, 150, 80, { left: 0, right: 100, top: 0, bottom: 300 }, []);
-  assert.deepEqual([narrow.box.left, narrow.box.right, narrow.box.bottom <= 142], [0, 80, true]);
-  const second = placeLabel(50, 150, 80, { left: 0, right: 100, top: 0, bottom: 300 }, [narrow.box]);
-  assert.deepEqual([second.box.left, second.box.right, second.box.top >= 158], [20, 100, true], "below, clear of the first");
+test("ageTicks: January of every n-th age, as many as fit", () => {
+  // Born 1990, from October 2026 to the end of 120.
+  const months = [];
+  for (let y = 2026, m = 10; y < 2111; m === 12 ? (y++, m = 1) : m++) months.push(`${y}-${String(m).padStart(2, "0")}`);
+  const ageOf = (month) => Number(month.slice(0, 4)) - 1990;
+  const ages = (width) => ageTicks(months, ageOf, width).map((i) => ageOf(months[i]));
+  assert.deepEqual(ages(800), [40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120]);
+  assert.deepEqual(ages(300), [40, 50, 60, 70, 80, 90, 100, 110, 120]);
+  assert.ok(ageTicks(months, ageOf, 800).every((i) => months[i].endsWith("-01")));
+});
+
+test("fitText: the first text that fits, or none", () => {
+  const texts = ["+1.400 € → 2.000 €/month", "+1.400 € → 2.000 €", "+1.400 €"];
+  assert.equal(fitText(texts, 300), texts[0]);
+  assert.equal(fitText(texts, 150), texts[1]);
+  assert.equal(fitText(texts, 80), texts[2]);
+  assert.equal(fitText(texts, 40), "");
 });

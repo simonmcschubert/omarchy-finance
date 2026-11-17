@@ -97,10 +97,10 @@ Finance window's browser profile. The data file stays.
 - **Portfolio**: each account's value at the end of each month, and what
   was paid in, with the returns and the history. See
   [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
-- **Forecast**: how the portfolio could grow until retirement, and whether
-  it lasts after, in three plans and at three growth rates (6, 8 and 10 % a
-  year before inflation, by default), with planned one-offs. It only shows:
-  what it goes on is set in Settings. See [Forecast](#forecast).
+- **Forecast**: three plans, retiring at FI, coasting and working to the
+  retirement age, as bars on one age line to 120, and the picked plan's
+  portfolio at 6, 8 and 10 % a year before inflation (by default). It only
+  shows: what it goes on is set in Settings. See [Forecast](#forecast).
 - **Settings**, in three tabs. **Data**, what the numbers go on:
   - Safe withdrawal rate (default 4 %) and a buffer on expenses for irregular
     costs (default 10 %).
@@ -144,9 +144,10 @@ Finance window's browser profile. The data file stays.
     with the currency sign after the amount (`1.234,56 €`), or
     `1,000,000.00`, with it before (`€1,234.56`). Amounts can be typed
     either way. Dates follow the system language.
-  - Year of birth and the official retirement age (default 67: when the
-    state pension starts without deductions, not when you plan to stop
-    working), for the forecast. The forecast needs the year of birth; it is
+  - Year of birth and the retirement age (default 67): the age you stop
+    working at the latest, for employees usually when the state pension
+    starts without deductions. The forecast works out when you could stop
+    sooner. The forecast needs the year of birth; it is
     empty until entered. Ages and retirement start in January of their year.
   - The [lock](#lock): on or off.
   - Where the data file and its daily backups are, and which updates to
@@ -201,7 +202,7 @@ amounts: when the rent goes up, edit it and the numbers change.
   pension from 67, a salary until retirement. It counts only in its
   months: what does not count this month is listed under Later or Ended,
   and is left out of the totals. In the forecast, retirement is each plan's
-  own (for Retire early, the month after FI). New income ends at
+  own (for Retire at FI, the month after FI). New income ends at
   retirement; new expenses never end. Income from before starts and ends
   ends at retirement, as it was never counted after it; change that for
   income that goes on, such as rent from a flat.
@@ -220,8 +221,8 @@ you stop working:
 - **State pension** (under Income): your Rentenpunkte so far, from the
   Renteninformation, plus those of the years you still plan to work,
   times the value of a point (42,52 € from July 2026), 0,3 % less a month
-  before the regular age (your retirement age in Settings; at most 4
-  years) or 0,5 % more a month after it, less what pensioners pay for
+  before the regular age (67 for everyone born in 1964 or later, a field of
+  its own; at most 4 years) or 0,5 % more a month after it, less what pensioners pay for
   health and care insurance (12,95 % by default). Added as the income
   "State pension" from the age it starts, or updates it. The
   Renteninformation's own pension at 67 assumes you pay in until then;
@@ -309,7 +310,7 @@ with your age then.
 | Coast FI | What the portfolio needs now to grow to the FI number by the retirement age without another pay-in, at the expected return, plus what planned one-offs take out before then: as the Coast plan on the Forecast page counts it. Planned pay-ins and one-offs that pay in don't lower it; they only make the portfolio get there sooner. Shown with a year of birth, until retirement |
 
 How much it has is the portfolio ÷ what it needs. When, for FI and Lean
-FI, is Time to FI, counted as the Forecast page's Retire early counts it.
+FI, is Time to FI, counted as the Forecast page's Retire at FI counts it.
 From the latest month the portfolio grows by the expected return
 (compounded monthly) and gets the future pay-ins each month (the average
 monthly pay-in of the last 12 months, 0 when that is a withdrawal, or your
@@ -340,8 +341,8 @@ The **Portfolio** chart has two views; the one picked last stays picked.
   after, risen by the inflation. The line under the chart
   says when each reaches the FI number; its ⓘ, what the FI number is by
   then.
-  Its switch shows the projection in today's money instead, as on the
-  Forecast page.
+  Its switch shows the projection in today's money (the default) or in the
+  money of each year, as on the Forecast page.
 
 ![Path to FI](docs/path-to-fi.png)
 
@@ -359,57 +360,60 @@ and what is left over, or says how much more than the income those two take.
 
 ![Forecast](docs/forecast.png)
 
-Three plans, each investing the future pay-ins from Settings until it
-changes course (a 12-month average that is a withdrawal counts as 0). A
-tile for each answers its question:
+Three plans, one row each, as bars on one age line from now to 120:
 
-| Plan | Invests | Its tile says |
-| --- | --- | --- |
-| Keep investing | until retirement | what the portfolio is worth when retirement starts |
-| Coast | until Coast FI, then only the amount set for after it in Settings (default 0) | when Coast FI is |
-| Retire early | until the portfolio reaches the FI number, then lives off it | when that is |
+| Plan | Phases |
+| --- | --- |
+| Retire at 53 (the age FI is reached) | investing until FI, then retired from the month after |
+| Coast from now (or the age of Coast FI) | investing until Coast FI, then coasting: working, and paying in only the amount set for after Coast FI in Settings (default 0), then retired from the retirement age |
+| Work to 67 (the retirement age) | investing until retirement, then retired |
 
-Retirement starts in January of the year you reach the retirement age; for
-Retire early, the month after it reaches the FI number. From then on every
-plan lives off the portfolio: each month it takes out the expenses that
-count that month (with the buffer), less the income that does, risen by the
-inflation. Expenses and income that start or end at retirement follow each
-plan's retirement. Coast FI is the first month from which investing only the
-amount for after it makes the portfolio reach the FI number when
-retirement starts; with 0, it gets there on its own. The page says what the
-portfolio pays when retirement starts, and the tiles what the FI number is.
+Each phase is a stretch of the bar: **Investing** (blue) with what is paid
+in a month, as planned in Settings (`+1.400 € → 2.000 €/month`),
+**Coasting** (hatched) and **Retired** (orange) with what the portfolio pays
+a month: the expenses with buffer, less the income that counts then, in
+today's money. Above the bar, what the portfolio has when a phase or step
+ends. A plan that doesn't happen before retirement says “Not before 67”.
 
-Each tile also says whether the money lasts, that is whether some is still
-left at age 150, or at which age it runs out. When it lasts but would run
-out at the lowest growth rate, the tile says that too.
+While retired, a step splits the bar wherever that amount changes, with its
+cause under it: an income that starts (“+ State pension”, “+ Rürup
+pension”, rent) or an expense that ends. The bar's height splits into what
+the portfolio pays (orange) and what other income pays (aqua), so a large
+pension shows as mostly aqua, a small one as a thin line, and none as
+orange to the end. Nothing in the forecast needs a pension.
 
-The growth rates are the expected return from Settings and 2 points less
-and more, as on the Path to FI chart; the buttons at the top switch the
-tiles and the chart between them. The chart shows the three plans up to age
-95, in the colors of their tiles, with the FI number and retirement. Coast
-and Retire early follow Keep investing's line until a dot where they change
-course.
+The icon before a plan says whether the money lasts to 120: a check when
+it does even at the low growth (6 % by default), a warning triangle when it
+runs out at the low growth only, a cross when it runs out at the expected
+return. Where it runs out, the portfolio's part of the bar turns red
+(“6 %: empty at 83”); other income goes on.
 
-**Amounts in** switches the tiles and the chart between the money of each
-year (the default: what the amounts will be then) and today's money: what
-they would buy now, with the inflation since the latest month taken out.
-In today's money the FI number stays about level and growth is the
-expected return less the inflation. The Path to FI chart on the dashboard
-has the same switch; the choice is remembered in this window's browser,
+Click a plan, or move with the arrow keys, to see it in the chart under the
+bars, on the same age line: the portfolio at the expected return, colored
+by phase, with a band from 2 points less to 2 points more growth. The band
+and the low and high results keep the plan's dates from the expected return
+(retiring at 53 stays retiring at 53), so they show what happens to the same
+plan when markets do worse or better. A red dot marks where the money runs
+out. Hovering a year, or the arrow keys on the chart, shows the three
+values. The plan picked stays picked in this browser.
+
+The switch above the bars shows the portfolio in today's money (the
+default: what it would buy now, with the inflation since the latest month
+taken out) or in the money of each year. The Path to FI chart on the
+dashboard has the same switch; the choice is remembered in this browser,
 not in the data file.
 
 - It starts from the portfolio in the latest month, and grows it by the
   growth rate every month (8 % a year is about 0.64 % a month), as Time to
-  FI on the dashboard does.
-- Every amount is in the money of its year, unless Amounts in is set to
-  today's money: growth is before inflation, and the expenses and the FI
-  number rise by the inflation from Settings (3 % a year by default). What
-  is invested stays the same.
+  FI on the dashboard does. Retire at FI retires when that counts FI.
+- Retirement starts in January of the year you reach the retirement age.
+  Expenses and income that start or end at retirement follow each plan's
+  retirement; for Retire at FI that is the month after FI.
+- Growth is before inflation, and the expenses rise by the inflation from
+  Settings (3 % a year by default). Pay-ins stay the same unless they rise.
 - The growth is the same every year. Real markets are not, and bad years
-  right after you start living off the portfolio hurt most.
-- A state pension or other income that goes on after retirement counts
-  when it is entered under Income, from its age, and the FI number covers
-  the years until it starts. Taxes are left out.
+  right after you start living off the portfolio hurt most. Taxes are left
+  out.
 
 **Planned one-offs**, in Settings › Data, are money that comes in
 or goes out once in a month to come: an inheritance, a house deposit, a

@@ -1833,10 +1833,10 @@ test("forecast: the growth rates are the expected return and 2 points less and m
   assert.equal(f.plans.coast.coastMonth, null);
 });
 
-test("forecast: months from the start to age 95, retirement in January of the year of the age", () => {
+test("forecast: months from the start to age 120, retirement in January of the year of the age", () => {
   const f = F.forecast(plan());
   assert.equal(f.months[0], "2026-10");
-  assert.equal(f.months.at(-1), "2085-12");
+  assert.equal(f.months.at(-1), "2110-12");
   assert.equal(f.retirement, "2057-01");
   for (const p of F.PLANS) assert.equal(f.plans[p].values.length, f.months.length);
   assert.equal(F.ageIn("2057-01", 1990), 67);
@@ -1972,15 +1972,138 @@ test("forecast: retire at FI takes out expenses from the month after FI", () => 
   assert.ok(slow.values.slice(k).every((v) => v === 0));
 });
 
-test("forecast: a plan lasts only when money is left at age 150", () => {
+test("forecast: a plan lasts only when money is left at age 120", () => {
   // Already at 30 × yearly expenses at 36, living off it at 3 % growth:
-  // that lasts about 78 years, past what is shown but not to 150.
+  // that lasts about 74 years, past 95 but not to 120.
   const f = F.forecast(plan({ value: 2000 * EUR * 12 * 30, growth: 3 }));
   const fi = f.plans.fi;
   assert.equal(fi.fiMonth, "2026-10");
   const age = F.ageIn(fi.runsOut, 1990);
-  assert.ok(age > F.SHOWN_AGE && age < F.LASTS_AGE, `runs out at ${age}`);
-  assert.ok(fi.values.at(-1) > 0, "still money at 95");
+  assert.ok(age > 95 && age <= F.SHOWN_AGE, `runs out at ${age}`);
+  assert.equal(fi.values.at(-1), 0);
+  // 40 × at 3 %: taking out 2.5 % a year, it lasts.
+  const lasting = F.forecast(plan({ value: 2000 * EUR * 12 * 40, growth: 3 })).plans.fi;
+  assert.equal(lasting.runsOut, null);
+  assert.ok(lasting.values.at(-1) > 0, "still money at 120");
+});
+
+test("forecast: fixed dates run the plans of the expected return at another growth", () => {
+  const mid = F.forecast(plan());
+  const fixed = { coast: mid.plans.coast.coastMonth, fi: mid.plans.fi.fiMonth };
+  const low = F.forecast({ ...plan({ growth: 3 }), fixed });
+  assert.equal(low.plans.fi.fiMonth, fixed.fi);
+  assert.equal(low.plans.coast.coastMonth, fixed.coast);
+  assert.ok(F.forecast(plan({ growth: 3 })).plans.fi.fiMonth > fixed.fi, "3 % reaches FI later on its own");
+  const r = monthly(3);
+  const i = F.monthIndex(fixed.fi) - F.monthIndex("2026-10");
+  close(low.plans.fi.values[i + 1], low.plans.fi.values[i] * (1 + r) - 2000 * EUR, "retired from the month after");
+  const j = F.monthIndex(fixed.coast) - F.monthIndex("2026-10");
+  close(low.plans.coast.values[j + 1], low.plans.coast.values[j] * (1 + r), "coasting from the month after");
+  // Without FI or Coast FI by retirement, both are Keep investing.
+  const never = F.forecast({ ...plan({ growth: 3 }), fixed: { coast: null, fi: null } });
+  assert.deepEqual(never.plans.fi.values, never.plans.keep.values);
+  assert.deepEqual(never.plans.coast.values, never.plans.keep.values);
+  assert.deepEqual([never.plans.fi.fiMonth, never.plans.coast.coastMonth], [null, null]);
+});
+
+test("fiOutlook plans: each plan's phases, with a pension as a step while retired", () => {
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, withdrawalRate: 4, expectedReturn: 5, inflation: 0, birthYear: 1990, futurePayIn: 1000 * EUR },
+    expenses: [
+      { id: "rent", name: "Rent", category: "", amount: 2000 * EUR, everyMonths: 1, active: true, essential: false },
+      { id: "health", name: "Health", category: "", amount: 300 * EUR, everyMonths: 1, active: true, essential: true, from: { at: "retirement" }, until: { age: 67 } },
+    ],
+    income: [
+      { id: "salary", name: "Salary", category: "", amount: 4000 * EUR, everyMonths: 1 },
+      { id: "pension", name: "Pension", category: "", amount: 1500 * EUR, everyMonths: 1, from: { age: 67 }, until: null },
+    ],
+    accounts: [{ id: "a", name: "A" }],
+    records: [{ month: "2026-10", account: "a", value: 200000 * EUR, payIn: 1000 * EUR }],
+    payInChanges: [{ id: "c", from: { age: 45 }, amount: 1500 * EUR }],
+  });
+  const o = F.fiOutlook(s, "2026-11");
+  const result = o.plans("nominal");
+  assert.deepEqual([result.months[0], result.months.at(-1), result.retirement], ["2026-10", "2110-12", "2057-01"]);
+  assert.deepEqual(result.plans.map((p) => p.key), ["fi", "coast", "keep"]);
+  const [fi, coast, keep] = result.plans;
+  const at = (month) => F.monthIndex(month) - F.monthIndex("2026-10");
+  const end = result.months.length;
+
+  // Retire early, at the expected return as forecast() runs it: investing
+  // as planned, then retired, with a step when the pension starts and the
+  // health insurance ends.
+  const main = o.forecast();
+  assert.deepEqual(fi.values.mid, main.plans.fi.values);
+  assert.equal(fi.stopInvesting, main.plans.fi.fiMonth);
+  assert.equal(fi.retires, F.addMonths(main.plans.fi.fiMonth, 1));
+  assert.ok(fi.retires > "2035-01" && fi.retires < "2057-01", fi.retires);
+  assert.deepEqual(fi.phases.map((p) => [p.kind, p.from, p.to]), [["invest", 0, at(fi.retires)], ["retired", at(fi.retires), end]]);
+  assert.deepEqual(fi.phases[0].steps.map((st) => [st.from, st.to, st.amount]), [[0, at("2035-01"), 1000 * EUR], [at("2035-01"), at(fi.retires), 1500 * EUR]]);
+  const [bridge, pension] = fi.phases[1].steps;
+  assert.deepEqual([bridge.from, bridge.to, bridge.amount, bridge.share], [at(fi.retires), at("2057-01"), 2300 * EUR, 1]);
+  assert.deepEqual([pension.from, pension.to, pension.amount, pension.share], [at("2057-01"), end, 500 * EUR, 0.25]);
+  assert.deepEqual(pension.changes, [{ name: "Health", kind: "expenses", starts: false }, { name: "Pension", kind: "income", starts: true }]);
+  assert.deepEqual(bridge.changes, [{ name: "Health", kind: "expenses", starts: true }, { name: "Salary", kind: "income", starts: false }]);
+
+  // At 3 % it keeps the 5 % plan's dates: retired from the same month.
+  const r = monthly(3);
+  const k = at(fi.stopInvesting);
+  close(fi.values.low[k + 1], fi.values.low[k] * (1 + r) - 2300 * EUR, "at 3 %, retired when 5 % says");
+  assert.ok(o.forecast({ growth: "low" }).plans.fi.fiMonth > fi.stopInvesting, "3 % on its own reaches FI later");
+  assert.equal(fi.runsOut.mid, main.plans.fi.runsOut);
+
+  // Coast from now: nothing paid in until retirement.
+  assert.equal(coast.stopInvesting, null);
+  assert.equal(coast.retires, "2057-01");
+  assert.deepEqual(coast.phases.map((p) => [p.kind, p.from, p.to]), [["coast", 0, at("2057-01")], ["retired", at("2057-01"), end]]);
+  assert.deepEqual(coast.phases[0].steps.map((st) => st.amount), [0]);
+  assert.deepEqual(coast.phases[1].steps.map((st) => [st.amount, st.share]), [[500 * EUR, 0.25]]);
+  assert.ok(coast.phases[1].steps[0].changes.some((c) => c.name === "Pension" && c.starts), "the pension starts with retirement");
+
+  // Keep investing until retirement.
+  assert.deepEqual([keep.stopInvesting, keep.retires], ["2056-12", "2057-01"]);
+  assert.deepEqual(keep.phases.map((p) => p.kind), ["invest", "retired"]);
+  assert.deepEqual(keep.values.mid, main.plans.keep.values);
+
+  // Today's money: the values without the inflation since the start.
+  const prices = F.fiOutlook({ ...s, settings: { ...s.settings, inflation: 2 } }, "2026-11");
+  const nominal = prices.plans("nominal").plans[2].values.mid;
+  const today = prices.plans("today").plans[2].values.mid;
+  close(today[120], F.deflated(nominal[120], 2, 120), "today's money");
+});
+
+test("fiOutlook plans: a step while retired when the share changes, even if the amount doesn't", () => {
+  // At 80 care costs 1,000 more and an annuity of 1,000 starts: the
+  // portfolio still pays 2,000, but now only two thirds of the spending.
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, expectedReturn: 5, inflation: 0, birthYear: 1990 },
+    expenses: [
+      { id: "rent", name: "Rent", category: "", amount: 2000 * EUR, everyMonths: 1, active: true, essential: false },
+      { id: "care", name: "Care", category: "", amount: 1000 * EUR, everyMonths: 1, active: true, essential: false, from: { age: 80 } },
+    ],
+    income: [{ id: "annuity", name: "Annuity", category: "", amount: 1000 * EUR, everyMonths: 1, from: { age: 80 }, until: null }],
+    accounts: [{ id: "a", name: "A" }],
+    records: [{ month: "2026-10", account: "a", value: 100000 * EUR, payIn: 1000 * EUR }],
+  });
+  const result = F.fiOutlook(s, "2026-11").plans("nominal");
+  const keep = result.plans.find((p) => p.key === "keep");
+  const steps = keep.phases.find((p) => p.kind === "retired").steps;
+  const at = (month) => F.monthIndex(month) - F.monthIndex("2026-10");
+  assert.deepEqual(steps.map((st) => [st.from, st.amount]), [[at("2057-01"), 2000 * EUR], [at("2070-01"), 2000 * EUR]]);
+  close(steps[1].share, 2 / 3, "the portfolio's share from 80");
+  assert.deepEqual(steps[1].changes, [{ name: "Care", kind: "expenses", starts: true }, { name: "Annuity", kind: "income", starts: true }]);
+});
+
+test("fiOutlook plans: retired already, plans that don't happen, and without a year of birth", () => {
+  const retired = F.fiOutlook(outlookStore({ value: 100000 * EUR, goal: 600000 * EUR, rate: 5, settings: { birthYear: 1950 } }), "2026-11").plans("nominal");
+  assert.deepEqual(retired.plans.map((p) => [p.key, p.stopInvesting, p.retires]), [["keep", null, "2026-10"]]);
+  assert.deepEqual(retired.plans[0].phases.map((p) => [p.kind, p.from]), [["retired", 0]]);
+  assert.ok(retired.plans[0].runsOut.mid < "2032-01", "2,000 a month from 100,000 runs out within 5 years");
+  // No FI and no Coast FI before retirement: only Keep investing happens.
+  const far = F.fiOutlook(outlookStore({ value: 1000 * EUR, payIn: 100 * EUR, goal: 2000000 * EUR, rate: 5, settings: { birthYear: 1990 } }), "2026-11").plans("nominal");
+  assert.deepEqual(far.plans.map((p) => [p.key, p.retires]), [["fi", null], ["coast", null], ["keep", "2057-01"]]);
+  assert.deepEqual([far.plans[0].phases, far.plans[1].phases], [[], []]);
+  assert.equal(F.fiOutlook(outlookStore({ goal: 600000 * EUR, rate: 5 }), "2026-11").plans(), null);
 });
 
 test("forecast: past Coast FI and FI at the start", () => {
@@ -1999,14 +2122,14 @@ test("forecast: past the retirement age every plan lives off the portfolio", () 
   const r = monthly(5);
   const f = F.forecast(plan({ birthYear: 1950 }));
   assert.equal(f.retirement, "2017-01");
-  assert.equal(f.months.at(-1), "2045-12", "until 95");
+  assert.equal(f.months.at(-1), "2070-12", "until 120");
   for (const p of F.PLANS) {
     const { values, coastMonth, fiMonth, atRetirement } = f.plans[p];
     assert.deepEqual([coastMonth, fiMonth, atRetirement], [null, null, null]);
     close(values[1], 50000 * EUR * (1 + r) - 2000 * EUR, p);
   }
-  // At least ten years are shown, also past 95.
-  assert.equal(F.forecast(plan({ birthYear: 1925 })).months.at(-1), "2036-10");
+  // At least ten years are shown, also past 120.
+  assert.equal(F.forecast(plan({ birthYear: 1900 })).months.at(-1), "2036-10");
 });
 
 test("forecast: with inflation, expenses and the FI number rise and pay-ins stay", () => {

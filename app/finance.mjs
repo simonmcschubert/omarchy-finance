@@ -1108,6 +1108,9 @@ export const GERMANY_2026 = Object.freeze({
   careRate: 3.6,
   careRateChildless: 4.2,
   pensionerRate: 7.3,
+  // The age the state pension starts without deductions, for everyone born
+  // in 1964 or later.
+  regularAge: 67,
 });
 
 // Current numbers for the dashboard, for the month `now`. Amounts are in
@@ -1207,11 +1210,9 @@ export function growthRates(expectedReturn) {
   return { low: expectedReturn - RETURN_SPREAD, mid: expectedReturn, high: expectedReturn + RETURN_SPREAD };
 }
 export const GROWTHS = Object.freeze(["low", "mid", "high"]);
-// The forecast is shown up to the end of the year of this age…
-export const SHOWN_AGE = 95;
-// …and a plan lasts when money is still left at the end of the year of this
-// age.
-export const LASTS_AGE = 150;
+// The forecast is shown up to the end of the year of this age, and a plan
+// lasts when money is still left then.
+export const SHOWN_AGE = 120;
 
 // keep: pay in until retirement.
 // coast: pay in until Coast FI, then the smaller amount until retirement.
@@ -1252,6 +1253,10 @@ export function ageIn(month, birthYear) {
 // is there. takenOut(index), when given, is the part of them taken out (0 or
 // less), so that money coming in the same month doesn't hide it; without it,
 // a month's one-offs when they add up to less than 0.
+// fixed, when given, is { coast, fi } (months, or null for never): Coast
+// changes course after its month and Retire early retires the month after
+// its own, instead of when this growth reaches Coast FI and FI. So another
+// growth can run the plans of the expected return.
 //
 // Returns { months: shown months from start on, retirement: its first
 // month (null without), goal: the FI number of each shown month,
@@ -1273,7 +1278,7 @@ export function forecast(params) {
   const retires = birthYear != null;
   const retirement = retirementIndex({ birthYear, retirementAge });
   const lastShown = retires ? Math.max((birthYear + SHOWN_AGE) * 12 + 11, first + 120) : first + MAX_PROJECTION_MONTHS;
-  const lastChecked = retires ? Math.max((birthYear + LASTS_AGE) * 12 + 11, lastShown) : lastShown;
+  const fixed = params.fixed ? { coast: params.fixed.coast && monthIndex(params.fixed.coast), fi: params.fixed.fi && monthIndex(params.fixed.fi) } : null;
   // What the portfolio pays in the month of `index`, retired from the month
   // of `from`, the FI number of that month, and its one-offs, in the money
   // of then.
@@ -1322,6 +1327,18 @@ export function forecast(params) {
     // money of that month-end.
     const check = (index) => {
       if (index >= retirement) return;
+      if (fixed) {
+        if (plan === "coast" && index === fixed.coast) {
+          coastMonth = monthFromIndex(index);
+          phase = "coast";
+        }
+        if (plan === "fi" && index === fixed.fi) {
+          fiMonth = monthFromIndex(index);
+          phase = "out";
+          retiredFrom = index + 1;
+        }
+        return;
+      }
       if (retires && coastMonth === null && grown(v, index, coastContribution) >= fiAtRetirement) {
         coastMonth = monthFromIndex(index);
         if (plan === "coast" && phase === "full") phase = "coast";
@@ -1335,7 +1352,7 @@ export function forecast(params) {
       }
     };
     check(first);
-    for (let index = first + 1; index <= lastChecked; index++) {
+    for (let index = first + 1; index <= lastShown; index++) {
       const out = phase === "out" || index >= retirement;
       v = v * (1 + rate) + (out ? -expensesAt(index, retiredFrom) : phase === "coast" ? coastContribution : paidIn(index)) + onceAt(index);
       if (v <= 0) {
@@ -1343,8 +1360,7 @@ export function forecast(params) {
         if (out) runsOut ??= monthFromIndex(index);
       }
       if (index === retirement - 1) atRetirement = v;
-      if (index <= lastShown) values.push(v);
-      else if (runsOut !== null) break;
+      values.push(v);
       check(index);
     }
     return { values, coastMonth, fiMonth, atRetirement, runsOut };
@@ -1428,13 +1444,14 @@ export function fiOutlook(store, now = currentMonth()) {
   const goal = (essential) => (index) => fiNumberIn(store, Math.max(index, nowIndex), { essential });
   const fiNumber = goal(false)(first + 1);
 
-  // forecast() runs, once each.
+  // forecast() runs, and plans() in each money, once each.
   const runs = new Map();
-  const run = ({ essential = false, growth = "mid", coastContribution = 0 } = {}) => {
-    const key = `${essential} ${growth} ${coastContribution}`;
+  const plansIn = new Map();
+  const run = ({ essential = false, growth = "mid", coastContribution = 0, fixed = null } = {}) => {
+    const key = `${essential} ${growth} ${coastContribution} ${fixed?.coast} ${fixed?.fi}`;
     if (!runs.has(key)) {
       runs.set(key, forecast({
-        start, value, birthYear, retirementAge, inflation, coastContribution,
+        start, value, birthYear, retirementAge, inflation, coastContribution, fixed,
         contribution: paidIn,
         growth: rates[growth],
         need: (index, from) => needIn(store, index, from),
@@ -1535,12 +1552,104 @@ export function fiOutlook(store, now = currentMonth()) {
       return { rates, reach, points };
     },
 
-    // The Forecast page's plans: forecast() at `growth` ("low", "mid" or
-    // "high"), investing `coastContribution` a month after Coast FI (the
-    // coast pay-in from Settings unless given), in "nominal" money or
-    // "today"'s.
+    // forecast() at `growth` ("low", "mid" or "high"), investing
+    // `coastContribution` a month after Coast FI (the coast pay-in from
+    // Settings unless given), in "nominal" money or "today"'s.
     forecast({ growth = "mid", coastContribution = store.settings.coastPayIn, money: kind = "nominal" } = {}) {
       return inMoney(run({ growth, coastContribution }), kind);
+    },
+
+    // The Forecast page's plans, each with the dates of the expected
+    // return, at that and at RETURN_SPREAD points less and more: so the low
+    // and high growth show what happens to the same plan when markets do
+    // worse or better. Values in "nominal" money (of each month) or
+    // "today"'s. null without a year of birth. Otherwise {
+    //   months: shown months, from start to the end of SHOWN_AGE,
+    //   retirement: its first month,
+    //   plans: [{ key: "fi" (Retire early), "coast" or "keep", or just
+    //     "keep" once retired,
+    //     stopInvesting: the last month paid in in full (null: none after
+    //       start), retires: the first month lived off the portfolio; both
+    //       null when the plan doesn't happen before retirement (no FI or
+    //       Coast FI by then),
+    //     values: { low, mid, high }, one per shown month,
+    //     runsOut: { low, mid, high }, the first month with nothing left, or
+    //       null when money is left at the end of SHOWN_AGE,
+    //     phases: [{ kind: "invest", "coast" or "retired", from, to (indexes
+    //       of shown months; the last phase ends at months.length),
+    //       steps }] }] }
+    // A phase's steps split it where its monthly amount changes: { from,
+    // to, amount (a month, as entered: pay-ins as planned, what the
+    // portfolio pays in today's money) }; while retired also share (the
+    // part of the spending the portfolio pays, the rest coming from
+    // income) and changes (the expenses and income that start or end with
+    // the step: { name, kind: "expenses" | "income", starts }).
+    plans(kind = "nominal") {
+      if (plansIn.has(kind)) return plansIn.get(kind);
+      const remember = (result) => (plansIn.set(kind, result), result);
+      if (!Number.isFinite(retirement)) return remember(null);
+      const coastContribution = store.settings.coastPayIn;
+      const main = run({ coastContribution });
+      const fixed = { coast: main.plans.coast.coastMonth, fi: main.plans.fi.fiMonth };
+      const results = { mid: main, low: run({ growth: "low", coastContribution, fixed }), high: run({ growth: "high", coastContribution, fixed }) };
+      const shown = inMoney(main, kind);
+      const n = shown.months.length;
+      const at = (i) => first + i; // month index of shown month i
+      // Splits [from, to) where amount(i) changes.
+      const stepsOf = (from, to, amount, extra = () => ({})) => {
+        const steps = [];
+        for (let i = from; i < to; i++) {
+          const a = amount(i);
+          if (steps.length && steps.at(-1).amount === a) continue;
+          if (steps.length) steps.at(-1).to = i;
+          steps.push({ from: i, to, amount: a, ...extra(i) });
+        }
+        return steps;
+      };
+      const invest = (from, to) => ({ kind: "invest", from, to, steps: stepsOf(Math.max(from, 1), to, (i) => Math.max(0, plan.at(at(i)))).map((s, k) => (k ? s : { ...s, from })) });
+      const coast = (from, to) => ({ kind: "coast", from, to, steps: [{ from, to, amount: coastContribution }] });
+      // Living off the portfolio from shown month `from`, retired from the
+      // month index `since`.
+      const living = (from, since) => {
+        const changed = (index) => [...store.expenses, ...store.income]
+          .filter((item) => item.active !== false)
+          .flatMap((item) => {
+            const { from: begins, until } = itemWindow(item, birthYear, since);
+            const type = store.income.includes(item) ? "income" : "expenses";
+            return begins === index ? [{ name: item.name, kind: type, starts: true }] : until === index ? [{ name: item.name, kind: type, starts: false }] : [];
+          });
+        // What the portfolio pays (as forecast() takes it out) and its
+        // share can only change where an expense or income starts or ends.
+        const steps = [];
+        for (const index of [at(from), ...changesAfter(store, since).filter((i) => i > at(from) && i < at(n))]) {
+          const b = budget(store, index, since);
+          const amount = Math.round(b.need);
+          const share = b.expenses.total > 0 ? Math.min(1, b.need / b.expenses.total) : 1;
+          const last = steps.at(-1);
+          if (last && last.amount === amount && last.share === share) continue;
+          if (last) last.to = index - first;
+          steps.push({ from: index - first, to: n, amount, share, changes: changed(index) });
+        }
+        return { kind: "retired", from, to: n, steps };
+      };
+      const runsOut = (key) => Object.fromEntries(GROWTHS.map((g) => [g, results[g].plans[key].runsOut]));
+      const values = (key) => Object.fromEntries(GROWTHS.map((g) => [g, inMoney(results[g], kind).plans[key].values]));
+      const describe = (key, stopInvesting, retires, phases) => ({ key, stopInvesting, retires, values: values(key), runsOut: runsOut(key), phases: phases.filter((p) => p.to > p.from) });
+      const ret = retirement - first;
+      if (retired) return remember({ months: shown.months, retirement: monthFromIndex(retirement), plans: [describe("keep", null, start, [living(0, retirement)])] });
+      // Each phase from the month after the one before it ends.
+      const fi = fixed.fi === null ? describe("fi", null, null, [])
+        : describe("fi", monthIndex(fixed.fi) > first ? fixed.fi : null, monthFromIndex(monthIndex(fixed.fi) + 1), [
+          ...(monthIndex(fixed.fi) > first ? [invest(0, monthIndex(fixed.fi) - first + 1)] : []),
+          living(monthIndex(fixed.fi) - first + 1, monthIndex(fixed.fi) + 1)]);
+      const coastFrom = fixed.coast === null ? null : monthIndex(fixed.coast) - first + 1;
+      const coasting = fixed.coast === null ? describe("coast", null, null, [])
+        : describe("coast", coastFrom > 1 ? fixed.coast : null, monthFromIndex(retirement), [
+          ...(coastFrom > 1 ? [invest(0, coastFrom)] : []),
+          coast(coastFrom > 1 ? coastFrom : 0, ret),
+          living(ret, retirement)]);
+      const keep = describe("keep", monthFromIndex(retirement - 1), monthFromIndex(retirement), [invest(0, ret), living(ret, retirement)]);
+      return remember({ months: shown.months, retirement: monthFromIndex(retirement), plans: [fi, coasting, keep] });
     },
   };
 }
