@@ -2072,6 +2072,28 @@ test("fiOutlook plans: each plan's phases, with a pension as a step while retire
   close(today[120], F.deflated(nominal[120], 2, 120), "today's money");
 });
 
+test("fiOutlook plans: a step while retired when the share changes, even if the amount doesn't", () => {
+  // At 80 care costs 1,000 more and an annuity of 1,000 starts: the
+  // portfolio still pays 2,000, but now only two thirds of the spending.
+  const s = store({
+    settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, expectedReturn: 5, inflation: 0, birthYear: 1990 },
+    expenses: [
+      { id: "rent", name: "Rent", category: "", amount: 2000 * EUR, everyMonths: 1, active: true, essential: false },
+      { id: "care", name: "Care", category: "", amount: 1000 * EUR, everyMonths: 1, active: true, essential: false, from: { age: 80 } },
+    ],
+    income: [{ id: "annuity", name: "Annuity", category: "", amount: 1000 * EUR, everyMonths: 1, from: { age: 80 }, until: null }],
+    accounts: [{ id: "a", name: "A" }],
+    records: [{ month: "2026-10", account: "a", value: 100000 * EUR, payIn: 1000 * EUR }],
+  });
+  const result = F.fiOutlook(s, "2026-11").plans("nominal");
+  const keep = result.plans.find((p) => p.key === "keep");
+  const steps = keep.phases.find((p) => p.kind === "retired").steps;
+  const at = (month) => F.monthIndex(month) - F.monthIndex("2026-10");
+  assert.deepEqual(steps.map((st) => [st.from, st.amount]), [[at("2057-01"), 2000 * EUR], [at("2070-01"), 2000 * EUR]]);
+  close(steps[1].share, 2 / 3, "the portfolio's share from 80");
+  assert.deepEqual(steps[1].changes, [{ name: "Care", kind: "expenses", starts: true }, { name: "Annuity", kind: "income", starts: true }]);
+});
+
 test("fiOutlook plans: retired already, plans that don't happen, and without a year of birth", () => {
   const retired = F.fiOutlook(outlookStore({ value: 100000 * EUR, goal: 600000 * EUR, rate: 5, settings: { birthYear: 1950 } }), "2026-11").plans("nominal");
   assert.deepEqual(retired.plans.map((p) => [p.key, p.stopInvesting, p.retires]), [["keep", null, "2026-10"]]);

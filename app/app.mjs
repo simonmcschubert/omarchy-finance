@@ -1190,7 +1190,6 @@ function readNumber(text, decimals = 4) {
 function pensionCard() {
   const store = state.store;
   const g = F.GERMANY_2026;
-  const regularAge = store.settings.retirementAge;
   const existing = store.income.find((item) => item.name === PENSION_NAME) ?? null;
   const result = h("p", { class: "helper-result", "aria-live": "polite" });
   const read = (form) => {
@@ -1200,10 +1199,13 @@ function pensionCard() {
     const pointValue = F.parseMoney(data.get("pointValue"));
     const ageText = String(data.get("startAge")).trim();
     const startAge = Number(ageText);
+    const regularText = String(data.get("regularAge")).trim();
+    const regularAge = Number(regularText);
     const deductions = readNumber(data.get("deductions"), 2);
     if (points === null) return { error: "Rentenpunkte so far: enter a number, such as 25,5." };
     if (more === null) return { error: "More points: enter a number, or 0." };
     if (!pointValue.ok || pointValue.cents <= 0) return { error: "Value of a point: enter an amount." };
+    if (!/^[0-9]+$/.test(regularText) || regularAge < F.RETIREMENT_AGES.min || regularAge > F.RETIREMENT_AGES.max) return { error: `Regular age: enter whole years from ${F.RETIREMENT_AGES.min} to ${F.RETIREMENT_AGES.max}.` };
     if (!/^[0-9]+$/.test(ageText) || startAge < regularAge - 4 || startAge > F.AGES.max) return { error: `Starts at age: from ${regularAge - 4} on.` };
     if (deductions === null || deductions >= 100) return { error: "Health and care insurance: enter a percentage." };
     return { startAge, ...F.statePension({ points: points + more, pointValue: pointValue.cents, startAge, regularAge, deductions }) };
@@ -1236,8 +1238,10 @@ function pensionCard() {
       "About 1 a year at the average wage, 51.944 € in 2026."),
     field("Value of a point", h("input", { name: "pointValue", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.pointValue) }),
       "42,52 € from July 2026. In the forecast, the pension rises with inflation, as pensions about do."),
-    field("Starts at age", h("input", { name: "startAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.from?.age ?? regularAge) }),
-      `The regular age is your retirement age in Settings, ${regularAge}. Each month earlier costs 0,3 %, at most 4 years early (63 with 35 years of contributions); each month later adds 0,5 %.`),
+    field("Regular age", h("input", { name: "regularAge", inputmode: "numeric", autocomplete: "off", value: String(g.regularAge) }),
+      `When the pension starts without deductions: ${g.regularAge} for everyone born in 1964 or later.`),
+    field("Starts at age", h("input", { name: "startAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.from?.age ?? g.regularAge) }),
+      "Each month before the regular age costs 0,3 %, at most 4 years early (63 with 35 years of contributions); each month after it adds 0,5 %."),
     field("Health and care insurance (%)",
       h("input", { name: "deductions", inputmode: "decimal", autocomplete: "off", value: plain.format(g.pensionerRate + g.extraRate / 2 + g.careRateChildless) }),
       "Pensioners pay half the general and the extra health rate (7,3 % + about 1,45 %) and the whole care rate (3,6 %, 4,2 % without children).",
@@ -1247,10 +1251,13 @@ function pensionCard() {
   return h("section", { class: "card" },
     h("details", null,
       h("summary", null, h("h2", null, "State pension (Germany)")),
-      h("p", null, "From your Renteninformation, enter the Rentenpunkte (Entgeltpunkte) you have so far, not its pension at ", regularAge,
-        ": that assumes you pay in until then."),
+      h("p", null, "From your Renteninformation, enter the Rentenpunkte (Entgeltpunkte) you have so far, not its pension at the regular age: that assumes you pay in until then."),
       form, result));
 }
+
+// When the state pension starts: as entered with the pension helper, or the
+// regular age.
+const pensionAge = (store) => store.income.find((item) => item.name === PENSION_NAME)?.from?.age ?? F.GERMANY_2026.regularAge;
 
 // Germany: health and care insurance at the minimum, as a voluntary member,
 // from retirement until the pension starts.
@@ -1297,7 +1304,7 @@ function healthCard() {
     field("Zusatzbeitrag (%)", h("input", { name: "extra", inputmode: "decimal", autocomplete: "off", value: plain.format(g.extraRate) }),
       "Your insurer's extra rate, 2,9 % on average in 2026, on top of the general rate of 14 % (without sick pay) and care insurance."),
     field("Until age (the pension starts)",
-      h("input", { name: "untilAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.until?.age ?? store.settings.retirementAge) }),
+      h("input", { name: "untilAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.until?.age ?? pensionAge(store)) }),
       "From the pension on, insured as a pensioner (KVdR, after 9/10 of the second half of your working life insured), only the pension counts; that is in the pension helper under Income."),
     h("label", { class: "check" }, h("input", { type: "checkbox", name: "childless", checked: true }), "No children (care insurance 4,2 % instead of 3,6 %)"),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, existing ? `Update ${HEALTH_NAME}` : "Add as expense")));

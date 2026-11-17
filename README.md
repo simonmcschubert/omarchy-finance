@@ -221,8 +221,8 @@ you stop working:
 - **State pension** (under Income): your Rentenpunkte so far, from the
   Renteninformation, plus those of the years you still plan to work,
   times the value of a point (42,52 € from July 2026), 0,3 % less a month
-  before the regular age (your retirement age in Settings; at most 4
-  years) or 0,5 % more a month after it, less what pensioners pay for
+  before the regular age (67 for everyone born in 1964 or later, a field of
+  its own; at most 4 years) or 0,5 % more a month after it, less what pensioners pay for
   health and care insurance (12,95 % by default). Added as the income
   "State pension" from the age it starts, or updates it. The
   Renteninformation's own pension at 67 assumes you pay in until then;

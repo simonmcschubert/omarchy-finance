@@ -1108,6 +1108,9 @@ export const GERMANY_2026 = Object.freeze({
   careRate: 3.6,
   careRateChildless: 4.2,
   pensionerRate: 7.3,
+  // The age the state pension starts without deductions, for everyone born
+  // in 1964 or later.
+  regularAge: 67,
 });
 
 // Current numbers for the dashboard, for the month `now`. Amounts are in
@@ -1615,11 +1618,18 @@ export function fiOutlook(store, now = currentMonth()) {
             const type = store.income.includes(item) ? "income" : "expenses";
             return begins === index ? [{ name: item.name, kind: type, starts: true }] : until === index ? [{ name: item.name, kind: type, starts: false }] : [];
           });
-        // As forecast() takes it out: needIn of each month.
-        const steps = stepsOf(from, n, (i) => Math.round(needIn(store, at(i), since)), (i) => {
-          const b = budget(store, at(i), since);
-          return { share: b.expenses.total > 0 ? Math.min(1, b.need / b.expenses.total) : 1, changes: changed(at(i)) };
-        });
+        // What the portfolio pays (as forecast() takes it out) and its
+        // share can only change where an expense or income starts or ends.
+        const steps = [];
+        for (const index of [at(from), ...changesAfter(store, since).filter((i) => i > at(from) && i < at(n))]) {
+          const b = budget(store, index, since);
+          const amount = Math.round(b.need);
+          const share = b.expenses.total > 0 ? Math.min(1, b.need / b.expenses.total) : 1;
+          const last = steps.at(-1);
+          if (last && last.amount === amount && last.share === share) continue;
+          if (last) last.to = index - first;
+          steps.push({ from: index - first, to: n, amount, share, changes: changed(index) });
+        }
         return { kind: "retired", from, to: n, steps };
       };
       const runsOut = (key) => Object.fromEntries(GROWTHS.map((g) => [g, results[g].plans[key].runsOut]));
