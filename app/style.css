@@ -1017,6 +1017,21 @@ label {
   outline-offset: 2px;
 }
 
+/* A box that can't be changed now looks it, and so does its label. */
+.check:has(input[type="checkbox"]:disabled) {
+  color: var(--fg-muted);
+  cursor: not-allowed;
+}
+
+.check input[type="checkbox"]:disabled {
+  border-color: var(--fg-muted);
+  cursor: not-allowed;
+}
+
+.check input[type="checkbox"]:disabled:checked {
+  background: var(--fg-muted);
+}
+
 .badge {
   display: inline-block;
   margin-left: 8px;

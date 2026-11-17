@@ -117,7 +117,10 @@ class ServerTest(unittest.TestCase):
 
     def test_no_file_yet(self):
         backups = str(self.data_file.parent / "backups")
-        self.assertEqual(self.get_data(), {"revision": "none", "file": str(self.data_file), "backups": backups, "data": None})
+        setup = str(Path(server.__file__).resolve().parent / "setup")
+        self.assertEqual(self.get_data(), {"revision": "none", "file": str(self.data_file), "backups": backups, "setup": setup, "data": None})
+        # Settings names it for the lock, to be run in a terminal.
+        self.assertTrue(Path(setup).is_file())
 
     def test_save_and_load(self):
         origin = {"Origin": f"http://127.0.0.1:{self.port}"}

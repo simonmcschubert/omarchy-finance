@@ -30,6 +30,8 @@ from pathlib import Path
 PORT = 47219
 APP_DIR = Path(__file__).resolve().parent / "app"
 UPDATE_SCRIPT = Path(__file__).resolve().parent / "update"
+# Installs Finance, and the polkit action the lock needs (Lock.available).
+SETUP_SCRIPT = Path(__file__).resolve().parent / "setup"
 MAX_BODY = 10 * 1024 * 1024
 NO_FILE = "none"
 VERSION = 15  # data file version; matches VERSION in app/finance.mjs
@@ -624,6 +626,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "revision": revision_of(raw),
             "file": str(self.server.data_file),
             "backups": str(backup_dir(self.server.data_file)),
+            "setup": str(SETUP_SCRIPT),
             "data": None,
         }
         if raw is not None:
