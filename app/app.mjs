@@ -2120,14 +2120,13 @@ function payInsCard(store) {
   const { birthYear, futurePayIn, payInsRiseWithInflation } = store.settings;
   const series = F.portfolioSeries(store);
   const average = F.averagePayIn(series);
-  const start = series.at(-1)?.month ?? F.currentMonth();
-  const next = F.monthIndex(start) + 1; // the first month projected
+  const now = thisMonth(); // as the dashboard counts it
   const retirement = F.retirementIndex(store.settings);
   // In the order they start (payInPlan's), an age without a year of birth
-  // last; the latest one that has started is what is paid in now.
+  // last; the latest one that has started is what is paid in this month.
   const changes = store.payInChanges.map((change) => ({ change, index: F.payInChangeIndex(change, birthYear) }))
     .sort((a, b) => (a.index === b.index ? 0 : a.index < b.index ? -1 : 1));
-  const current = changes.filter((c) => c.index <= next).at(-1)?.change ?? null;
+  const current = changes.filter((c) => c.index <= now).at(-1)?.change ?? null;
   const editing = state.editingPayIn === "now" ? "now" : store.payInChanges.find((c) => c.id === state.editingPayIn) ?? null;
 
   const amountText = (amount) => (amount !== null ? money(amount) : average ? `Average · ${money(average.average)}` : "Average");
@@ -2144,7 +2143,7 @@ function payInsCard(store) {
       if (!Number.isFinite(index)) note = "Needs your year of birth";
       else if (index >= retirement) note = "After retirement: nothing is paid in then";
       else if (change === current) note = `Paid in now${change.amount !== null && average ? `; your average: ${money(average.average)}` : ""}`;
-      else if (index <= next) note = "A later change counts instead";
+      else if (index <= now) note = "A later change counts instead";
       return h("tr", { class: change === editing ? "editing" : null },
         h("td", null, startText(change), sub(note)),
         h("td", { class: "num" }, amountText(change.amount)),
