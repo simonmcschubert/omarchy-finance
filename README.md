@@ -92,15 +92,15 @@ Finance window's browser profile. The data file stays.
   Lean FI and FI), the portfolio's history or its path to FI, the net
   worth, and where the income goes. See
   [Dashboard numbers](#dashboard-numbers).
-- **Expenses** and **Income**: regular payments, from now or a month to
-  come, until they end. See [Expenses and income](#expenses-and-income).
-- **Portfolio**: each account's value at the end of each month, and what
-  was paid in, with the returns and the history. See
-  [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
 - **Forecast**: three plans, retiring at FI, coasting and working to the
   retirement age, as bars on one age line to 120, and the picked plan's
   portfolio at 6, 8 and 10 % a year before inflation (by default). It only
   shows: what it goes on is set in Settings. See [Forecast](#forecast).
+- **Portfolio**: each account's value at the end of each month, and what
+  was paid in, with the returns and the history. See
+  [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
+- **Expenses** and **Income**: regular payments, from now or a month to
+  come, until they end. See [Expenses and income](#expenses-and-income).
 - **Settings**, in three tabs. **Data**, what the numbers go on:
   - Safe withdrawal rate (default 4 %) and a buffer on expenses for irregular
     costs (default 10 %).
@@ -162,7 +162,7 @@ it, or press Enter on it, to open it; Esc or a click elsewhere closes it.
 
 ![The ⓘ next to FI, open: the FI number and how it is worked out](docs/info.png)
 
-`Ctrl+1` to `Ctrl+6` open Dashboard, Expenses, Income, Portfolio, Forecast and
+`Ctrl+1` to `Ctrl+6` open Dashboard, Forecast, Portfolio, Expenses, Income and
 Settings. `Ctrl+Shift+H`, or the eye at the right end of the top bar, hides
 every amount (as `••• €`, in charts and amount fields too) and keeps the
 percentages, for sharing the screen; again shows them. The choice is kept in
