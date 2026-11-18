@@ -317,7 +317,7 @@ function monthField({ id = null, name, value = "", label = null, required = fals
   const today = F.currentMonth();
   let shown = null;
   const yearOf = (month) => Number(month.slice(0, 4));
-  const monthOf = (year, i) => `${year}-${String(i + 1).padStart(2, "0")}`;
+  const monthOf = (year, i) => `${String(year).padStart(4, "0")}-${String(i + 1).padStart(2, "0")}`;
   const head = (title, unit, n, ontitle) => h("div", { class: "month-head" },
     h("button", { type: "button", class: "month-step", "data-step": "-1", "aria-label": `Previous ${unit}`, onclick: () => move(-n) }, "‹"),
     ontitle
@@ -1755,14 +1755,15 @@ function viewPortfolio() {
         return render();
       }
       // Left: the focus goes on where it went, in the page for the month:
-      // the field of the same name, or else the control in the same place,
-      // with the explanation it opened.
+      // the control of the same name or label (an ⓘ), or else the one in
+      // the same place, with the explanation it opened.
       const to = document.activeElement;
       const opened = to?.popoverTargetElement?.matches(":popover-open");
+      const key = to?.name ? ["name", to.name] : to?.hasAttribute("aria-label") ? ["aria-label", to.getAttribute("aria-label")] : null;
       const controls = () => [...document.querySelectorAll("#main :is(a, button, input, select, textarea)")];
       const at = controls().indexOf(to);
       render();
-      const same = to?.name ? document.querySelector(`#main [name="${CSS.escape(to.name)}"]`) : null;
+      const same = key ? document.querySelector(`#main [${key[0]}="${CSS.escape(key[1])}"]`) : null;
       const next = same ?? controls()[at];
       next?.focus();
       if (opened) next?.popoverTargetElement?.showPopover();
