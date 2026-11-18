@@ -736,7 +736,7 @@ main > div {
   cursor: pointer;
 }
 
-.tile.answer:hover:not(:disabled) {
+.tile.answer:not(.on):hover:not(:disabled) {
   border-color: var(--fg-muted);
 }
 
