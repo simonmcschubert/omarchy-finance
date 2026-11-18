@@ -1582,7 +1582,7 @@ export function fiOutlook(store, now = currentMonth()) {
     //     stopInvesting: the last month paid in in full (null: none after
     //       start), retires: the first month lived off the portfolio; both
     //       null when the plan doesn't happen before retirement (no FI or
-    //       Coast FI by then),
+    //       Coast FI by then, or only in the month before),
     //     values: { low, mid, high }, one per shown month,
     //     runsOut: { low, mid, high }, the first month with nothing left, or
     //       null when money is left at the end of SHOWN_AGE,
@@ -1608,6 +1608,9 @@ export function fiOutlook(store, now = currentMonth()) {
       const coastContribution = store.settings.coastPayIn;
       const main = run({ coastContribution });
       const fixed = { coast: main.plans.coast.coastMonth, fi: main.plans.fi.fiMonth };
+      // A plan happens when it changes course before retirement: FI or
+      // Coast FI in the last month before it would change nothing.
+      const before = (month) => month !== null && monthIndex(month) + 1 < retirement;
       const runsWith = (dates) => Object.fromEntries(GROWTHS.map((g) => [g, run({ growth: g, coastContribution, fixed: dates })]));
       const results = { mid: main, low: run({ growth: "low", coastContribution, fixed }), high: run({ growth: "high", coastContribution, fixed }) };
       // The last month worked for a safe plan (December before the age it
@@ -1615,7 +1618,7 @@ export function fiOutlook(store, now = currentMonth()) {
       // the low growth, or doesn't happen), null when no age before
       // retirement lasts.
       const safeStop = () => {
-        if (fixed.fi === null || results.low.plans.fi.runsOut === null) return undefined;
+        if (!before(fixed.fi) || results.low.plans.fi.runsOut === null) return undefined;
         const from = ageIn(monthFromIndex(monthIndex(fixed.fi) + 1), birthYear) + 1;
         for (let age = from; (birthYear + age) * 12 < retirement; age++) {
           const last = monthFromIndex((birthYear + age) * 12 - 1);
@@ -1694,9 +1697,9 @@ export function fiOutlook(store, now = currentMonth()) {
       const ret = retirement - first;
       if (retired) return remember({ months: shown.months, retirement: monthFromIndex(retirement), plans: [{ ...keepPlan([living(0, retirement)]), stopInvesting: null, retires: start }] });
       // Each phase from the month after the one before it ends.
-      const fi = fixed.fi === null ? describe("fi", null, null, []) : stopping("fi", fixed.fi, results);
-      const coastFrom = fixed.coast === null ? null : monthIndex(fixed.coast) - first + 1;
-      const coasting = fixed.coast === null ? describe("coast", null, null, [])
+      const fi = before(fixed.fi) ? stopping("fi", fixed.fi, results) : describe("fi", null, null, []);
+      const coastFrom = before(fixed.coast) ? monthIndex(fixed.coast) - first + 1 : null;
+      const coasting = coastFrom === null ? describe("coast", null, null, [])
         : describe("coast", coastFrom > 1 ? fixed.coast : null, monthFromIndex(retirement), [
           ...(coastFrom > 1 ? [invest(0, coastFrom)] : []),
           coast(coastFrom > 1 ? coastFrom : 0, ret),

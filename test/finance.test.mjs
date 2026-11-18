@@ -2148,6 +2148,15 @@ test("fiOutlook plans: a safe plan only when stopping at FI runs out at the low 
   assert.equal(plans.keep.spare, 0);
 });
 
+test("fiOutlook plans: FI in the last month before retirement doesn't happen before it", () => {
+  // Retirement in January 2027; 596,000 reaches 600,000 at the end of
+  // December 2026, not November.
+  const o = outlook({ value: 596000 * EUR, payIn: 1000 * EUR, goal: 600000 * EUR, rate: 5, settings: { birthYear: 1960 } });
+  assert.equal(o.forecast().plans.fi.fiMonth, "2026-12");
+  const plans = o.plans("nominal").plans;
+  assert.deepEqual(plans.map((p) => [p.key, p.retires]), [["fi", null], ["coast", "2027-01"], ["keep", "2027-01"]]);
+});
+
 test("forecast: past Coast FI and FI at the start", () => {
   const r = monthly(5);
   const f = F.forecast(plan({ value: 700000 * EUR }));
