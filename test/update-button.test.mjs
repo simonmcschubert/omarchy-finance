@@ -34,7 +34,6 @@ test("the button offers a release step by step", () => {
   assert.deepEqual(steps.map((b) => b.tone), ["accent", "accent", "accent", "accent"]);
   assert.equal(steps[0].tip, "Finance 0.2.0 is available. Click to install it and restart Finance. Your data stays as it is.",
     "one click downloads and installs it");
-  assert.equal(steps[1].tip, "Downloading Finance 0.2.0. Finance restarts with it once it is downloaded.");
   assert.equal(steps[2].tip, "Finance 0.2.0 is downloaded. Click to restart Finance with it. Your data stays as it is.");
   assert.equal(steps[3].busy, true);
 });

@@ -29,7 +29,7 @@ export function updateButton(server, asked) {
       return { icon: "download", text: "Update", tone: "accent",
         tip: `${name} is available. Click to install it and restart Finance. Your data stays as it is.` };
     case "downloading":
-      return { icon: "download", text: "Downloading", tone: "accent", tip: `Downloading ${name}. Finance restarts with it once it is downloaded.` };
+      return { icon: "download", text: "Downloading", tone: "accent", tip: `Downloading ${name}.` };
     case "downloaded":
       return { icon: "restart", text: "Restart to update", tone: "accent",
         tip: `${name} is downloaded. Click to restart Finance with it. Your data stays as it is.` };
