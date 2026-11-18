@@ -419,9 +419,9 @@ they show what happens to the same plan when markets do worse or better. A
 red dot marks where the money runs out. Hovering a year, or the arrow keys
 on the chart, shows the three values.
 
-The switch above the bar shows the portfolio in today's money (the
-default: what it would buy now, with the inflation since the latest month
-taken out) or in the money of each year. The Path to FI chart on the
+The switch at the top of the page shows the portfolio in today's money
+(the default: what it would buy now, with the inflation since the latest
+month taken out) or in the money of each year. The Path to FI chart on the
 dashboard has the same switch; the choice is remembered in this browser,
 not in the data file.
 

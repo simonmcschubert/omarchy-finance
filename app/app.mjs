@@ -2049,13 +2049,12 @@ function viewForecast() {
       h("li", null, store.records.length ? `It starts from the portfolio in ${monthLabel(o.start)}, ${money(o.value)}.` : "It starts from 0, as there are no broker values yet."),
       h("li", null, `Planned one-offs count in their month. A plan lasts when money is left at ${F.SHOWN_AGE}. Taxes are left out.`)));
   return h("div", null,
-    h("div", { class: "answers-head" }, h("h2", null, "When can you stop?", about)),
+    h("div", { class: "answers-head" }, h("h2", null, "When can you stop?", about), moneySwitch(drawForecast)),
     h("div", { id: "forecast-answers", class: "answers", role: "radiogroup", "aria-label": "When can you stop?" }),
     h("section", { class: "card forecast" },
       h("div", { class: "card-head" },
         h("h2", { id: "forecast-title", class: "plan-title" }),
-        h("div", { id: "forecast-keys", class: "phase-keys" }),
-        moneySwitch(drawForecast)),
+        h("div", { id: "forecast-keys", class: "phase-keys" })),
       h("div", { id: "forecast-chart", class: "forecast-box" })));
 }
 
