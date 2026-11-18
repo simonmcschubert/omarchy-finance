@@ -1693,12 +1693,17 @@ table.entry th {
   background: var(--bad, var(--red));
 }
 
-/* ---- emergency fund, on the Portfolio page: a bar for how much of the
+/* ---- emergency fund, at the foot of Net worth: a bar for how much of the
    target the cash covers, as in Milestones. */
 
+.emergency {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
 .emergency .reach-row {
-  max-width: 480px;
-  margin: 6px 0 4px;
+  margin: 6px 0 0;
 }
 
 .emergency.reached .meter-fill {
@@ -1707,7 +1712,9 @@ table.entry th {
 
 /* Short of the target. */
 .emergency .short {
+  margin: 4px 0 0;
   color: var(--yellow);
+  font-size: 12px;
 }
 
 /* Amounts hidden: what is typed into amount fields and the CSV box shows
