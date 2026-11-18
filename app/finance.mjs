@@ -1458,7 +1458,8 @@ function inTodaysMoney(result, inflation) {
 //   rates: growthRates, retirement: its first month (null without a year
 //     of birth), retired: whether it has started by `start`,
 //   fiNumber: for retiring the month after `start`, in today's money,
-//   milestones(), path(money), forecast(options): see below.
+//   milestones(), path(money), forecast(options), plans(money), payIns():
+//   see below.
 // }
 export function fiOutlook(store, now = currentMonth()) {
   const { birthYear, retirementAge, expectedReturn, inflation } = store.settings;
@@ -1491,12 +1492,14 @@ export function fiOutlook(store, now = currentMonth()) {
   // forecast() runs, and plans() in each money, once each.
   const runs = new Map();
   const plansIn = new Map();
-  const run = ({ essential = false, growth = "mid", coastContribution = 0, fixed = null } = {}) => {
-    const key = `${essential} ${growth} ${coastContribution} ${fixed?.coast} ${fixed?.fi}`;
+  // payIn, when given, is paid in every month instead of the pay-in plan
+  // (whole cents, rising with inflation as the plan's amounts do).
+  const run = ({ essential = false, growth = "mid", coastContribution = 0, fixed = null, payIn: flat = null } = {}) => {
+    const key = `${essential} ${growth} ${coastContribution} ${fixed?.coast} ${fixed?.fi} ${flat}`;
     if (!runs.has(key)) {
       runs.set(key, forecast({
         start, value, birthYear, retirementAge, inflation, coastContribution, fixed,
-        contribution: paidIn,
+        contribution: flat === null ? paidIn : (index) => (rises ? inflated(flat, inflation, index - first) : flat),
         growth: rates[growth],
         need,
         goal: goal(essential),
@@ -1735,7 +1738,57 @@ export function fiOutlook(store, now = currentMonth()) {
         : [safe === null ? describe("safe", null, null, [], results, "fi") : stopping("safe", safe, runsWith({ coast: null, fi: safe }))];
       return remember({ months: shown.months, retirement: monthFromIndex(retirement), plans: [fi, coasting, keep, ...safely] });
     },
+
+    // The Forecast's pay-in scenarios: when you could stop working when
+    // paying in the same amount every month from `start` on, instead of the
+    // pay-in plan, at the expected return. The amounts are 2, 1.5, 1, 0.5 and
+    // 0 times the average pay-in (whole cents; a withdrawal counts as 0);
+    // with an average of 0, it and 1, 2 and 4 times a round amount near a
+    // quarter of the expenses. null without a year of birth, once retired,
+    // or when FI is reached at `start`. Otherwise {
+    //   average: the average pay-in, months: how many months it is of (0
+    //     without values),
+    //   rows: [{ amount, factor (times the average, null when it is 0),
+    //     average (the average's own row), retires }], most first,
+    //   plan: { retires } with the pay-in plan, or null when the plan pays
+    //     in the average every month,
+    // } where retires is when the Stop working plan would stop: the month
+    // after FI, or null when FI doesn't come before the month before
+    // retirement.
+    payIns() {
+      if (!Number.isFinite(retirement) || retired) return null;
+      const mean = averagePayIn(series);
+      const average = Math.max(0, Math.round(mean?.average ?? 0));
+      const stops = (result) => {
+        const month = result.plans.fi.fiMonth;
+        return month !== null && monthIndex(month) + 1 < retirement ? monthFromIndex(monthIndex(month) + 1) : null;
+      };
+      if (run({ payIn: average }).plans.fi.fiMonth === start) return null;
+      const unit = roundAmount(budget(store, first + 1).expenses.total / 4);
+      const amounts = average > 0
+        ? [2, 1.5, 1, 0.5, 0].map((factor) => ({ amount: Math.round(average * factor), factor, average: factor === 1 }))
+        : [4, 2, 1, 0].map((k) => ({ amount: unit * k, factor: null, average: k === 0 }));
+      // The plan pays in the average in every month before retirement (or
+      // none is left).
+      const flat = first + 1 >= retirement
+        || (invested === average && plan.changes.every((step) => step.index >= retirement || plan.at(step.index) === average));
+      return {
+        average,
+        months: mean?.months ?? 0,
+        rows: amounts.map((row) => ({ ...row, retires: stops(run({ payIn: row.amount })) })),
+        plan: flat ? null : { retires: stops(run({ coastContribution: store.settings.coastPayIn })) },
+      };
+    },
   };
+}
+
+// A round amount near `cents`: 1, 2, 2.5 or 5 times a power of ten of whole
+// units, at least 1.
+function roundAmount(cents) {
+  const units = Math.max(1, cents / 100);
+  const power = 10 ** Math.floor(Math.log10(units));
+  const f = units / power;
+  return (f < 1.5 ? 1 : f < 2.25 ? 2 : f < 3.5 ? 2.5 : f < 7.5 ? 5 : 10) * power * 100;
 }
 
 // ---------------------------------------------------------------- changes

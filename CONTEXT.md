@@ -136,7 +136,15 @@ picked plan that runs out: “Lasts even at 6 % with 781.000 € at 53
 (+242.000 €)”, the bracket being how much more that is than the plan has
 then at the low growth. `forecast()`'s _needs_ give it for every month.
 
+**Pay-in scenarios** (`fiOutlook().payIns()`, “Pay in more or less” on
+the Forecast): when you could stop working, as _Retire at FI_ counts it,
+paying in the same amount every month from now on: 2, 1½, 1, ½ and 0 times
+the average pay-in (round amounts when the average is 0). The _plan_ row
+is the pay-in plan, there when it isn't the average every month.
+
 **Phases**: _Investing_, _Coasting_ and _Retired_. A pension or other
 income that starts, or an expense that ends, is a _step_ inside Retired,
 never a phase: what the portfolio pays a month changes there, and the
 **share** is the part of the spending it pays, the rest coming from income.
+A planned pay-in change splits Investing the same way, into a part for each
+amount paid in.

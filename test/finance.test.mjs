@@ -2310,3 +2310,64 @@ test("forecast: with nothing paid in, inflation moves no milestone", () => {
   }
   assert.ok(nominal.plans.fi.fiMonth !== null && nominal.plans.coast.coastMonth !== null);
 });
+
+test("fiOutlook payIns: when you could stop with more or less paid in, against the average", () => {
+  const parts = { value: 50000 * EUR, payIn: 1000 * EUR, goal: 600000 * EUR, rate: 5, settings: { birthYear: 1990 } };
+  const o = outlook(parts);
+  const result = o.payIns();
+  assert.equal(result.average, 1000 * EUR);
+  assert.equal(result.months, 12);
+  assert.deepEqual(result.rows.map((r) => [r.amount, r.factor, r.average]), [
+    [2000 * EUR, 2, false], [1500 * EUR, 1.5, false], [1000 * EUR, 1, true], [500 * EUR, 0.5, false], [0, 0, false],
+  ]);
+  // The plan pays in the average every month: no row of its own, and the
+  // average stops when the Stop working plan does.
+  assert.equal(result.plan, null);
+  const fi = o.plans("nominal").plans.find((p) => p.key === "fi");
+  assert.equal(result.rows[2].retires, fi.retires);
+  // Each row stops the month after FI of paying in its amount from Settings.
+  for (const row of result.rows) {
+    const own = outlook({ ...parts, settings: { ...parts.settings, futurePayIn: row.amount } }).milestones().fi.month;
+    assert.equal(row.retires, own && F.addMonths(own, 1), `paying in ${row.amount}`);
+  }
+  // More is sooner; nothing doesn't get there before 67.
+  const [a, b, c, d, e] = result.rows.map((r) => r.retires);
+  assert.ok(a < b && b < c && c < d, "sooner with more");
+  assert.equal(e, null);
+
+  // A planned change is a row of its own, as the Stop working plan counts
+  // it; the rows stay the same amount every month.
+  const changes = [{ id: "c", from: { month: "2030-01" }, amount: 3000 * EUR }];
+  const planned = outlook({ ...parts, changes });
+  const withPlan = planned.payIns();
+  assert.deepEqual(withPlan.rows.map((r) => r.retires), result.rows.map((r) => r.retires));
+  assert.equal(withPlan.plan.retires, planned.plans("nominal").plans.find((p) => p.key === "fi").retires);
+  assert.ok(withPlan.plan.retires < c, "sooner than the average");
+  // An amount of your own is a plan too, unless it is the average.
+  assert.notEqual(outlook({ ...parts, settings: { ...parts.settings, futurePayIn: 1200 * EUR } }).payIns().plan, null);
+  assert.equal(outlook({ ...parts, settings: { ...parts.settings, futurePayIn: 1000 * EUR } }).payIns().plan, null);
+  // So is a change to the average, or one from retirement on: nothing
+  // changes before it.
+  const same = [{ id: "a", from: { month: "2030-01" }, amount: null }, { id: "r", from: { age: 67 }, amount: 3000 * EUR }];
+  assert.equal(outlook({ ...parts, changes: same }).payIns().plan, null);
+  // From December before retirement, no month is left to pay in.
+  const month = (s, m) => F.saveMonth(s, m, [{ account: "a", value: 50000 * EUR, payIn: 1000 * EUR }]);
+  const december = month(month(outlookStore({ ...parts, settings: { ...parts.settings, birthYear: 1960 }, changes: [same[1]] }), "2026-11"), "2026-12");
+  assert.equal(F.fiOutlook(december, "2027-01").payIns().plan, null);
+});
+
+test("fiOutlook payIns: round amounts with nothing paid in, and nothing to compare", () => {
+  // Expenses of 2,000 a month: a quarter is 500.
+  const none = outlook({ value: 50000 * EUR, payIn: -200 * EUR, goal: 600000 * EUR, rate: 5, settings: { birthYear: 1990 } }).payIns();
+  assert.equal(none.average, 0);
+  assert.deepEqual(none.rows.map((r) => [r.amount, r.factor, r.average]), [
+    [2000 * EUR, null, false], [1000 * EUR, null, false], [500 * EUR, null, false], [0, null, true],
+  ]);
+  assert.equal(none.plan, null);
+  // Expenses of 1,250: a quarter is 312.50, round 250.
+  assert.equal(outlook({ value: 50000 * EUR, goal: 375000 * EUR, rate: 5, settings: { birthYear: 1990 } }).payIns().rows[2].amount, 250 * EUR);
+  // Without a year of birth, once retired, and at FI already.
+  assert.equal(outlook({ value: 50000 * EUR, payIn: 1000 * EUR, goal: 600000 * EUR, rate: 5 }).payIns(), null);
+  assert.equal(outlook({ value: 50000 * EUR, payIn: 1000 * EUR, goal: 600000 * EUR, rate: 5, settings: { birthYear: 1950 } }).payIns(), null);
+  assert.equal(outlook({ value: 700000 * EUR, payIn: 1000 * EUR, goal: 600000 * EUR, rate: 5, settings: { birthYear: 1990 } }).payIns(), null);
+});

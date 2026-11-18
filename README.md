@@ -395,11 +395,13 @@ from now to 120, and its chart. The plan picked stays picked in this
 browser.
 
 Each phase is a stretch of the bar: **Investing** (blue) with what is paid
-in a month, as planned in Settings (`+1.400 € → 2.000 €/month`),
-**Coasting** (hatched) and **Retired** (orange) with what the portfolio pays
-a month: the expenses with buffer, less the income that counts then, in
-today's money. Above the bar, what the portfolio has when a phase or step
-ends. A plan that doesn't happen before retirement says “Not before 67”.
+in a month as planned in Settings, a part for each amount (`+1.400 €`, then
+`+2.000 €/month` from a planned change), **Coasting** (hatched) and
+**Retired** (orange) with what the portfolio pays a month: the expenses
+with buffer, less the income that counts then, in today's money. Hovering a
+part shows its amount and ages, also where the bar is too narrow for them.
+Above the bar, what the portfolio has when a phase or step ends. A plan
+that doesn't happen before retirement says “Not before 67”.
 
 While retired, a step splits the bar wherever that amount changes, with its
 cause under it: an income that starts (“+ State pension”, a private
@@ -431,6 +433,20 @@ The switch at the top of the page shows the portfolio in today's money
 month taken out) or in the money of each year. The Path to FI chart on the
 dashboard has the same switch; the choice is remembered in this browser,
 not in the data file.
+
+**Pay in more or less** shows what paying in more or less does: a bar for
+each amount a month, from now to the age you could stop working (as Stop
+working counts it, at the expected return), on an age line to the
+retirement age, and how much sooner or later that is than with the average
+pay-in of the last 12 months (bold). The others are 2, 1½, ½ and 0 times
+the average, each paid in every month from now on (rising with inflation
+when pay-ins do); with an average of 0, round amounts near a quarter of the
+expenses. **Plan** is what you pay in
+as set in Settings, with its changes (its ⓘ lists them): it is a row when
+that isn't the average every month, and stops when the Stop working card
+does. A hatched bar doesn't reach FI before the retirement age. With
+amounts hidden, the rows say 2×, 1½×, average, ½× and nothing. The card
+isn't there once FI is reached, or once retired.
 
 - It starts from the portfolio in the latest month, and grows it by the
   growth rate every month (8 % a year is about 0.64 % a month), as Time to
