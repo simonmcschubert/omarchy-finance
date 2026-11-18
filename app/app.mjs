@@ -206,10 +206,173 @@ function info(about, ...content) {
 // say. The label is a <label> of its own, so the ⓘ is not part of it.
 let fieldCount = 0;
 function field(text, control, ...help) {
-  if (!control.id) control.id = `field-${++fieldCount}`;
+  // A control of several parts, such as a month field, is labelled by its input.
+  const target = control.labels === undefined ? control.querySelector("input") : control;
+  if (!target.id) target.id = `field-${++fieldCount}`;
   return h("div", { class: "field" },
-    h("span", { class: "field-label" }, h("label", { for: control.id }, text), help.length ? info(text, ...help) : null),
+    h("span", { class: "field-label" }, h("label", { for: target.id }, text), help.length ? info(text, ...help) : null),
     control);
+}
+
+// A month field. Typed as the month's number and the year, "1 2027" or just
+// 1 2 0 2 7 (F.parseMonth), and shown as "01/2027". ↑ and ↓ step a month,
+// Page Up and Page Down a year. Its button, or Alt+↓, opens a picker: the
+// twelve months of a year, with ‹ › for the year before and after, and the
+// year to switch to a choice of years. Arrow keys move in it, Enter picks.
+// A fieldset, so that hiding and disabling it does both for its input and
+// buttons. onpick(month, left), for a field that switches what the page
+// shows: called when a month is typed or picked; Enter in the field then
+// picks instead of submitting the form. `left` is true when the month was
+// typed and the field left (Tab or a click elsewhere): onpick then runs
+// once the focus has moved on.
+const CALENDAR = ["M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z", "M4 10h16", "M8 3v4", "M16 3v4"];
+let monthNames = null;
+const monthName = (i) => (monthNames ??= Array.from({ length: 12 }, (_, k) => new Intl.DateTimeFormat(locale, { month: "short" }).format(new Date(2026, k, 1))))[i];
+const monthLong = (month) => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1));
+const MONTH_HINT = "the month's number and the year, such as 1 2027";
+const MONTH_ERROR = `Enter ${MONTH_HINT}.`;
+let monthFieldCount = 0;
+function monthField({ id = null, name, value = "", label = null, required = false, onpick = null }) {
+  const popId = `month-pop-${++monthFieldCount}`;
+  const input = h("input", { id, name, class: "month-text", inputmode: "numeric", autocomplete: "off", spellcheck: "false", placeholder: "MM/YYYY",
+    required, "aria-label": label, value: F.isMonth(value) ? F.monthToText(value) : "" });
+  // Out of the Tab order, so Tab goes from the month to the next field.
+  const open = h("button", { type: "button", class: "month-open", popovertarget: popId, tabindex: "-1", title: "Choose a month (Alt+↓)", "aria-label": "Choose a month" }, icon(CALENDAR));
+  const pop = h("div", { id: popId, popover: "auto", class: "month-pop", role: "dialog", "aria-label": "Choose a month" });
+  const wrap = h("fieldset", { class: "month-field" }, input, open, pop);
+  // Through the CSSOM: the page's CSP blocks style attributes.
+  wrap.style.setProperty("anchor-name", `--${popId}`);
+  pop.style.setProperty("position-anchor", `--${popId}`);
+
+  // Text that is no month stops the form, with how to type one.
+  const check = () => input.setCustomValidity(input.value.trim() === "" || F.parseMonth(input.value) ? "" : MONTH_ERROR);
+  let last = F.parseMonth(input.value);
+  // Shows the month as 01/2027; onpick hears of a new one.
+  const pick = (month, left = false) => {
+    input.value = F.monthToText(month);
+    check();
+    if (month === last) return;
+    last = month;
+    if (onpick && left) setTimeout(() => onpick(month, true));
+    else onpick?.(month, false);
+  };
+  const typed = () => F.parseMonth(input.value);
+  // From an empty field, ↑ or ↓ goes to this month; never past the years
+  // a month can have.
+  const step = (n) => {
+    const month = typed() ? F.addMonths(typed(), n) : F.currentMonth();
+    if (F.parseMonth(F.monthToText(month))) pick(month);
+  };
+
+  input.addEventListener("input", check);
+  input.addEventListener("change", () => {
+    const month = typed();
+    if (month) pick(month, true);
+  });
+  // All of it is selected on focus, so typing replaces it.
+  input.addEventListener("focus", () => input.select());
+  input.addEventListener("mousedown", (event) => {
+    if (document.activeElement === input) return;
+    event.preventDefault();
+    input.focus();
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.altKey && event.key === "ArrowDown") {
+      event.preventDefault();
+      if (!pop.matches(":popover-open")) pop.showPopover();
+    } else if (event.key === "Enter" && onpick) {
+      event.preventDefault();
+      const month = typed();
+      if (month) pick(month);
+      else input.reportValidity();
+    } else if (["ArrowUp", "ArrowDown", "PageUp", "PageDown"].includes(event.key) && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      const n = event.key.startsWith("Page") || event.shiftKey ? 12 : 1;
+      step(event.key === "ArrowUp" || event.key === "PageUp" ? n : -n);
+    }
+  });
+
+  // The picker: the months of `shown.year`, or with shown.years the twelve
+  // years from shown.from.
+  const today = F.currentMonth();
+  let shown = null;
+  const yearOf = (month) => Number(month.slice(0, 4));
+  const monthOf = (year, i) => `${year}-${String(i + 1).padStart(2, "0")}`;
+  const head = (title, unit, n, ontitle) => h("div", { class: "month-head" },
+    h("button", { type: "button", class: "month-step", "data-step": "-1", "aria-label": `Previous ${unit}`, onclick: () => move(-n) }, "‹"),
+    ontitle
+      ? h("button", { type: "button", class: "month-title", "aria-label": `${title}: choose a year`, onclick: ontitle }, title)
+      : h("span", { class: "month-title" }, title),
+    h("button", { type: "button", class: "month-step", "data-step": "1", "aria-label": `Next ${unit}`, onclick: () => move(n) }, "›"));
+  const choose = (month) => {
+    pop.hidePopover();
+    pick(month);
+    if (input.isConnected) input.focus();
+  };
+  function draw(focus = null) {
+    const selected = typed();
+    if (shown.years) {
+      const years = Array.from({ length: 12 }, (_, i) => shown.from + i);
+      pop.replaceChildren(
+        head(`${years[0]}–${years.at(-1)}`, "years", 12, null),
+        h("div", { class: "month-grid" }, years.map((year) => h("button", {
+          type: "button", class: "month-cell year-cell", "data-year": year,
+          "aria-pressed": String(selected !== null && yearOf(selected) === year), "aria-current": yearOf(today) === year ? "date" : null,
+          onclick: () => { shown = { year }; draw(selected && yearOf(selected) === year ? selected : monthOf(year, 0)); },
+        }, h("span", { class: "month-num" }, String(year))))));
+    } else {
+      pop.replaceChildren(
+        head(String(shown.year), "year", 12, () => { shown = { years: true, from: shown.year - 5, year: shown.year }; draw(shown.year); }),
+        h("div", { class: "month-grid" }, Array.from({ length: 12 }, (_, i) => {
+          const month = monthOf(shown.year, i);
+          return h("button", {
+            type: "button", class: "month-cell", "data-month": month, "aria-label": monthLong(month),
+            "aria-pressed": String(month === selected), "aria-current": month === today ? "date" : null, onclick: () => choose(month),
+          }, h("span", { class: "month-num" }, String(i + 1)), h("span", { class: "month-name" }, monthName(i)));
+        })),
+        h("div", { class: "month-foot" }, h("button", { type: "button", class: "link", onclick: () => choose(today) }, "This month")));
+    }
+    if (focus !== null) pop.querySelector(shown.years ? `[data-year="${focus}"]` : `[data-month="${focus}"]`)?.focus();
+  }
+  // ‹ and ›: a year back or on, or twelve years in the choice of years.
+  // The button pressed keeps the focus.
+  function move(n) {
+    if (shown.years) shown.from += n;
+    else shown.year += n / 12;
+    const again = pop.contains(document.activeElement) ? document.activeElement.dataset.step : undefined;
+    draw();
+    if (again) pop.querySelector(`[data-step="${again}"]`)?.focus();
+  }
+  pop.addEventListener("beforetoggle", (event) => {
+    if (event.newState !== "open") return;
+    shown = { year: yearOf(typed() ?? today) };
+    draw();
+  });
+  pop.addEventListener("toggle", (event) => {
+    if (event.newState !== "open") return;
+    const selected = typed();
+    pop.querySelector(`[data-month="${selected ?? today}"]`)?.focus();
+  });
+  // Arrow keys move a month (a year in the choice of years), ↑ and ↓ a
+  // row; past the first or last, on into the year or years before or after.
+  // Page Up and Page Down go a year (twelve years) back or on.
+  pop.addEventListener("keydown", (event) => {
+    const cell = event.target.closest?.(".month-cell");
+    const moves = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -4, ArrowDown: 4, PageUp: -12, PageDown: 12 };
+    if (!cell || !(event.key in moves)) return;
+    event.preventDefault();
+    const n = moves[event.key];
+    if (shown.years) {
+      const year = Number(cell.dataset.year) + n;
+      if (year < shown.from || year >= shown.from + 12) shown.from += Math.sign(n) * 12;
+      draw(year);
+    } else {
+      const month = F.addMonths(cell.dataset.month, n);
+      shown.year = yearOf(month);
+      draw(month);
+    }
+  });
+  return wrap;
 }
 
 // ---------------------------------------------------------------- state
@@ -1174,8 +1337,8 @@ function boundField(name, label, bound, choices, help = null) {
   const kind = bound === null ? "none" : bound.at === "retirement" ? "retirement" : "age" in bound ? "age" : "month";
   const age = h("input", { name: `${name}-age`, type: "number", min: F.AGES.min, max: F.AGES.max, step: 1, inputmode: "numeric", placeholder: "67",
     "aria-label": `${label}: age`, value: kind === "age" ? String(bound.age) : "", hidden: kind !== "age", disabled: kind !== "age" });
-  const month = h("input", { name: `${name}-month`, type: "month", "aria-label": `${label}: month`, value: kind === "month" ? bound.month : "",
-    hidden: kind !== "month", disabled: kind !== "month" });
+  const month = monthField({ name: `${name}-month`, label: `${label}: month`, value: kind === "month" ? bound.month : "" });
+  month.hidden = month.disabled = kind !== "month";
   const select = h("select", { name, value: kind, "aria-label": label, onchange: (event) => {
     age.hidden = age.disabled = event.target.value !== "age";
     month.hidden = month.disabled = event.target.value !== "month";
@@ -1197,8 +1360,8 @@ function readBound(data, name, label) {
     return { bound: { age } };
   }
   if (kind === "month") {
-    const month = String(data.get(`${name}-month`) ?? "");
-    return F.isMonth(month) ? { bound: { month } } : { error: `${label}: choose a month.` };
+    const month = F.parseMonth(data.get(`${name}-month`));
+    return month ? { bound: { month } } : { error: `${label}: enter ${MONTH_HINT}.` };
   }
   return { bound: null };
 }
@@ -1564,13 +1727,18 @@ function viewPortfolio() {
       commit(F.saveMonth(store, month, entries), `Saved ${monthLabel(month)}.`);
     },
   },
-    h("label", { class: "month-pick" }, "Month",
-      h("input", { type: "month", name: "month", required: true, value: month, onchange: (event) => {
-        if (F.isMonth(event.target.value)) {
-          state.month = event.target.value;
-          render();
-        }
-      } })),
+    h("div", { class: "month-pick" }, field("Month", monthField({ id: "month-pick", name: "month", required: true, value: month, onpick: (picked, left) => {
+      state.month = picked;
+      if (!left) {
+        state.focus = "#month-pick";
+        return render();
+      }
+      // Left: the focus goes on where it went, in the page for the month.
+      const controls = () => [...document.querySelectorAll("#main :is(a, button, input, select, textarea)")];
+      const at = controls().indexOf(document.activeElement);
+      render();
+      if (at !== -1) controls()[at]?.focus();
+    } }))),
     store.accounts.length === 0
       ? h("p", { class: "muted" }, "Add your ", settingsLink("data", "accounts"), " in Settings first, or ", settingsLink("export", "import past months"), " from a CSV file.")
       : h("div", { class: "table-wrap" }, h("table", { class: "entry" },
@@ -2213,16 +2381,18 @@ function eventsCard(store) {
   const form = h("form", { class: "event-form", onsubmit: (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    const month = F.parseMonth(data.get("month"));
+    if (!month) return showError(event.currentTarget, `Month: enter ${MONTH_HINT}.`);
     const amount = F.parseMoney(data.get("amount"));
     if (!amount.ok) return showError(event.currentTarget, `Amount: ${amount.error}.`);
-    const result = F.saveEvent(store, { id: editing?.id ?? null, name: data.get("name"), month: String(data.get("month")), amount: amount.cents });
+    const result = F.saveEvent(store, { id: editing?.id ?? null, name: data.get("name"), month, amount: amount.cents });
     if (!result.ok) return showError(event.currentTarget, `${result.error}.`);
     state.editingEvent = null;
     state.focus = "#event-name";
     commit(result.store, `${editing ? "Saved" : "Added"} ${String(data.get("name")).trim()}.`);
   } },
     h("label", null, "Name", h("input", { id: "event-name", name: "name", autocomplete: "off", required: true, value: editing?.name ?? "", placeholder: "Inheritance" })),
-    h("label", null, "Month", h("input", { name: "month", type: "month", required: true, value: editing?.month ?? "" })),
+    field("Month", monthField({ name: "month", required: true, value: editing?.month ?? "" })),
     h("label", null, "Amount (negative: taken out)", h("input", { name: "amount", class: "amount", inputmode: "decimal", autocomplete: "off", required: true,
       value: editing ? inputMoney(editing.amount) : "", placeholder: inputMoney(-2000000) })),
     h("div", { class: "form-actions" },

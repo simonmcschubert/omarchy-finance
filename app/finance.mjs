@@ -592,6 +592,30 @@ export function parseDate(text) {
   return `${ym}-${String(d).padStart(2, "0")}`;
 }
 
+// Reads a month as typed: its number, then the year, as "1 2027",
+// "01/2027", "1.2027" or only the digits, "12027" (five digits: a month
+// of one digit) or "012027"; or year first, "2027-01". The year has four
+// digits, so the digits alone are never ambiguous. Returns "YYYY-MM", or
+// null for any other text.
+export function parseMonth(text) {
+  const s = String(text ?? "").trim();
+  let m;
+  let month;
+  let year;
+  if ((m = /^([0-9]{1,2})[\s./-]*([0-9]{4})$/.exec(s))) [month, year] = [m[1], m[2]];
+  else if ((m = /^([0-9]{4})\s*[./-]\s*([0-9]{1,2})$/.exec(s))) [year, month] = [m[1], m[2]];
+  else return null;
+  const y = Number(year);
+  const mo = Number(month);
+  if (mo < 1 || mo > 12 || y < 1900 || y > 2200) return null;
+  return `${year}-${String(mo).padStart(2, "0")}`;
+}
+
+// "2027-01" as a month field shows it: "01/2027".
+export function monthToText(month) {
+  return `${month.slice(5, 7)}/${month.slice(0, 4)}`;
+}
+
 // ---------------------------------------------------------------- budget
 // What counts in a month: the one rule for which expenses and income count
 // when, and for the buffer. Pages read budget(); the projections loop over
