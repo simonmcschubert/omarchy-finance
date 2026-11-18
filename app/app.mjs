@@ -1145,7 +1145,7 @@ function milestonesCard(m) {
       h("td", { class: "reach" },
         h("div", { class: "reach-row" }, meter, h("span", { class: "num" }, r.progress === null ? "–" : `${reached ? "✓ " : ""}${percent.format(r.progress)}`))),
       h("td", null,
-        r.progress === null ? "–" : r.months === null ? r.never : ahead > 0 ? `in ${duration(ahead)}` : "Now",
+        r.progress === null ? "–" : r.months === 0 ? "Now" : r.months === null ? r.never : ahead > 0 ? `in ${duration(ahead)}` : "About now",
         month
           ? h("div", { class: "sub" }, `around ${monthLabel(month, ahead >= 24)}${birthYear === null ? "" : `, at ${F.ageIn(month, birthYear)}`}`)
           : r.months === 0 ? h("div", { class: "sub" }, `as of ${monthLabel(o.start)}`) : null));
