@@ -326,10 +326,10 @@ test("gains: the change in value minus pay-ins, with a Modified Dietz return", (
   ];
   // From August's 1,000: 300 more, 100 of it paid in, in the middle of the
   // second of two months, so invested for a quarter of the time.
-  assert.deepEqual(F.gains(series), { gain: 200, months: 2, rate: 200 / 1025 });
-  assert.deepEqual(F.gains(series, 1), { gain: 100, months: 1, rate: 100 / 1150 });
+  assert.deepEqual(F.gains(series), { gain: 200, months: 2, paid: 100, rate: 200 / 1025 });
+  assert.deepEqual(F.gains(series, 1), { gain: 100, months: 1, paid: 100, rate: 100 / 1150 });
   assert.equal(F.gains(series.slice(0, 1)), null);
-  assert.deepEqual(F.gains([{ value: 0, payIn: 0 }, { value: 0, payIn: 0 }]), { gain: 0, months: 1, rate: null });
+  assert.deepEqual(F.gains([{ value: 0, payIn: 0 }, { value: 0, payIn: 0 }]), { gain: 0, months: 1, paid: 0, rate: null });
 });
 
 test("metrics: gains over the last 12 months, expenses covered", () => {
@@ -346,6 +346,7 @@ test("metrics: gains over the last 12 months, expenses covered", () => {
   // From 2025-02 (2,000) to 2026-02 (14,000): 12,000 more, 6,000 paid in.
   assert.equal(m.gains.months, 12);
   assert.equal(m.gains.gain, 6000 * EUR);
+  assert.equal(m.gains.paid, 6000 * EUR);
   // Each pay-in invested for (12 - i - 0.5) / 12 of the time: 3,000 in all.
   assert.ok(Math.abs(m.gains.rate - 6000 / (2000 + 3000)) < 1e-12, String(m.gains.rate));
   assert.equal(m.coveredMonths, 14);
@@ -997,6 +998,7 @@ test("one-offs count as paid in, but not for the average pay-in", () => {
   assert.deepEqual(F.averagePayIn(series), { average: 1000 / 3, months: 3 });
   // The gain leaves the inheritance out: 61,200 - 10,000 - 1,000 - 50,000.
   assert.equal(F.gains(series).gain, 200);
+  assert.equal(F.gains(series).paid, 51000);
   const m = F.metrics({ ...s, settings: { ...F.DEFAULT_SETTINGS } });
   assert.equal(m.investmentRate, null);
   assert.equal(m.payIn.amount, 1000 / 3);

@@ -849,10 +849,11 @@ function viewDashboard() {
         : m.latestMonth ? `as of ${monthLabel(m.latestMonth)}` : h("a", { href: "#portfolio" }, "Add broker values"),
       nudge),
     tile([`Gains, last ${gainsMonths}`, m.gains === null ? null
-      : info("the gains", `How much the portfolio grew in the last ${gainsMonths} besides what was paid in: the change in value minus the pay-ins and one-offs.`,
-          "The return is that gain over what was invested, each pay-in counted from the middle of its month.")],
+      : info("the gains", `How much the portfolio grew in the last ${gainsMonths} besides what was paid in: the change in value minus the pay-ins and one-offs.`)],
       m.gains === null ? "–" : signedMoney(m.gains.gain),
-      m.gains === null ? "needs values for two months" : m.gains.rate === null ? "" : `a return of ${percent.format(m.gains.rate)}`),
+      m.gains === null ? "needs values for two months"
+        : m.gains.paid > 0 ? `besides ${money(m.gains.paid)} paid in`
+          : m.gains.paid < 0 ? `besides ${money(-m.gains.paid)} taken out` : "with nothing paid in"),
     tile(["Expenses covered", m.coveredMonths === null ? null
       : info("expenses covered", `How long the portfolio alone would pay your expenses, ${money(m.expenses)} a month with buffer.`)],
       m.coveredMonths === null ? "–" : duration(m.coveredMonths),
@@ -870,6 +871,8 @@ function viewDashboard() {
   }
 
   if (m.series.length > 0) parts.push(portfolioCard(m));
+  const returns = returnsCard(store);
+  if (returns) parts.push(returns);
 
   const breakdown = (kind, total) => {
     const groups = F.byCategory(m.budget[kind].now);
@@ -1021,7 +1024,32 @@ function netWorthCard(m) {
     h("p", { class: "muted" }, before && !firstEntered(now.month)
       ? `${signedMoney(now.total - before.total)} since ${monthLabel(before.month)}, as of ${monthLabel(now.month)}`
       : `as of ${monthLabel(now.month)}`),
-    h("ul", { class: "bars" }, rows));
+    h("ul", { class: "bars" }, rows),
+    emergencyFund(m));
+}
+
+// The emergency fund, at the foot of Net worth: how long the cash accounts'
+// latest values pay this month's expenses, with a bar for how much of the
+// months set in Settings that is. Only with a cash account and expenses.
+function emergencyFund(m) {
+  const e = m.emergency;
+  if (e === null || e.months === null) return null;
+  let target = null;
+  if (e.target > 0) {
+    const share = e.months / e.target;
+    const meter = h("div", { class: "meter", role: "presentation" }, h("div", { class: "meter-fill" }));
+    meter.firstChild.style.width = `${Math.min(100, share * 100)}%`;
+    target = h("div", { class: "reach-row" }, meter,
+      h("span", { class: "num" }, e.short === 0 ? `✓ ${e.target} months` : `${percent.format(share)} of ${e.target} months`));
+  }
+  return h("div", { class: e.target > 0 && e.short === 0 ? "emergency reached" : "emergency" },
+    h("div", { class: "bar-text" },
+      h("span", null, "Emergency fund", info("the emergency fund",
+        `How long your cash accounts alone would pay your expenses, ${money(m.expenses)} a month with buffer.`,
+        ["The months you aim for are set in ", settingsLink("data"), "; 0 sets none."])),
+      h("span", { class: "num" }, e.months >= 1 ? duration(Math.floor(e.months)) : "Less than a month")),
+    target,
+    e.short > 0 ? h("p", { class: "short" }, `${money(e.short)} short`) : null);
 }
 
 // No active expenses, no FI number: the chart then has no goal line and no
@@ -1624,18 +1652,44 @@ function viewPortfolio() {
 
   return h("div", null,
     h("section", { class: "card" },
-      h("div", { class: "card-head" }, h("h2", null, "Monthly values"),
+      h("div", { class: "card-head" }, h("h2", null, "Portfolio"),
         store.accounts.length
           ? h("span", null, h("a", { class: "label-link", href: "#settings/data" }, "Accounts"), h("a", { class: "label-link", href: "#settings/export" }, "CSV import"))
           : null),
+      portfolioSummary(store),
+      h("h3", null, "Monthly values"),
       monthForm),
-    returnsCard(store),
-    emergencyCard(store),
     history);
 }
 
+// The few numbers at the top of the Portfolio page, as on Expenses and
+// Income: the portfolio in its latest month and that month's change, the
+// average pay-in, and the net worth with other kinds of accounts. The rest
+// is on the dashboard. null before any value.
+function portfolioSummary(store) {
+  const m = F.metrics(store);
+  const item = (term, value, strong) => h("div", null, h("dt", null, term), h("dd", { class: strong ? "num strong" : "num" }, value));
+  const items = [];
+  const [before, last] = m.series.length >= 2 ? m.series.slice(-2) : [null, m.series.at(-1)];
+  if (last) {
+    items.push(item(`Portfolio, ${monthLabel(last.month)}`, money(last.value), true));
+    if (before) {
+      items.push(item(`Change in ${monthLabel(last.month)}`,
+        `${signedMoney(last.value - before.value)} · ${money(last.payIn)} paid in${last.oneOff ? `, ${signedMoney(last.oneOff)} one-off` : ""}`));
+    }
+    const average = F.averagePayIn(m.series);
+    items.push(item(`Average pay-in, ${average.months === 1 ? "1 month" : `${average.months} months`}`, `${money(average.average)} / month`));
+  }
+  const worth = m.netWorth.at(-1);
+  if (worth && store.accounts.some((a) => !isInvested(a))) {
+    items.push(item(worth.month === last?.month ? "Net worth" : `Net worth, ${monthLabel(worth.month)}`, money(worth.total), !last));
+  }
+  return items.length ? h("dl", { class: "summary" }, items) : null;
+}
+
 // What the portfolio and each invested account returned, time-weighted
-// over several periods and money-weighted since the start.
+// over several periods and money-weighted since the start, on the
+// dashboard under the chart. A period no row has yet is left out.
 function returnsCard(store) {
   const series = F.portfolioSeries(store);
   if (series.length < 2) return null;
@@ -1650,57 +1704,19 @@ function returnsCard(store) {
   }
   const cell = (rate) => h("td", { class: "num" }, rate === null ? h("span", { class: "muted" }, "–") : signedPercent(rate));
   const latestYear = series.at(-1).month.slice(0, 4);
+  const columns = [["ytd", latestYear], ["year", "1 year"], ["three", "3 years, a year"], ["five", "5 years, a year"],
+    ["all", "Since the start"], ["moneyWeighted", "Your money, since the start"]]
+    .filter(([key]) => rows.some(([, r]) => r[key] !== null));
+  if (columns.length === 0) return null;
   return card(["Returns", info("the returns",
-      "The first five columns are time-weighted: what the investments did, month by month chained, whatever was paid in or out. Compare them with an index or a fund.",
+      "All but Your money are time-weighted: what the investments did, month by month chained, whatever was paid in or out. Compare them with an index or a fund.",
       "Your money is money-weighted: what your money earned, given when you paid it in. Paying in before a rise makes it higher, before a fall lower.",
       "Since the start, both are a year once there are 12 months or more, and the whole time before that. Pay-ins and one-offs count from the middle of their month; – means the history is shorter.")],
     h("div", { class: "table-wrap" }, h("table", null,
-      h("thead", null, h("tr", null, h("th", null, ""), h("th", { class: "num" }, latestYear), h("th", { class: "num" }, "1 year"),
-        h("th", { class: "num" }, "3 years, a year"), h("th", { class: "num" }, "5 years, a year"), h("th", { class: "num" }, "Since the start"),
-        h("th", { class: "num" }, "Your money, since the start"))),
+      h("thead", null, h("tr", null, h("th", null, ""), columns.map(([, label]) => h("th", { class: "num" }, label)))),
       h("tbody", null, rows.map(([name, r]) => h("tr", null,
         h("th", { scope: "row" }, name, h("div", { class: "sub" }, `since ${monthLabel(r.since)}`)),
-        cell(r.ytd), cell(r.year), cell(r.three), cell(r.five), cell(r.all), cell(r.moneyWeighted)))))));
-}
-
-// The emergency fund: how long the cash accounts' latest values pay this
-// month's expenses, against the months set in Settings. Only once there are
-// accounts: until then, Monthly values asks for them.
-function emergencyCard(store) {
-  if (store.accounts.length === 0) return null;
-  const m = F.metrics(store);
-  const e = m.emergency;
-  const title = ["Emergency fund", info("the emergency fund",
-    `How long your cash accounts alone would pay your expenses${m.expenses > 0 ? `, ${money(m.expenses)} a month with buffer` : ""}.`,
-    ["The months you aim for are set in ", h("a", { href: "#settings" }, "Settings"), "; 0 sets none."])];
-  if (e === null) return card(title, h("p", { class: "muted" }, "Add a cash account, such as Tagesgeld, in ", h("a", { href: "#settings" }, "Settings"), "."));
-
-  const asOf = m.netWorth.length ? `, as of ${monthLabel(m.netWorth.at(-1).month)}` : "";
-  if (e.months === null) {
-    return card(title,
-      h("div", { class: "big" }, money(e.cash)),
-      h("p", { class: "muted" }, `in cash${asOf}`),
-      h("p", { class: "muted" }, store.expenses.length
-        ? [h("a", { href: "#expenses" }, "No expenses count this month"), "."]
-        : [h("a", { href: "#expenses" }, "Add expenses"), " to see how long it lasts."]));
-  }
-
-  // How much of the target the cash covers, with a bar as in Milestones.
-  let target = null;
-  if (e.target > 0) {
-    const share = e.months / e.target;
-    const meter = h("div", { class: "meter", role: "presentation" }, h("div", { class: "meter-fill" }));
-    meter.firstChild.style.width = `${Math.min(100, share * 100)}%`;
-    target = h("div", { class: "reach-row" }, meter,
-      h("span", { class: "num" }, e.short === 0 ? `✓ ${e.target} months reached` : `${percent.format(share)} of ${e.target} months`));
-  }
-  return h("section", { class: e.target > 0 && e.short === 0 ? "card emergency reached" : "card emergency" },
-    h("h2", null, title),
-    h("div", { class: "big" }, e.months >= 1 ? duration(Math.floor(e.months)) : "Less than a month"),
-    target,
-    h("p", { class: "muted" }, `${money(e.cash)} in cash`,
-      e.short > 0 ? h("span", { class: "short" }, `, ${money(e.short)} short`) : null,
-      asOf));
+        columns.map(([key]) => cell(r[key]))))))));
 }
 
 // ---------------------------------------------------------------- forecast

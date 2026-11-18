@@ -980,17 +980,19 @@ export function returnsOf(series) {
 // window (the first month when there are fewer). rate is a Modified Dietz
 // return: the gain ÷ (that first value + each pay-in weighted by the part of
 // the time it was invested, from the middle of its month). Returns
-// { gain, months, rate } (rate null when nothing was invested), or null
-// with less than two months.
+// { gain, months, paid, rate } (paid: the pay-ins and one-offs of those
+// months; rate null when nothing was invested), or null with less than two
+// months.
 export function gains(series, window = 12) {
   if (series.length < 2) return null;
   const months = Math.min(window, series.length - 1);
   const start = series.at(-1 - months);
   const recent = series.slice(-months);
-  const paid = (m) => m.payIn + (m.oneOff ?? 0);
-  const gain = series.at(-1).value - start.value - sum(recent.map(paid));
-  const invested = start.value + sum(recent.map((m, i) => (paid(m) * (months - i - 0.5)) / months));
-  return { gain, months, rate: invested > 0 ? gain / invested : null };
+  const paidIn = (m) => m.payIn + (m.oneOff ?? 0);
+  const paid = sum(recent.map(paidIn));
+  const gain = series.at(-1).value - start.value - paid;
+  const invested = start.value + sum(recent.map((m, i) => (paidIn(m) * (months - i - 0.5)) / months));
+  return { gain, months, paid, rate: invested > 0 ? gain / invested : null };
 }
 
 // The months after `latest` up to last month: values are entered once a

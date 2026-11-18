@@ -89,18 +89,21 @@ Finance window's browser profile. The data file stays.
 ## Use
 
 - **Dashboard**: the numbers on the way to FI, the milestones (Coast FI,
-  Lean FI and FI), the portfolio's history or its path to FI, the net
-  worth, and where the income goes. See
+  Lean FI and FI), the portfolio's history or its path to FI, the returns,
+  the net worth with the emergency fund, and where the income goes. See
   [Dashboard numbers](#dashboard-numbers).
 - **Forecast**: three plans, retiring at FI, coasting and working to the
   retirement age, as bars on one age line to 120, and the picked plan's
   portfolio at 6, 8 and 10 % a year before inflation (by default). It only
   shows: what it goes on is set in Settings. See [Forecast](#forecast).
 - **Portfolio**: each account's value at the end of each month, and what
-  was paid in, with the returns and the history. See
+  was paid in, under a short summary, with the history. See
   [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
 - **Expenses** and **Income**: regular payments, from now or a month to
-  come, until they end. See [Expenses and income](#expenses-and-income).
+  come, until they end, under a short summary of the totals. See
+  [Expenses and income](#expenses-and-income). Portfolio, Expenses and
+  Income are for entering; the Dashboard and the Forecast show what it
+  comes to.
 - **Settings**, in three tabs. **Data**, what the numbers go on:
   - Safe withdrawal rate (default 4 %) and a buffer on expenses for irregular
     costs (default 10 %).
@@ -256,9 +259,15 @@ deposit. A one-off counts as paid in (so it is no gain), but not for the
 average pay-in that the investment rate, Time to FI and the forecast go on
 with, unless Settings plans your own future pay-ins. An account without a value in a month counts with its last value.
 The history lists every month with each account, the portfolio, what was
-paid in and, with other kinds of accounts, the net worth.
+paid in and, with other kinds of accounts, the net worth. The summary at
+the top has the portfolio in its latest month, that month's change and
+pay-in, the average pay-in of the last 12 months and, with other kinds of
+accounts, the net worth.
 
-**Returns**, for the portfolio and each invested account:
+![Portfolio: the summary, two invested accounts, cash and a car loan, a one-off column, and the history](docs/portfolio.png)
+
+**Returns**, on the dashboard under the Portfolio chart, for the portfolio
+and each invested account:
 
 - Time-weighted this year, over the last 1, 3 and 5 years (3 and 5 a year)
   and since the start: each month's return (the change in value less what
@@ -271,14 +280,13 @@ paid in and, with other kinds of accounts, the net worth.
 
 Since the start, both are a year from 12 months of history on, and over the
 whole time before. Pay-ins, one-offs and an account's first value count
-from the middle of their month.
+from the middle of their month. A column no row has yet, such as 5 years
+with a shorter history, is left out.
 
-**Emergency fund**, under the returns: the latest values of the cash
-accounts ÷ this month's expenses with buffer, how much of the months set
-in Settings that is, and how much is missing. Without a cash account it
-says to add one.
-
-![Portfolio: two invested accounts, cash and a car loan, a one-off column, the returns and the emergency fund](docs/portfolio.png)
+**Emergency fund**, at the foot of Net worth on the dashboard: the latest
+values of the cash accounts ÷ this month's expenses with buffer, how much
+of the months set in Settings that is, and how much is missing. It shows
+once there is a cash account and an expense that counts this month.
 
 ### Dashboard numbers
 
@@ -288,7 +296,7 @@ says to add one.
 | Monthly expenses | Sum of the active expenses that count this month the same way, plus the buffer |
 | Investment rate | What you pay in now ÷ monthly income: the average monthly pay-in over the last 12 months (one-offs left out), your own amount from Settings, or a planned change that has started |
 | Portfolio | Sum of the invested accounts in the latest month, and its change since the month before |
-| Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins and one-offs. The return is that gain ÷ (the value 12 months ago + each pay-in and one-off for the part of the 12 months it was invested, from the middle of its month) |
+| Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins and one-offs, and how much those were. The returns are in their own card |
 | Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them |
 
 With less than 12 months of history, the average uses the months there
@@ -346,10 +354,13 @@ The **Portfolio** chart has two views; the one picked last stays picked.
 
 ![Path to FI](docs/path-to-fi.png)
 
+**Returns** sits under the chart; see
+[Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
+
 **Net worth**, once there is an account that is not invested, adds up the
 latest value of every account, debts taken off, with each kind on a bar,
 and its change since the month before (left out in a month an account is
-entered for the first time).
+entered for the first time). The emergency fund is at its foot.
 
 **Where the income goes** splits the monthly income into expenses (with
 the buffer), what you pay in now (the 12-month average or your own amount),
