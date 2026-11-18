@@ -164,6 +164,34 @@ test("parseDate reads YYYY-MM-DD, YYYY.MM.DD and DD.MM.YYYY", () => {
   for (const text of wrong) assert.equal(F.parseDate(text), null, text);
 });
 
+test("parseMonth reads the month's number, then a four-digit year; or year first with a separator", () => {
+  const cases = {
+    "12027": "2027-01", // typed 1 2 0 2 7
+    "122027": "2027-12",
+    "012027": "2027-01",
+    "1 2027": "2027-01",
+    "01/2027": "2027-01",
+    "1.2027": "2027-01",
+    "1-2027": "2027-01",
+    " 11 / 2026 ": "2026-11",
+    "2027-01": "2027-01",
+    "2027-1": "2027-01",
+    "2027.12": "2027-12",
+    "12 1899": "1899-12", // any four-digit year, as stored months have
+    "1 2201": "2201-01",
+  };
+  for (const [text, month] of Object.entries(cases)) assert.equal(F.parseMonth(text), month, text);
+  const wrong = [
+    "", "2027", "1", "12", "1202", // no year yet
+    "0 2027", "13 2027", "132027", "002027", "2027-13", "2027-0", // no such month
+    "1 27", "1/27", "1 20270", "202701", // a year of four digits, after the month without a separator
+    "Jan 2027", "1/2027/1", "1 2027 x", "1,2027",
+  ];
+  for (const text of wrong) assert.equal(F.parseMonth(text), null, text);
+  for (const month of ["2027-01", "2026-11", "1990-12"]) assert.equal(F.parseMonth(F.monthToText(month)), month, month);
+  assert.equal(F.monthToText("2027-01"), "01/2027");
+});
+
 test("daysInMonth", () => {
   assert.equal(F.daysInMonth("2026-01"), 31);
   assert.equal(F.daysInMonth("2026-02"), 28);
