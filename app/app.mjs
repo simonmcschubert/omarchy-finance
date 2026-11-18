@@ -26,6 +26,7 @@ let percent;
 let percentUnit;
 let plain;
 let plainRate;
+let tenths;
 let zero;
 let whole;
 let exact;
@@ -39,6 +40,7 @@ function useFormats({ currency: code, numberFormat }) {
   percentUnit = new Intl.NumberFormat(numbers, { style: "unit", unit: "percent", maximumFractionDigits: RATE_DECIMALS });
   plain = new Intl.NumberFormat(numbers, { maximumFractionDigits: 2, useGrouping: false });
   plainRate = new Intl.NumberFormat(numbers, { maximumFractionDigits: RATE_DECIMALS, useGrouping: false });
+  tenths = new Intl.NumberFormat(numbers, { maximumFractionDigits: 1, useGrouping: false });
   zero = new Intl.NumberFormat(numbers, { minimumFractionDigits: 2 }).format(0);
   whole = new Intl.NumberFormat(numbers, { style: "currency", currency: code, maximumFractionDigits: 0 });
   // Two decimals for every currency, since amounts are stored in hundredths.
@@ -70,6 +72,13 @@ const currencyName = (code) => currencyNames?.of(code) ?? code;
 function duration(months) {
   if (months < 24) return months === 1 ? "1 month" : `${months} months`;
   return `${Math.round(months / 12)} years`;
+}
+
+// A span of time, short and about to the month: months under a year, else
+// years to a tenth ("8 months", "1 year", "2,4 years").
+function yearsTenths(months) {
+  if (months < 12) return months === 1 ? "1 month" : `${months} months`;
+  return months === 12 ? "1 year" : `${tenths.format(months / 12)} years`;
 }
 
 // The months the average pay-in is of, in words.
@@ -2177,18 +2186,15 @@ function payInCard(store) {
   const base = scenarios.rows.find((row) => row.average).retires;
   const never = `Not before ${retirementAge}`;
 
-  // Sooner or later than with the average: months under a year, then half
-  // years.
+  // Sooner or later than with the average, about to the month. Each age
+  // shows its month too, so rows at the same age add up.
   const change = (row) => {
     if (row.retires === null) return never;
     if (row.average) return "–";
     if (base === null) return "";
     const months = F.monthIndex(row.retires) - F.monthIndex(base);
-    const n = Math.abs(months);
-    if (n === 0) return "same";
-    const halves = Math.round(n / 6) / 2;
-    const size = n < 12 ? (n === 1 ? "1 month" : `${n} months`) : `${Math.floor(halves)}${halves % 1 ? "½" : ""} ${halves > 1 ? "years" : "year"}`;
-    return `${size} ${months < 0 ? "sooner" : "later"}`;
+    if (months === 0) return "same";
+    return `${yearsTenths(Math.abs(months))} ${months < 0 ? "sooner" : "later"}`;
   };
 
   const { payIn } = o;
@@ -2210,10 +2216,14 @@ function payInCard(store) {
   const when = (row) => (row.retires === null ? Infinity : F.monthIndex(row.retires));
   rows.sort((a, b) => when(a) - when(b));
 
+  // After the bar, the age and the month in that year; hovering the bar or
+  // the age shows the year too.
   const line = (row) => {
-    const bar = h("span", { class: `payin-bar${row.retires === null ? " never" : ""}` });
+    const tip = row.retires === null ? never : `Stop working in ${monthLabel(row.retires)}, at ${F.ageIn(row.retires, birthYear)}`;
+    const bar = h("span", { class: `payin-bar${row.retires === null ? " never" : ""}`, title: tip });
     bar.style.setProperty("--at", row.retires === null ? "1" : at(F.monthIndex(row.retires)));
-    const age = row.retires === null ? null : h("span", { class: "payin-age" }, String(F.ageIn(row.retires, birthYear)));
+    const age = row.retires === null ? null : h("span", { class: "payin-age", title: tip },
+      String(F.ageIn(row.retires, birthYear)), " ", h("span", { class: "payin-month" }, monthName(Number(row.retires.slice(5, 7)) - 1)));
     age?.style.setProperty("--at", bar.style.getPropertyValue("--at"));
     return h("div", { class: `payin-row${row.average ? " average" : ""}`, role: "listitem" },
       h("span", { class: "payin-label" }, label(row)),
@@ -2247,6 +2257,7 @@ function payInCard(store) {
       : `Average: you paid in nothing a month over ${scenarios.months ? payInMonths(scenarios.months) : "the months so far"}, so the others are round amounts.`,
     payIn.rises ? "Like your pay-ins, they rise with inflation." : null,
     scenarios.plan ? ["Plan: what you pay in as set in ", settingsLink("data"), ", with its changes."] : null,
+    "Next to each age, the month in that year. Sooner or later: in months under a year, else in years to a tenth.",
     "Planned one-offs count in every row.");
   return h("section", { class: "card payins" },
     h("div", { class: "card-head" }, h("h2", null, "Pay in more or less", about)),

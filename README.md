@@ -438,7 +438,9 @@ not in the data file.
 each amount a month, from now to the age you could stop working (as Stop
 working counts it, at the expected return), on an age line to the
 retirement age, and how much sooner or later that is than with the average
-pay-in of the last 12 months (bold). The others are 2, 1½, ½ and 0 times
+pay-in of the last 12 months (bold): months under a year, else years to
+a tenth. Each age has the month in that year next to it, so rows at the
+same age add up; hovering a bar shows the year too. The others are 2, 1½, ½ and 0 times
 the average, each paid in every month from now on (rising with inflation
 when pay-ins do); with an average of 0, round amounts near a quarter of the
 expenses. **Plan** is what you pay in
