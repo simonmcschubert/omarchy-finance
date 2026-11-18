@@ -1043,6 +1043,7 @@ main > div {
 /* Where the portfolio runs out: red stripes over its part. */
 .plan-bar.out {
   stroke: var(--bad);
+  pointer-events: none;
 }
 
 .plan-bars .out-bg {
@@ -1253,6 +1254,115 @@ main > div {
 
 .phase-key.other::before {
   background: var(--series-3);
+}
+
+/* Pay in more or less: a bar per amount, from now to when you could stop
+   working, on an age line to the retirement age. The rows share the
+   columns: the amount, the bar, sooner or later. --at is where on the
+   line, 0 to 1; the line leaves room after it for the age. */
+.payin-rows {
+  --payin-room: 32px;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  column-gap: 16px;
+  row-gap: 10px;
+  margin-top: 4px;
+}
+
+.payin-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+}
+
+.payin-label {
+  color: var(--fg-strong);
+  white-space: nowrap;
+}
+
+.payin-row.average .payin-label,
+.payin-row.average .payin-age {
+  font-weight: 600;
+}
+
+.payin-track {
+  position: relative;
+  height: 16px;
+  font-size: 13px;
+}
+
+.payin-bar {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  height: 12px;
+  width: calc((100% - var(--payin-room)) * var(--at));
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--series-1) 55%, transparent);
+}
+
+.payin-row.average .payin-bar:not(.never) {
+  background: var(--series-1);
+}
+
+/* FI doesn't come before the retirement age. */
+.payin-bar.never {
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--series-1) 30%, transparent) 0 4px, transparent 4px 8px);
+}
+
+.payin-age {
+  position: absolute;
+  top: -1px;
+  left: calc((100% - var(--payin-room)) * var(--at));
+  margin-left: 8px;
+  color: var(--fg-strong);
+}
+
+.payin-change {
+  color: var(--fg-muted);
+  font-size: 13px;
+  text-align: right;
+}
+
+.payin-axis .payin-track {
+  height: 14px;
+}
+
+/* The line ends at the retirement age. */
+.payin-axis .payin-track::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(100% - var(--payin-room));
+  border-top: 1px solid var(--border);
+}
+
+.payin-axis .payin-track span {
+  position: absolute;
+  top: 2px;
+  left: calc((100% - var(--payin-room)) * var(--at));
+  transform: translateX(-50%);
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+@media (max-width: 520px) {
+  .payin-rows {
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 12px;
+  }
+
+  .payin-change {
+    grid-column: 2;
+    text-align: left;
+    margin-top: 2px;
+  }
+
+  .payin-axis .payin-change {
+    display: none;
+  }
 }
 
 .chart .cross {

@@ -413,9 +413,10 @@ export function statusBadge(level) {
 // - months: the shown months; ageOf(month)
 // - row: the plan's bar, { name, title (whether it lasts, in words),
 //   segments: [{ kind ("invest", "coast" or "retired"), from, to (indexes;
-//   to excluded), texts (the amount a month, longest first), share
-//   (retired: the portfolio's part, 0 to 1), end (the value at its end, or
-//   null), step (it splits a phase), cause: { text, income } or null }],
+//   to excluded), texts (the amount a month, longest first), tip (shown on
+//   hover), share (retired: the portfolio's part, 0 to 1), end (the value
+//   at its end, or null), step (it splits a phase), cause: { text, income }
+//   or null }],
 //   out: { from, text } or null }
 // - chart: { values: { low, mid, high }, rates: { low, high } (labels),
 //   phases: [{ kind, from, to }], marks: [indexes], steps: [indexes],
@@ -451,16 +452,24 @@ export function renderForecast(root, options) {
     const x0 = x(seg.from);
     const x1 = x(seg.to);
     const w = Math.max(2, x1 - x0 - 2);
+    // A part of the bar, with its tip on hover.
+    const part = svg("g", { class: "plan-part" });
+    if (seg.tip) {
+      const title = svg("title");
+      title.textContent = seg.tip;
+      part.append(title);
+    }
     if (seg.kind === "retired") {
       const own = PLAN_BAR * seg.share;
-      if (seg.share < 0.999) g.append(svg("rect", { class: "plan-bar other", x: x0 + 1, y: by, width: w, height: PLAN_BAR - own }));
-      g.append(svg("rect", { class: "plan-bar retired", x: x0 + 1, y: by + PLAN_BAR - own, width: w, height: own }));
+      if (seg.share < 0.999) part.append(svg("rect", { class: "plan-bar other", x: x0 + 1, y: by, width: w, height: PLAN_BAR - own }));
+      part.append(svg("rect", { class: "plan-bar retired", x: x0 + 1, y: by + PLAN_BAR - own, width: w, height: own }));
     } else {
-      g.append(svg("rect", { class: `plan-bar ${seg.kind}`, x: x0 + 1, y: by, width: w, height: PLAN_BAR, rx: 3, ...(seg.kind === "coast" ? { fill: `url(#coast-${id})` } : {}) }));
+      part.append(svg("rect", { class: `plan-bar ${seg.kind}`, x: x0 + 1, y: by, width: w, height: PLAN_BAR, rx: 3, ...(seg.kind === "coast" ? { fill: `url(#coast-${id})` } : {}) }));
     }
-    if (seg.step) g.append(svg("line", { class: "notch", x1: x0, x2: x0, y1: by - 3, y2: by + PLAN_BAR + 3 }));
+    if (seg.step) part.append(svg("line", { class: "notch", x1: x0, x2: x0, y1: by - 3, y2: by + PLAN_BAR + 3 }));
     const t = fitText(seg.texts, x1 - x0);
-    if (t) g.append(text({ class: `plan-bar-text ${seg.kind}`, x: x0 + 8, y: by + PLAN_BAR / 2 + 4.5 }, t));
+    if (t) part.append(text({ class: `plan-bar-text ${seg.kind}`, x: x0 + 8, y: by + PLAN_BAR / 2 + 4.5 }, t));
+    g.append(part);
     if (seg.end !== null) ends.push([x1, seg.end]);
     if (seg.cause) labels.push({ x: x0 + 4, y: by + PLAN_BAR + 14, text: seg.cause.text, class: seg.cause.income ? "plan-cause income" : "plan-cause" });
   }

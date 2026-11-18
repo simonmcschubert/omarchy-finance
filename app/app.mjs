@@ -1979,22 +1979,31 @@ function forecastPlans(store) {
     const other = first ? null : step.changes[0];
     return other ? { text: `${other.name} ${other.starts ? "starts" : "ends"}`, income: false } : null;
   };
+  // A part of the bar for each amount a month: what the portfolio pays
+  // while retired, what is paid in while investing (a planned pay-in change
+  // starts a part of its own). Hovering a part shows its amount and ages.
+  const ages = (from, to) => `${age(months[from])}–${age(months[Math.min(to, months.length) - 1])}`;
+  const tip = (kind, from, to, text) => `${PHASE_NAMES[kind]}, ${text}, ${ages(from, to)}`;
   const segments = (plan) => plan.phases.flatMap((phase) => {
     if (phase.kind === "retired") {
-      return phase.steps.map((step, k) => ({
-        kind: "retired", from: step.from, to: step.to, share: step.share, step: k > 0, cause: cause(step, k === 0),
-        texts: [step.amount > 0 ? perMonth(step.amount, "−") : perMonth(0, ""), step.amount > 0 ? `−${money(step.amount)}` : money(0)],
-        end: plan.values.mid[Math.min(step.to, months.length) - 1],
-      }));
+      return phase.steps.map((step, k) => {
+        const texts = [step.amount > 0 ? perMonth(step.amount, "−") : perMonth(0, ""), step.amount > 0 ? `−${money(step.amount)}` : money(0)];
+        return {
+          kind: "retired", from: step.from, to: step.to, share: step.share, step: k > 0, cause: cause(step, k === 0), texts,
+          tip: tip("retired", step.from, step.to, texts[0]),
+          end: plan.values.mid[Math.min(step.to, months.length) - 1],
+        };
+      });
     }
-    const amounts = phase.steps.map((step) => step.amount);
     const sign = (cents) => (cents > 0 ? "+" : "");
-    const all = `${sign(amounts[0])}${amounts.map(money).join(" → ")}/month`;
-    return [{
-      kind: phase.kind, from: phase.from, to: phase.to, share: 1, step: false, cause: null,
-      texts: [all, `${sign(amounts[0])}${amounts.map(money).join(" → ")}`, `${sign(amounts[0])}${money(amounts[0])}`],
-      end: plan.values.mid[phase.to - 1],
-    }];
+    return phase.steps.map((step, k) => {
+      const texts = [perMonth(step.amount, sign(step.amount)), `${sign(step.amount)}${money(step.amount)}`];
+      return {
+        kind: phase.kind, from: step.from, to: step.to, share: 1, step: k > 0, cause: null, texts,
+        tip: tip(phase.kind, step.from, step.to, texts[0]),
+        end: k === phase.steps.length - 1 ? plan.values.mid[phase.to - 1] : null,
+      };
+    });
   });
   // What the portfolio would need at the plan's turn to last even at the
   // low growth: the next whole thousand above what it has to be more than.
@@ -2073,7 +2082,8 @@ function viewForecast() {
           h("h2", { id: "forecast-title", class: "plan-title" }),
           h("p", { id: "forecast-need", class: "plan-need", hidden: true })),
         h("div", { id: "forecast-keys", class: "phase-keys" })),
-      h("div", { id: "forecast-chart", class: "forecast-box" })));
+      h("div", { id: "forecast-chart", class: "forecast-box" })),
+    payInCard(store));
 }
 
 // Draws the answers, and the picked one's bar and chart; with focus,
@@ -2147,6 +2157,100 @@ function drawForecast(focus = false) {
       formatAxis: axisMoney,
       formatMonth: monthLabel,
     }));
+}
+
+// Pay in more or less: a bar for each amount a month, from now to when you
+// could stop working (fiOutlook's payIns), on an age line that ends at the
+// retirement age, and how much sooner or later that is than with the
+// average pay-in. Your plan from Settings is a row of its own when it isn't
+// the average every month. null when there is nothing to compare.
+const TIMES = { 2: "2×", 1.5: "1½×", 1: "average", 0.5: "½×", 0: "nothing" };
+
+function payInCard(store) {
+  const o = outlook(store);
+  const scenarios = o.payIns();
+  if (!scenarios) return null;
+  const { birthYear, retirementAge } = store.settings;
+  const first = F.monthIndex(o.start);
+  const span = F.monthIndex(o.retirement) - first;
+  const at = (index) => String((index - first) / span); // along the age line, 0 to 1
+  const base = scenarios.rows.find((row) => row.average).retires;
+  const never = `Not before ${retirementAge}`;
+
+  // Sooner or later than with the average: months under a year, then half
+  // years.
+  const change = (row) => {
+    if (row.retires === null) return never;
+    if (row.average) return "–";
+    if (base === null) return "";
+    const months = F.monthIndex(row.retires) - F.monthIndex(base);
+    const n = Math.abs(months);
+    if (n === 0) return "same";
+    const halves = Math.round(n / 6) / 2;
+    const size = n < 12 ? (n === 1 ? "1 month" : `${n} months`) : `${Math.floor(halves)}${halves % 1 ? "½" : ""} ${halves > 1 ? "years" : "year"}`;
+    return `${size} ${months < 0 ? "sooner" : "later"}`;
+  };
+
+  const { payIn } = o;
+  const planInfo = () => info("your plan",
+    h("p", null, "What you pay in as planned in ", settingsLink("data"), ", as the plans above count it:"),
+    h("ul", null,
+      h("li", null, `Now: ${money(payIn.invested)} a month`),
+      payIn.changes.map((c) => h("li", null, `From ${monthLabel(c.month)}, at ${F.ageIn(c.month, birthYear)}: ${c.average ? "the average, " : ""}${money(c.amount)}`))),
+    payIn.rises ? "Rising with inflation." : null);
+  const label = (row) => {
+    if (row.plan) return ["Plan", planInfo()];
+    // With amounts hidden, how many times the average.
+    if (hidden() && row.factor !== null) return TIMES[row.factor];
+    return row.average ? [money(row.amount), h("span", { class: "sub" }, " average")] : money(row.amount);
+  };
+
+  // Sooner first; a tie keeps this order, the plan before the average.
+  const rows = scenarios.rows.flatMap((row) => (row.average && scenarios.plan ? [{ ...scenarios.plan, plan: true }, row] : [row]));
+  const when = (row) => (row.retires === null ? Infinity : F.monthIndex(row.retires));
+  rows.sort((a, b) => when(a) - when(b));
+
+  const line = (row) => {
+    const bar = h("span", { class: `payin-bar${row.retires === null ? " never" : ""}` });
+    bar.style.setProperty("--at", row.retires === null ? "1" : at(F.monthIndex(row.retires)));
+    const age = row.retires === null ? null : h("span", { class: "payin-age" }, String(F.ageIn(row.retires, birthYear)));
+    age?.style.setProperty("--at", bar.style.getPropertyValue("--at"));
+    return h("div", { class: `payin-row${row.average ? " average" : ""}`, role: "listitem" },
+      h("span", { class: "payin-label" }, label(row)),
+      h("span", { class: "payin-track" }, bar, age),
+      h("span", { class: "payin-change" }, change(row)));
+  };
+
+  // The ages under the bars: every 5 (or 1, 2, 10) years, and the
+  // retirement age at the end.
+  const years = span / 12;
+  const every = [1, 2, 5, 10].find((n) => years / n <= 7) ?? 20;
+  const ticks = [];
+  for (let age = F.ageIn(o.start, birthYear) + 1; age < retirementAge; age++) {
+    const index = (birthYear + age) * 12;
+    if (age % every === 0 && index - first >= every * 12 * 0.4 && retirementAge - age >= every * 0.6) ticks.push([age, index]);
+  }
+  ticks.push([retirementAge, F.monthIndex(o.retirement)]);
+  const axis = h("div", { class: "payin-row payin-axis", "aria-hidden": "true" },
+    h("span", { class: "payin-label" }),
+    h("span", { class: "payin-track" }, ticks.map(([age, index]) => {
+      const tick = h("span", null, String(age));
+      tick.style.setProperty("--at", at(index));
+      return tick;
+    })),
+    h("span", { class: "payin-change" }));
+
+  const about = info("pay in more or less",
+    `When you could stop working if you paid in the same amount every month from now on, at the expected return of ${percentUnit.format(o.rates.mid)}: the month after FI, as Stop working counts it.`,
+    scenarios.average > 0
+      ? `Average: what you paid in a month over ${payInMonths(scenarios.months)}. The others are 2, 1½, ½ and 0 times it.`
+      : `Average: you paid in nothing a month over ${scenarios.months ? payInMonths(scenarios.months) : "the months so far"}, so the others are round amounts.`,
+    payIn.rises ? "Like your pay-ins, they rise with inflation." : null,
+    scenarios.plan ? ["Plan: what you pay in as set in ", settingsLink("data"), ", with its changes."] : null,
+    "Planned one-offs count in every row.");
+  return h("section", { class: "card payins" },
+    h("div", { class: "card-head" }, h("h2", null, "Pay in more or less", about)),
+    h("div", { class: "payin-rows", role: "list", "aria-label": "Pay in more or less" }, rows.map(line), axis));
 }
 
 // ---------------------------------------------------------------- settings
