@@ -91,7 +91,7 @@ Finance window's browser profile. The data file stays.
 ## Use
 
 - **Dashboard**: the numbers on the way to FI, the milestones (Coast FI,
-  Lean FI and FI), the portfolio's history or its path to FI, the returns,
+  Lean FI and FI), the portfolio's path to FI and its history, the returns,
   the net worth with the emergency fund, and where the income goes. See
   [Dashboard numbers](#dashboard-numbers).
 - **Forecast**: when you can stop investing and stop working, from the
@@ -269,8 +269,8 @@ accounts, the net worth.
 
 ![Portfolio: the summary, two invested accounts, cash and a car loan, a one-off column, and the history](docs/portfolio.png)
 
-**Returns**, on the dashboard under the Portfolio chart, for the portfolio
-and each invested account:
+**Returns**, on the dashboard under the Portfolio history chart, for the
+portfolio and each invested account:
 
 - Time-weighted this year, over the last 1, 3 and 5 years (3 and 5 a year)
   and since the start: each month's return (the change in value less what
@@ -336,14 +336,8 @@ from which the portfolio, with the same pay-ins until then and none after,
 grows to the FI number by the retirement age: the age the Forecast page's
 Stop investing names, for the future pay-ins and nothing after Coast FI.
 
-The **Portfolio** chart has two views; the one picked last stays picked.
+Under the milestones come two charts, one under the other:
 
-- **History**: the portfolio value and what was paid in, per month. Paid in
-  starts with what each account held in its first month, then adds its
-  pay-ins, so the space between the lines is the gain (green) or loss (red)
-  since then. Hovering a month shows the gain in money and percent, and how
-  much of that month's change was paid in and how much came from the market.
-  The FI number shows once the data reaches it.
 - **Path to FI** (needs active expenses): from the latest month, the value
   goes on growing the way Time to FI counts, with planned one-offs, as a
   dashed line until it reaches the FI number, with a band from 2 points
@@ -355,10 +349,16 @@ The **Portfolio** chart has two views; the one picked last stays picked.
   long that is from this month; its ⓘ, what the FI number is by then.
   Its switch shows the projection in today's money (the default) or in the
   money of each year, as on the Forecast page.
+- **Portfolio history**: the portfolio value and what was paid in, per
+  month. Paid in starts with what each account held in its first month,
+  then adds its pay-ins, so the space between the lines is the gain (green)
+  or loss (red) since then. Hovering a month shows the gain in money and
+  percent, and how much of that month's change was paid in and how much
+  came from the market. The FI number shows once the data reaches it.
 
 ![Path to FI](docs/path-to-fi.png)
 
-**Returns** sits under the chart; see
+**Returns** sits under the history; see
 [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
 
 **Net worth**, once there is an account that is not invested, adds up the
