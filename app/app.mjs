@@ -408,27 +408,8 @@ function monthField({ id = null, name, value = "", label = null, required = fals
 
 // ---------------------------------------------------------------- state
 
-// The chart view is remembered in this browser only; it is not data.
-const CHART_VIEW_KEY = "finance.chartView";
-function savedChartView() {
-  try {
-    return localStorage.getItem(CHART_VIEW_KEY) === "path" ? "path" : "history";
-  } catch {
-    return "history";
-  }
-}
-function setChartView(view) {
-  state.chartView = view;
-  try {
-    localStorage.setItem(CHART_VIEW_KEY, view);
-  } catch {
-    // remembered until the window closes
-  }
-  render();
-}
-
-// Whether projections show the money of each year or today's money: also
-// remembered in this browser only.
+// Whether projections show the money of each year or today's money:
+// remembered in this browser only; it is not data.
 const MONEY_KEY = "finance.money";
 function savedMoney() {
   try {
@@ -533,7 +514,6 @@ const state = {
   month: null,
   importText: "",
   importPlan: null,
-  chartView: savedChartView(), // "history" | "path"
   money: savedMoney(), // "nominal" (the money of each year) | "today"
   hideAmounts: savedHidden(), // amounts as dots, for sharing the screen
   settingsTab: "data", // the tab of Settings on show: a key of SETTINGS_TABS
@@ -984,7 +964,7 @@ function render() {
   }
   main.replaceChildren(...content);
 
-  if (state.view === "dashboard" && state.store) drawChart();
+  if (state.view === "dashboard" && state.store) drawCharts();
   if (state.view === "forecast" && state.store) drawForecast();
   if (state.focus) {
     main.querySelector(state.focus)?.focus();
@@ -1064,7 +1044,10 @@ function viewDashboard() {
     parts.push(milestonesCard(m));
   }
 
-  if (m.series.length > 0) parts.push(portfolioCard(m));
+  if (m.series.length > 0) {
+    if (hasPath(m)) parts.push(pathCard());
+    parts.push(historyCard(m));
+  }
   const returns = returnsCard(store);
   if (returns) parts.push(returns);
 
@@ -1248,49 +1231,43 @@ function emergencyFund(m) {
     e.short > 0 ? h("p", { class: "short" }, `${money(e.short)} short`) : null);
 }
 
-// No active expenses, no FI number: the chart then has no goal line and no
-// path to FI.
+// No active expenses, no FI number: the history then has no goal line, and
+// there is no path to FI.
 const chartGoal = (m) => (F.counted(state.store.expenses).length ? m.fiNumber : 0);
-
-function chartView(m) {
-  return state.chartView === "path" && chartGoal(m) > 0 && outlook(state.store).fiNumber > 0 ? "path" : "history";
-}
+const hasPath = (m) => chartGoal(m) > 0 && outlook(state.store).fiNumber > 0;
 
 // The Path to FI chart's projection, in the money the switch says.
 const projection = () => outlook(state.store).path(inTodaysMoney() ? "today" : "nominal");
 
-function portfolioCard(m) {
-  const view = chartView(m);
-  const key = (kind, label) => h("span", null, h("span", { class: `key ${kind}` }), label);
-  const viewButton = (name, label) =>
-    h("button", { type: "button", class: view === name ? "seg active" : "seg", "aria-pressed": String(view === name), onclick: () => setChartView(name) }, label);
+const chartKey = (kind, label) => h("span", null, h("span", { class: `key ${kind}` }), label);
 
-  let legend;
-  let note = null;
-  let about;
-  if (view === "path") {
-    const p = projection();
-    legend = [key("value", "Portfolio value"),
-      p.points.length ? key("projection", `At ${percentUnit.format(p.rates.mid)} a year (${percentUnit.format(p.rates.low)} to ${percentUnit.format(p.rates.high)})`) : null,
-      key("goal", "FI number")];
-    ({ note, about } = pathSummary(p));
-  } else {
-    legend = [key("value", "Portfolio value"), key("paid", "Paid in"), key("gain", "Gain"),
-      m.series.some((s) => s.value < s.invested) ? key("loss", "Loss") : null,
-      goalVisible(m.series, chartGoal(m)) ? key("goal", "FI number") : null];
-    about = ["Paid in starts with what each account held in its first month, so the shading is the gain or loss since then."];
-  }
-
+// The portfolio's value, then its projection up to the FI number.
+function pathCard() {
+  const p = projection();
+  const { note, about } = pathSummary(p);
   return h("section", { class: "card" },
     h("div", { class: "card-head" },
-      h("h2", null, "Portfolio", info(view === "path" ? "the path to FI" : "the portfolio chart", ...about)),
-      h("div", { class: "legend" }, legend),
-      view === "path" ? moneySwitch(render) : null,
-      chartGoal(m) > 0
-        ? h("div", { class: "segmented", role: "group", "aria-label": "Chart" }, viewButton("history", "History"), viewButton("path", "Path to FI"))
-        : null),
-    h("div", { id: "chart", class: "chart-box" }),
+      h("h2", null, "Path to FI", info("the path to FI", ...about)),
+      h("div", { class: "legend" },
+        chartKey("value", "Portfolio value"),
+        p.points.length ? chartKey("projection", `At ${percentUnit.format(p.rates.mid)} a year (${percentUnit.format(p.rates.low)} to ${percentUnit.format(p.rates.high)})`) : null,
+        chartKey("goal", "FI number")),
+      moneySwitch(render)),
+    h("div", { id: "chart-path", class: "chart-box" }),
     note ? h("p", { class: "chart-note muted" }, note) : null);
+}
+
+// The portfolio's value and what was paid in, month by month.
+function historyCard(m) {
+  return h("section", { class: "card" },
+    h("div", { class: "card-head" },
+      h("h2", null, "Portfolio history", info("the portfolio history",
+        "Paid in starts with what each account held in its first month, so the shading is the gain or loss since then.")),
+      h("div", { class: "legend" },
+        chartKey("value", "Portfolio value"), chartKey("paid", "Paid in"), chartKey("gain", "Gain"),
+        m.series.some((s) => s.value < s.invested) ? chartKey("loss", "Loss") : null,
+        goalVisible(m.series, chartGoal(m)) ? chartKey("goal", "FI number") : null)),
+    h("div", { id: "chart-history", class: "chart-box" }));
 }
 
 // When the projection reaches the FI number: a short line under the chart,
@@ -1324,18 +1301,12 @@ function pathSummary(p) {
   return { note, about: [...about, settings] };
 }
 
-function drawChart() {
-  const box = document.getElementById("chart");
-  if (!box) return;
+// The dashboard's charts: the path to FI, when there is one, and the
+// history.
+function drawCharts() {
   const m = F.metrics(state.store);
-  const view = chartView(m);
   const options = {
-    view,
     series: m.series,
-    // On the path, what FI needs at the latest month's end, as the
-    // projection's goals.
-    fiNumber: view === "path" ? outlook(state.store).fiNumber : chartGoal(m),
-    projection: view === "path" ? projection() : null,
     format: money,
     formatSigned: signedMoney,
     formatPercent: (fraction) => percent.format(fraction),
@@ -1345,21 +1316,40 @@ function drawChart() {
     formatMonth: monthLabel,
     monthNumber: F.monthIndex,
   };
-  drawResizing(box, () => renderChart(box, options));
+  const charts = [];
+  const path = document.getElementById("chart-path");
+  if (path) {
+    // What FI needs at the latest month's end, as the projection's goals.
+    const pathOptions = { ...options, view: "path", fiNumber: outlook(state.store).fiNumber, projection: projection() };
+    charts.push([path, () => renderChart(path, pathOptions)]);
+  }
+  const history = document.getElementById("chart-history");
+  if (history) {
+    const historyOptions = { ...options, view: "history", fiNumber: chartGoal(m), projection: null };
+    charts.push([history, () => renderChart(history, historyOptions)]);
+  }
+  if (charts.length) drawResizing(...charts);
 }
 
-// Draws a chart, and again whenever its box changes width.
+// Draws charts, given as [box, draw], and each again whenever its box
+// changes width. Replaces the charts drawn before.
 let resizeObserver = null;
-function drawResizing(box, draw) {
-  draw();
+function drawResizing(...charts) {
   resizeObserver?.disconnect();
-  let width = box.clientWidth;
-  resizeObserver = new ResizeObserver(() => {
-    if (Math.abs(box.clientWidth - width) < 2) return;
-    width = box.clientWidth;
+  const drawn = new Map();
+  for (const [box, draw] of charts) {
     draw();
+    drawn.set(box, { width: box.clientWidth, draw });
+  }
+  resizeObserver = new ResizeObserver((entries) => {
+    for (const { target } of entries) {
+      const chart = drawn.get(target);
+      if (Math.abs(target.clientWidth - chart.width) < 2) continue;
+      chart.width = target.clientWidth;
+      chart.draw();
+    }
   });
-  resizeObserver.observe(box);
+  for (const box of drawn.keys()) resizeObserver.observe(box);
 }
 
 // ---------------------------------------------------------------- expenses and income
@@ -2158,7 +2148,7 @@ function drawForecast(focus = false) {
   const outs = [plan.runsOut.low, plan.runsOut.mid].filter((month) => month !== null).map(index);
   const rate = (g) => percentUnit.format(o.rates[g]);
   const short = (cents) => axisMoney(Math.abs(cents) >= 100000000 ? cents : Math.round(cents / 100000) * 100000);
-  drawResizing(box, () =>
+  drawResizing([box, () =>
     renderForecast(box, {
       months: result.months,
       row,
@@ -2168,7 +2158,7 @@ function drawForecast(focus = false) {
       formatShort: short,
       formatAxis: axisMoney,
       formatMonth: monthLabel,
-    }));
+    })]);
 }
 
 // Pay in more or less: a bar for each amount a month, from now to when you
