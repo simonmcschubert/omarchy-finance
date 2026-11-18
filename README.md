@@ -375,22 +375,24 @@ and what is left over, or says how much more than the income those two take.
 **When can you stop?** Four answers, a card each, and each answer is a
 plan:
 
-| Card | Plan | Its line |
-| --- | --- | --- |
-| Stop investing · now (or the age of Coast FI) | investing until Coast FI, then coasting: working, and paying in only the amount set for after Coast FI in Settings (default 0), then retired from the retirement age | what you no longer pay in then (“+1.400 €/month”) |
-| Stop working · 53 (the age FI is reached) | investing until FI, then retired from the month after | how many years before the retirement age |
-| Even at 6 % · 56 | investing until January of the first age from which the money lasts to 120 even at the low growth, then retired. Only when stopping at FI runs out at the low growth; “–” when no age before the retirement age lasts | how many years after FI |
-| At the latest · 67 (the retirement age) | investing until retirement, then retired | how much more the portfolio could pay a month from then, in today's money, and still last at the low growth (“+1.870 €/month to spare”) |
+| Card | Plan |
+| --- | --- |
+| Stop investing · now (or the age of Coast FI) | investing until Coast FI, then coasting: working, and paying in only the amount set for after Coast FI in Settings (default 0), then retired from the retirement age |
+| Stop working · 53 (the age FI is reached) | investing until FI, then retired from the month after |
+| Even at 6 % · 56 | investing until January of the first age from which the money lasts to 120 even at the low growth, then retired. Only when stopping at FI runs out at the low growth; “–” when no age before the retirement age lasts |
+| At the latest · 67 (the retirement age) | investing until retirement, then retired |
 
-Each card says whether that plan's money lasts to 120: a check when it does
-even at the low growth (6 % by default), a warning triangle when it runs out
-at the low growth only (“6 %: empty at 83”), a cross when it runs out at the
+Under the age, each card says whether that plan's money lasts: “Lasts to
+120” even at the low growth (6 % by default), “6 %: empty at 83” when it
+runs out at the low growth only, “Empty at 90” when it runs out at the
 expected return. A plan that doesn't happen before retirement says “Not
 before 67”. Once retired, one card says so.
 
 Click a card, or move with the arrow keys, to see its plan in the card
-below: its name, its bar on an age line from now to 120, and its chart. The
-plan picked stays picked in this browser.
+below (the picked card has a bright border and corner): its name, with a
+check, warning or cross for whether the money lasts, its bar on an age line
+from now to 120, and its chart. The plan picked stays picked in this
+browser.
 
 Each phase is a stretch of the bar: **Investing** (blue) with what is paid
 in a month, as planned in Settings (`+1.400 € → 2.000 €/month`),

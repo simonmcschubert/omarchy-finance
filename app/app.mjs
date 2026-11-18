@@ -1729,11 +1729,11 @@ const phaseKey = (kind) => h("span", { class: `phase-key ${kind}` }, PHASE_NAMES
 // each a plan, and the picked plan's bar. null without a year of birth.
 // Otherwise { result, o, cards, rows }: cards in the order shown, each {
 // key, question, answer ("now", an age, or null when the plan doesn't
-// happen before retirement), line (its own, or null), level, label
-// (whether the money lasts), title (the same, longer) }; rows: the bar of
+// happen before retirement), level, label (whether the money lasts, or
+// that it doesn't happen), title (longer) }; rows: the bar of
 // each plan that happens, by key, with its name and phases' segments.
 function forecastPlans(store) {
-  const { birthYear, retirementAge, coastPayIn } = store.settings;
+  const { birthYear, retirementAge } = store.settings;
   const o = outlook(store);
   const result = o.plans(inTodaysMoney() ? "today" : "nominal");
   if (!result) return null;
@@ -1793,33 +1793,23 @@ function forecastPlans(store) {
     rows[plan.key] = { name: name(plan), level: s.level, title: s.title, label: s.out ? s.out.text : `Lasts to ${F.SHOWN_AGE}`, out: s.out, segments: segments(plan), plan };
   }
 
-  const years = (n) => `${n} year${n === 1 ? "" : "s"}`;
-  const spare = (plan) => (plan.spare > 0 ? `+${money(plan.spare)}/month to spare` : "nothing to spare");
-  const card = (key, question, answer, line) => {
+  // A plan that doesn't happen before retirement says so instead.
+  const card = (key, question, answer) => {
     const row = rows[key];
     return row
-      ? { key, question, answer, line, level: row.level, label: row.label, title: row.title }
-      : { key, question, answer: null, line: `Not before ${retirementAge}`, level: null, label: null, title: null };
+      ? { key, question, answer, level: row.level, label: row.label, title: row.title }
+      : { key, question, answer: null, level: null, label: `Not before ${retirementAge}`, title: null };
   };
   let cards;
   if (o.retired) {
-    cards = [card("keep", "Retired", "now", spare(plans.keep))];
+    cards = [card("keep", "Retired", "now")];
   } else {
-    const { coast, fi, safe, keep } = plans;
-    // What coasting stops paying in: the pay-in planned for its first month
-    // (the month after the latest, when coasting from now), less what it
-    // still pays in, both in today's money when pay-ins rise with inflation
-    // (the coast pay-in stays the same amount of money).
-    const coasting = coast.phases.find((phase) => phase.kind === "coast");
-    const firstPaid = coasting && Math.max(1, coasting.from);
-    const planned = coasting && keep.phases[0].steps.find((step) => step.from <= firstPaid && firstPaid < step.to);
-    const still = store.settings.payInsRiseWithInflation && coasting ? F.deflated(coastPayIn, store.settings.inflation, firstPaid) : coastPayIn;
-    const stops = planned ? Math.round(planned.amount - still) : 0;
+    const { coast, fi, safe } = plans;
     cards = [
-      card("coast", "Stop investing", coast.retires && when(coastsFrom(coast)), stops > 0 ? `+${money(stops)}/month` : null),
-      card("fi", "Stop working", fi.retires && when(fi.retires), fi.retires && `${years(retirementAge - age(fi.retires))} before ${retirementAge}`),
-      safe ? card("safe", `Even at ${low}`, safe.retires && String(age(safe.retires)), safe.retires && `${years(age(safe.retires) - age(fi.retires))} later`) : null,
-      card("keep", "At the latest", String(retirementAge), spare(keep)),
+      card("coast", "Stop investing", coast.retires && when(coastsFrom(coast))),
+      card("fi", "Stop working", fi.retires && when(fi.retires)),
+      safe ? card("safe", `Even at ${low}`, safe.retires && String(age(safe.retires))) : null,
+      card("keep", "At the latest", String(retirementAge)),
     ].filter(Boolean);
   }
   return { result, o, cards, rows };
@@ -1840,10 +1830,10 @@ function viewForecast() {
   const rate = (g) => percentUnit.format(o.rates[g]);
   const about = info("when you can stop",
     h("ul", null,
-      h("li", null, `Stop investing: from then on, ${coastPayIn > 0 ? `paying in ${money(coastPayIn)} a month` : "without paying in"}, the portfolio still reaches the FI number by ${retirementAge} (Coast FI). Under it, what you no longer pay in.`),
+      h("li", null, `Stop investing: from then on, ${coastPayIn > 0 ? `paying in ${money(coastPayIn)} a month` : "without paying in"}, the portfolio still reaches the FI number by ${retirementAge} (Coast FI).`),
       h("li", null, "Stop working: as soon as the portfolio reaches the FI number."),
       h("li", null, `Even at ${rate("low")}: the first age, from January, at which stopping work lasts to ${F.SHOWN_AGE} with only ${rate("low")} growth. Shown when stopping at FI runs out then.`),
-      h("li", null, "At the latest: the retirement age, set in ", settingsLink("general"), `. To spare: how much more the portfolio could pay a month from then, in today's money, and still last at ${rate("low")}.`),
+      h("li", null, "At the latest: the retirement age, set in ", settingsLink("general"), "."),
       h("li", null, `Each plan at the expected return, ${rate("mid")} a year before inflation. The band and the ${rate("low")} result keep the same dates, with ${rate("low")} to ${rate("high")} growth.`),
       h("li", null, "Growth is the same every year. Real markets are not, and bad years right after you stop working hurt most."),
       h("li", null, `Amounts a month are as you entered them: pay-ins as in `, settingsLink("data"), ", and what the portfolio pays in today's money, the expenses with buffer less the income that counts then."),
@@ -1885,8 +1875,7 @@ function drawForecast(focus = false) {
       disabled: c.answer === null, title: c.title, "data-key": c.key, onclick: () => { if (!on) pick(c.key); } },
       h("span", { class: "tile-label" }, c.question),
       h("span", { class: "tile-value" }, c.answer ?? "–"),
-      c.level ? h("span", { class: `answer-status ${c.level}` }, statusBadge(c.level), c.label) : null,
-      c.line ? h("span", { class: "tile-detail" }, c.line) : null);
+      h("span", { class: `answer-status ${c.level ?? "none"}` }, c.label));
   });
   const enabled = buttons.filter((b) => !b.disabled);
   for (const b of enabled) {
