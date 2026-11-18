@@ -2017,6 +2017,32 @@ test("forecast: a plan lasts only when money is left at age 120", () => {
   assert.ok(lasting.values.at(-1) > 0, "still money at 120");
 });
 
+test("forecast: needs is what a month-end value has to top for the money to last", () => {
+  // 30 × the yearly expenses at 3 %: Retire early, from now, runs out.
+  const fi = F.forecast(plan({ value: 2000 * EUR * 12 * 30, growth: 3 })).plans.fi;
+  assert.notEqual(fi.runsOut, null);
+  assert.equal(fi.needs.length, fi.values.length);
+  assert.equal(fi.needs.at(-1), 0, "nothing more is needed at the end");
+  assert.ok(fi.needs[0] > fi.values[0]);
+  // A euro more at the start lasts, a euro less runs out.
+  const from = (value) => F.forecast(plan({ value, growth: 3 })).plans.fi;
+  assert.equal(from(fi.needs[0] + EUR).runsOut, null);
+  assert.notEqual(from(fi.needs[0] - EUR).runsOut, null);
+  // Later on too, with what the run pays in and takes out after then: here
+  // a one-off in January 2040 tops up Keep investing, which runs out on
+  // 2,500 a month.
+  const keep = F.forecast(plan({ growth: 3, expenses: 2500 * EUR })).plans.keep;
+  assert.notEqual(keep.runsOut, null);
+  const k = F.monthIndex("2040-01") - F.monthIndex("2026-10");
+  const topped = (extra) => F.forecast(plan({ growth: 3, expenses: 2500 * EUR, oneOffs: (i) => (i === F.monthIndex("2040-01") ? extra : 0) })).plans.keep;
+  assert.equal(topped(keep.needs[k] - keep.values[k] + EUR).runsOut, null);
+  assert.notEqual(topped(keep.needs[k] - keep.values[k] - EUR).runsOut, null);
+  // A plan that lasts has more than it needs.
+  const lasting = F.forecast(plan({ value: 2000 * EUR * 12 * 40, growth: 3 })).plans.fi;
+  assert.equal(lasting.runsOut, null);
+  assert.ok(lasting.needs[0] < lasting.values[0]);
+});
+
 test("forecast: fixed dates run the plans of the expected return at another growth", () => {
   const mid = F.forecast(plan());
   const fixed = { coast: mid.plans.coast.coastMonth, fi: mid.plans.fi.fiMonth };
@@ -2112,11 +2138,40 @@ test("fiOutlook plans: each plan's phases, with a pension as a step while retire
   assert.deepEqual(stopAfter(safe.stopInvesting).values, safe.values.low);
   assert.notEqual(stopAfter(F.addMonths(safe.stopInvesting, -12)).runsOut, null, "a year sooner runs out at 3 %");
 
+  // What would make Retire early last even at 3 %: the value at its turn,
+  // the end of its last month paid in. A euro more there lasts, a euro less
+  // runs out.
+  const turn = at(fi.stopInvesting);
+  const topped = (extra) => F.forecast({
+    start: "2026-10", value: 200000 * EUR, birthYear: 1990, retirementAge: 67, inflation: 0, growth: 3, coastContribution: 0,
+    contribution: (i) => (i >= F.monthIndex("2035-01") ? 1500 : 1000) * EUR, need: (i, from) => F.needIn(s, i, from), goal: () => 0,
+    fixed: { coast: null, fi: fi.stopInvesting }, oneOffs: (i) => (i === F.monthIndex(fi.stopInvesting) ? extra : 0),
+  }).plans.fi;
+  assert.deepEqual(topped(0).values, fi.values.low);
+  assert.equal(topped(fi.lastsWith.low - fi.values.low[turn] + EUR).runsOut, null);
+  assert.notEqual(topped(fi.lastsWith.low - fi.values.low[turn] - EUR).runsOut, null);
+  // It runs out at 3 %, so 3 % falls short of it then; at 5 % it lasts,
+  // with more than it needs. Here 5 % has more then than 3 % needs: what
+  // is short is 3 %'s slower growth until then.
+  assert.ok(fi.values.low[turn] < fi.lastsWith.low);
+  assert.equal(fi.runsOut.mid, null);
+  assert.ok(fi.lastsWith.mid < fi.values.mid[turn]);
+  assert.ok(fi.lastsWith.low < fi.values.mid[turn]);
+  // Coasting from now turns now: what it needs is what it has to be now.
+  assert.equal(coast.lastsWith.low, F.forecast({
+    start: "2026-10", value: 200000 * EUR, birthYear: 1990, retirementAge: 67, inflation: 0, growth: 3, coastContribution: 0,
+    contribution: 1000 * EUR, need: (i, from) => F.needIn(s, i, from), goal: () => 0, fixed: { coast: "2026-10", fi: null },
+  }).plans.coast.needs[0]);
+  // The safe plan lasts at 3 %: it has more than it needs then.
+  assert.ok(safe.lastsWith.low < safe.values.low[at(safe.stopInvesting)]);
+
   // Today's money: the values without the inflation since the start.
   const prices = F.fiOutlook({ ...s, settings: { ...s.settings, inflation: 2 } }, "2026-11");
   const nominal = prices.plans("nominal").plans[2].values.mid;
   const today = prices.plans("today").plans[2].values.mid;
   close(today[120], F.deflated(nominal[120], 2, 120), "today's money");
+  const [nominalKeep, todayKeep] = ["nominal", "today"].map((kind) => prices.plans(kind).plans[2]);
+  close(todayKeep.lastsWith.low, F.deflated(nominalKeep.lastsWith.low, 2, at(nominalKeep.stopInvesting)), "what it needs, in today's money");
 });
 
 test("fiOutlook plans: a step while retired when the share changes, even if the amount doesn't", () => {

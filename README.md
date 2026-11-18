@@ -411,6 +411,13 @@ orange to the end. Nothing in the forecast needs a pension.
 Where the money runs out, the portfolio's part of the bar turns red
 (“6 %: empty at 83”); other income goes on.
 
+When the picked plan runs out, a line under its name says what would make
+it last anyway: “Lasts even at 6 % with 781.000 € at 53 (+242.000 €)”.
+That is the portfolio it would need when it stops investing or working
+(now, for a plan that stops now) for the money to last to 120 with only
+the low growth from then on, up to whole thousands; in brackets, how much
+more that is than it would have then at the low growth.
+
 The chart under the bar is on the same age line: the portfolio at the
 expected return, colored by phase, with a band from 2 points less to 2
 points more growth. The band and the low and high results keep the plan's

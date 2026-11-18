@@ -984,6 +984,28 @@ main > div {
   gap: 8px;
 }
 
+/* Under the plan's name, when it runs out: what would make it last. */
+.plan-head {
+  margin-right: auto;
+}
+
+.plan-need {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+
+.plan-need.risk {
+  color: var(--risk-text);
+}
+
+.plan-need.bad {
+  color: var(--bad-text);
+}
+
+.plan-need-more {
+  color: var(--fg);
+}
+
 .forecast-box .plan-bars {
   margin-bottom: 4px;
 }

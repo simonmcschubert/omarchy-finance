@@ -1939,7 +1939,9 @@ const phaseKey = (kind) => h("span", { class: `phase-key ${kind}` }, PHASE_NAMES
 // key, question, answer ("now", an age, or null when the plan doesn't
 // happen before retirement), level, label (whether the money lasts, or
 // that it doesn't happen), title (longer) }; rows: the bar of
-// each plan that happens, by key, with its name and phases' segments.
+// each plan that happens, by key, with its name and phases' segments, and
+// need: when it runs out, what would make it last even at the low growth
+// ({ text, more }), else null.
 function forecastPlans(store) {
   const { birthYear, retirementAge } = store.settings;
   const o = outlook(store);
@@ -1994,11 +1996,23 @@ function forecastPlans(store) {
       end: plan.values.mid[phase.to - 1],
     }];
   });
+  // What the portfolio would need at the plan's turn to last even at the
+  // low growth, up to whole thousands, and how much more that is than it
+  // has then at the low growth. That is more for every plan that runs out
+  // then; what it has at the expected return may not be, when the slower
+  // growth before the turn is what falls short.
+  const up = (cents) => Math.ceil(cents / 100000) * 100000;
+  const need = (plan) => {
+    const value = up(plan.lastsWith.low);
+    const more = up(value - plan.values.low[plan.stopInvesting === null ? 0 : index(plan.stopInvesting)]);
+    const at = when(coastsFrom(plan));
+    return { text: `Lasts even at ${low} with ${money(value)} ${at === "now" ? "now" : `at ${at}`}`, more: more > 0 ? `(${signedMoney(more)})` : null };
+  };
   const rows = {};
   for (const plan of result.plans) {
     if (plan.retires === null) continue;
     const s = status(plan);
-    rows[plan.key] = { name: name(plan), level: s.level, title: s.title, label: s.out ? s.out.text : `Lasts to ${F.SHOWN_AGE}`, out: s.out, segments: segments(plan), plan };
+    rows[plan.key] = { name: name(plan), level: s.level, title: s.title, label: s.out ? s.out.text : `Lasts to ${F.SHOWN_AGE}`, out: s.out, segments: segments(plan), need: s.out ? need(plan) : null, plan };
   }
 
   // A plan that doesn't happen before retirement says so instead.
@@ -2042,6 +2056,7 @@ function viewForecast() {
       h("li", null, "Stop working: as soon as the portfolio reaches the FI number."),
       h("li", null, `Even at ${rate("low")}: the first age, from January, at which stopping work lasts to ${F.SHOWN_AGE} with only ${rate("low")} growth. Shown when stopping at FI runs out then.`),
       h("li", null, "At the latest: the retirement age, set in ", settingsLink("general"), "."),
+      h("li", null, `Lasts even at ${rate("low")} with: what a plan that runs out at ${rate("low")} would need when it stops investing or working, to last to ${F.SHOWN_AGE} with only ${rate("low")} growth from then on. In brackets, how much more that is than it would have then at ${rate("low")}.`),
       h("li", null, `Each plan at the expected return, ${rate("mid")} a year before inflation. The band and the ${rate("low")} result keep the same dates, with ${rate("low")} to ${rate("high")} growth.`),
       h("li", null, "Growth is the same every year. Real markets are not, and bad years right after you stop working hurt most."),
       h("li", null, `Amounts a month are as you entered them: pay-ins as in `, settingsLink("data"), ", and what the portfolio pays in today's money, the expenses with buffer less the income that counts then."),
@@ -2053,7 +2068,9 @@ function viewForecast() {
     h("div", { id: "forecast-answers", class: "answers", role: "radiogroup", "aria-label": "When can you stop?" }),
     h("section", { class: "card forecast" },
       h("div", { class: "card-head" },
-        h("h2", { id: "forecast-title", class: "plan-title" }),
+        h("div", { class: "plan-head" },
+          h("h2", { id: "forecast-title", class: "plan-title" }),
+          h("p", { id: "forecast-need", class: "plan-need", hidden: true })),
         h("div", { id: "forecast-keys", class: "phase-keys" })),
       h("div", { id: "forecast-chart", class: "forecast-box" })));
 }
@@ -2102,6 +2119,10 @@ function drawForecast(focus = false) {
   const row = rows[picked.key];
   const { plan } = row;
   document.getElementById("forecast-title").replaceChildren(statusBadge(row.level), row.name);
+  const need = document.getElementById("forecast-need");
+  need.hidden = row.need === null;
+  need.className = `plan-need ${row.level}`;
+  need.replaceChildren(...(row.need ? [row.need.text, row.need.more && " ", row.need.more && h("span", { class: "plan-need-more" }, row.need.more)].filter(Boolean) : []));
   const kinds = new Set(plan.phases.map((phase) => phase.kind));
   const other = plan.phases.some((phase) => phase.steps.some((step) => step.share !== undefined && step.share < 0.999));
   document.getElementById("forecast-keys").replaceChildren(...["invest", "coast", "retired"].filter((k) => kinds.has(k)).map(phaseKey), ...(other ? [phaseKey("other")] : []));
