@@ -129,6 +129,13 @@ The low and high growth run each plan with the dates of the expected
 return, so they show what happens to the same plan. A plan **lasts** when
 money is left at the end of age 120 (`SHOWN_AGE`), where the forecast ends.
 
+**Lasts even at** (`lastsWith`): what the portfolio would need at a plan's
+_turn_, the end of its last month paid in in full (now when there is none),
+for the plan to last with the low growth from then on. Under the name of a
+picked plan that runs out: “Lasts even at 6 % with 781.000 € at 53
+(+242.000 €)”, the bracket being how much more that is than the plan has
+then at the low growth. `forecast()`'s _needs_ give it for every month.
+
 **Phases**: _Investing_, _Coasting_ and _Retired_. A pension or other
 income that starts, or an expense that ends, is a _step_ inside Retired,
 never a phase: what the portfolio pays a month changes there, and the

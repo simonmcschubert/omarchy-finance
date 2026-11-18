@@ -1290,7 +1290,10 @@ export function ageIn(month, birthYear) {
 // coast, fi } } where each plan is { values: one per shown
 // month, coastMonth, fiMonth (when reached, or null), atRetirement (value
 // when retirement starts, or null if it has already), runsOut (the first
-// month with nothing left, or null if it lasts) }.
+// month with nothing left, or null if it lasts), needs: one per shown
+// month, what the value at the end of that month has to be more than for
+// the money to last to the end, with what this run pays in and takes out
+// after it (0: any value lasts; one-offs taken out count in full) }.
 export function forecast(params) {
   const { start, value, expenses, fiNumber, birthYear, retirementAge, growth, inflation = 0, contribution, coastContribution } = params;
   const need = params.need ?? (() => expenses);
@@ -1346,6 +1349,7 @@ export function forecast(params) {
     let retiredFrom = retirement; // Retire early's is the month after FI
     let atRetirement = first === retirement - 1 ? v : null;
     const values = [v];
+    const flows = [0]; // what each month pays in, or takes out (below 0)
     // Milestones are checked on month-end values, and change what is paid
     // from the next month on. FI is reached when the value at the end of a
     // month reaches the FI number of retiring the month after, in the
@@ -1379,7 +1383,10 @@ export function forecast(params) {
     check(first);
     for (let index = first + 1; index <= lastShown; index++) {
       const out = phase === "out" || index >= retirement;
-      v = v * (1 + rate) + (out ? -expensesAt(index, retiredFrom) : phase === "coast" ? coastContribution : paidIn(index)) + onceAt(index);
+      const flow = out ? -expensesAt(index, retiredFrom) : phase === "coast" ? coastContribution : paidIn(index);
+      const once = onceAt(index);
+      v = v * (1 + rate) + flow + once;
+      flows.push(flow + once);
       if (v <= 0) {
         v = 0;
         if (out) runsOut ??= monthFromIndex(index);
@@ -1388,7 +1395,11 @@ export function forecast(params) {
       values.push(v);
       check(index);
     }
-    return { values, coastMonth, fiMonth, atRetirement, runsOut };
+    // From the end back: what a month-end value has to be more than so
+    // that the next month's starts with what that one needs.
+    const needs = values.map(() => 0);
+    for (let k = values.length - 1; k > 0; k--) needs[k - 1] = Math.max(0, (needs[k] - flows[k]) / (1 + rate));
+    return { values, coastMonth, fiMonth, atRetirement, runsOut, needs };
   };
 
   const ahead = retires && first < retirement;
@@ -1417,7 +1428,7 @@ function inTodaysMoney(result, inflation) {
     goal: result.goal.map(at),
     fiAtRetirement: at(result.fiAtRetirement, before),
     plans: Object.fromEntries(Object.entries(result.plans).map(([name, plan]) =>
-      [name, { ...plan, values: plan.values.map(at), atRetirement: at(plan.atRetirement, before) }])),
+      [name, { ...plan, values: plan.values.map(at), needs: plan.needs.map(at), atRetirement: at(plan.atRetirement, before) }])),
   };
 }
 
@@ -1608,6 +1619,10 @@ export function fiOutlook(store, now = currentMonth()) {
     //     values: { low, mid, high }, one per shown month,
     //     runsOut: { low, mid, high }, the first month with nothing left, or
     //       null when money is left at the end of SHOWN_AGE,
+    //     lastsWith: { low, mid, high }, what the portfolio has to be more
+    //       than at its turn, the end of stopInvesting (of start when that
+    //       is null), for the money to last to the end of SHOWN_AGE with
+    //       the plan's course from there on: forecast()'s needs,
     //     phases: [{ kind: "invest", "coast" or "retired", from, to (indexes
     //       of shown months; the last phase ends at months.length),
     //       steps }] }] }
@@ -1687,12 +1702,18 @@ export function fiOutlook(store, now = currentMonth()) {
         return { kind: "retired", from, to: n, steps };
       };
       // A plan `key` as forecast() ran it as `plan` in the runs of `set`.
-      const describe = (key, stopInvesting, retires, phases, set = results, plan = key) => ({
-        key, stopInvesting, retires,
-        values: Object.fromEntries(GROWTHS.map((g) => [g, inMoney(set[g], kind).plans[plan].values])),
-        runsOut: Object.fromEntries(GROWTHS.map((g) => [g, set[g].plans[plan].runsOut])),
-        phases: phases.filter((p) => p.to > p.from),
-      });
+      const describe = (key, stopInvesting, retires, phases, set = results, plan = key) => {
+        const turn = stopInvesting === null ? 0 : monthIndex(stopInvesting) - first;
+        const runs = Object.fromEntries(GROWTHS.map((g) => [g, inMoney(set[g], kind).plans[plan]]));
+        const each = (f) => Object.fromEntries(GROWTHS.map((g) => [g, f(runs[g], g)]));
+        return {
+          key, stopInvesting, retires,
+          values: each((run) => run.values),
+          runsOut: each((_, g) => set[g].plans[plan].runsOut),
+          lastsWith: each((run) => run.needs[turn]),
+          phases: phases.filter((p) => p.to > p.from),
+        };
+      };
       // Stops working after the month `last`: invests until then, and
       // lives off the portfolio from the month after.
       const stopping = (key, last, set) => describe(key, monthIndex(last) > first ? last : null, monthFromIndex(monthIndex(last) + 1), [
