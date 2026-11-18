@@ -223,14 +223,30 @@ function field(text, control, ...help) {
 // buttons. onpick(month, left), for a field that switches what the page
 // shows: called when a month is typed or picked; Enter in the field then
 // picks instead of submitting the form. `left` is true when the month was
-// typed and the field left (Tab or a click elsewhere): onpick then runs
-// once the focus has moved on.
+// typed and the field left (Tab or a click elsewhere, not into its picker):
+// onpick then runs once the focus has moved on and a click is done, and
+// not when that click drew the page again.
 const CALENDAR = ["M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z", "M4 10h16", "M8 3v4", "M16 3v4"];
 let monthNames = null;
 const monthName = (i) => (monthNames ??= Array.from({ length: 12 }, (_, k) => new Intl.DateTimeFormat(locale, { month: "short" }).format(new Date(2026, k, 1))))[i];
 const monthLong = (month) => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1));
 const MONTH_HINT = "the month's number and the year, such as 1 2027";
 const MONTH_ERROR = `Enter ${MONTH_HINT}.`;
+// Whether a mouse button or a finger is down, for a month field left by a
+// click: runs `then` once it is up and the click is done.
+let pointerDown = false;
+addEventListener("pointerdown", () => { pointerDown = true; }, true);
+for (const type of ["pointerup", "pointercancel"]) addEventListener(type, () => { pointerDown = false; }, true);
+function afterClick(then) {
+  if (!pointerDown) return setTimeout(then);
+  const done = () => {
+    removeEventListener("pointerup", done, true);
+    removeEventListener("pointercancel", done, true);
+    setTimeout(then);
+  };
+  addEventListener("pointerup", done, true);
+  addEventListener("pointercancel", done, true);
+}
 let monthFieldCount = 0;
 function monthField({ id = null, name, value = "", label = null, required = false, onpick = null }) {
   const popId = `month-pop-${++monthFieldCount}`;
@@ -253,21 +269,25 @@ function monthField({ id = null, name, value = "", label = null, required = fals
     check();
     if (month === last) return;
     last = month;
-    if (onpick && left) setTimeout(() => onpick(month, true));
-    else onpick?.(month, false);
+    onpick?.(month, left);
   };
   const typed = () => F.parseMonth(input.value);
-  // From an empty field, ↑ or ↓ goes to this month; never past the years
-  // a month can have.
+  // From an empty field, ↑ or ↓ goes to this month; never past year 9999.
   const step = (n) => {
     const month = typed() ? F.addMonths(typed(), n) : F.currentMonth();
     if (F.parseMonth(F.monthToText(month))) pick(month);
   };
 
   input.addEventListener("input", check);
+  // Left, the month shows as 01/2027.
   input.addEventListener("change", () => {
-    const month = typed();
-    if (month) pick(month, true);
+    if (!onpick && typed()) pick(typed());
+  });
+  wrap.addEventListener("focusout", (event) => {
+    if (!onpick || wrap.contains(event.relatedTarget)) return;
+    afterClick(() => {
+      if (input.isConnected && typed()) pick(typed(), true);
+    });
   });
   // All of it is selected on focus, so typing replaces it.
   input.addEventListener("focus", () => input.select());
@@ -349,7 +369,8 @@ function monthField({ id = null, name, value = "", label = null, required = fals
     draw();
   });
   pop.addEventListener("toggle", (event) => {
-    if (event.newState !== "open") return;
+    // Closed, it holds no buttons.
+    if (event.newState !== "open") return pop.replaceChildren();
     const selected = typed();
     pop.querySelector(`[data-month="${selected ?? today}"]`)?.focus();
   });
@@ -1733,11 +1754,14 @@ function viewPortfolio() {
         state.focus = "#month-pick";
         return render();
       }
-      // Left: the focus goes on where it went, in the page for the month.
+      // Left: the focus goes on where it went, in the page for the month:
+      // the field of the same name, or else the control in the same place.
+      const to = document.activeElement;
       const controls = () => [...document.querySelectorAll("#main :is(a, button, input, select, textarea)")];
-      const at = controls().indexOf(document.activeElement);
+      const at = controls().indexOf(to);
       render();
-      if (at !== -1) controls()[at]?.focus();
+      const same = to?.name ? document.querySelector(`#main [name="${CSS.escape(to.name)}"]`) : null;
+      (same ?? controls()[at])?.focus();
     } }))),
     store.accounts.length === 0
       ? h("p", { class: "muted" }, "Add your ", settingsLink("data", "accounts"), " in Settings first, or ", settingsLink("export", "import past months"), " from a CSV file.")

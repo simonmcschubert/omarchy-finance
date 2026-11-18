@@ -596,7 +596,7 @@ export function parseDate(text) {
 // "01/2027", "1.2027" or only the digits, "12027" (five digits: a month
 // of one digit) or "012027"; or year first, "2027-01". The year has four
 // digits, so the digits alone are never ambiguous. Returns "YYYY-MM", or
-// null for any other text.
+// null for any other text or a month that is not 1 to 12.
 export function parseMonth(text) {
   const s = String(text ?? "").trim();
   let m;
@@ -605,9 +605,8 @@ export function parseMonth(text) {
   if ((m = /^([0-9]{1,2})[\s./-]*([0-9]{4})$/.exec(s))) [month, year] = [m[1], m[2]];
   else if ((m = /^([0-9]{4})\s*[./-]\s*([0-9]{1,2})$/.exec(s))) [year, month] = [m[1], m[2]];
   else return null;
-  const y = Number(year);
   const mo = Number(month);
-  if (mo < 1 || mo > 12 || y < 1900 || y > 2200) return null;
+  if (mo < 1 || mo > 12) return null;
   return `${year}-${String(mo).padStart(2, "0")}`;
 }
 

@@ -177,14 +177,14 @@ test("parseMonth reads the month's number, then a four-digit year; or year first
     "2027-01": "2027-01",
     "2027-1": "2027-01",
     "2027.12": "2027-12",
-    "12 1900": "1900-12",
-    "1 2200": "2200-01",
+    "12 1899": "1899-12", // any four-digit year, as stored months have
+    "1 2201": "2201-01",
   };
   for (const [text, month] of Object.entries(cases)) assert.equal(F.parseMonth(text), month, text);
   const wrong = [
     "", "2027", "1", "12", "1202", // no year yet
     "0 2027", "13 2027", "132027", "002027", "2027-13", "2027-0", // no such month
-    "1 1899", "1 2201", "1 27", "1/27", "202701", // years of four digits from 1900 to 2200, after the month without a separator
+    "1 27", "1/27", "1 20270", "202701", // a year of four digits, after the month without a separator
     "Jan 2027", "1/2027/1", "1 2027 x", "1,2027",
   ];
   for (const text of wrong) assert.equal(F.parseMonth(text), null, text);

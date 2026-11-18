@@ -183,6 +183,10 @@ code {
   border-radius: 6px;
 }
 
+.month-field[hidden] {
+  display: none;
+}
+
 .month-field:has(.month-text:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
