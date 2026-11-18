@@ -2,7 +2,7 @@
 // time, and saves every change straight away.
 
 import * as F from "./finance.mjs";
-import { goalVisible, renderChart, renderForecast } from "./chart.mjs";
+import { goalVisible, renderChart, renderForecast, statusBadge } from "./chart.mjs";
 import { startUpdates } from "./update.mjs";
 
 // ---------------------------------------------------------------- formatting
@@ -919,8 +919,8 @@ function milestonesCard(m) {
     coast && { name: "Coast FI", what: `stop investing, FI at ${retirementAge}`, number: coast.fiNumber, progress: coast.progress, months: coast.months, never,
       about: [`Once the portfolio has this much, you can stop investing: it still grows to the FI number by ${retirementAge}, ${money(coast.fiAtRetirement)} by then.`,
         store.settings.coastPayIn > 0
-          ? ["The Coast plan of the ", h("a", { href: "#forecast" }, "Forecast"), ` pays in ${money(store.settings.coastPayIn)} a month after it, as set in `, settingsLink("data"), "."]
-          : ["As in the Coast plan of the ", h("a", { href: "#forecast" }, "Forecast"), "."]] },
+          ? ["The ", h("a", { href: "#forecast" }, "Forecast"), `'s Stop investing pays in ${money(store.settings.coastPayIn)} a month after it, as set in `, settingsLink("data"), "."]
+          : ["As the ", h("a", { href: "#forecast" }, "Forecast"), "'s Stop investing counts it."]] },
     lean && { name: "Lean FI", what: "essential expenses only", number: lean.fiNumber, progress: lean.progress, months: lean.months, never,
       about: ["FI on the leanest budget: the FI number, worked out the same way, with only the expenses marked Essential.",
         ["Mark them on the ", h("a", { href: "#expenses" }, "Expenses"), " page."]] },
@@ -1721,14 +1721,19 @@ function returnsCard(store) {
 
 // ---------------------------------------------------------------- forecast
 
-// The phases, as the key above the bars names them.
+// The phases, as the key names them.
 const PHASE_NAMES = { invest: "Investing", coast: "Coasting", retired: "Retired", other: "Other income" };
+const phaseKey = (kind) => h("span", { class: `phase-key ${kind}` }, PHASE_NAMES[kind]);
 
-// The plans, as the bars and the chart show them: names by what you do,
-// whether the money lasts, and the phases with their amounts. null without
-// a year of birth.
+// The plans, as the page shows them: the answers to "When can you stop?",
+// each a plan, and the picked plan's bar. null without a year of birth.
+// Otherwise { result, o, cards, rows }: cards in the order shown, each {
+// key, question, answer ("now", an age, or null when the plan doesn't
+// happen before retirement), line (its own, or null), level, label
+// (whether the money lasts), title (the same, longer) }; rows: the bar of
+// each plan that happens, by key, with its name and phases' segments.
 function forecastPlans(store) {
-  const { birthYear, retirementAge } = store.settings;
+  const { birthYear, retirementAge, coastPayIn } = store.settings;
   const o = outlook(store);
   const result = o.plans(inTodaysMoney() ? "today" : "nominal");
   if (!result) return null;
@@ -1737,16 +1742,16 @@ function forecastPlans(store) {
   const age = (month) => F.ageIn(month, birthYear);
   const low = percentUnit.format(o.rates.low);
   const perMonth = (cents, sign) => `${sign}${money(cents)}/month`;
+  const plans = Object.fromEntries(result.plans.map((plan) => [plan.key, plan]));
+  // The first month without pay-ins: the month after the last one.
+  const coastsFrom = (plan) => (plan.stopInvesting === null ? months[1] : F.addMonths(plan.stopInvesting, 1));
+  const when = (month) => (month === months[1] ? "now" : String(age(month)));
 
   const name = (plan) => {
     if (o.retired) return "Retired";
-    if (plan.key === "keep") return `Work to ${retirementAge}`;
-    if (plan.key === "coast") {
-      if (plan.retires === null) return "Coast";
-      return plan.stopInvesting === null ? "Coast from now" : `Coast from ${age(F.addMonths(plan.stopInvesting, 1))}`;
-    }
-    if (plan.retires === null) return "Retire at FI";
-    return plan.retires === months[1] ? "Retire now" : `Retire at ${age(plan.retires)}`;
+    if (plan.key === "coast") return plan.stopInvesting === null ? "Stop investing now" : `Stop investing at ${age(coastsFrom(plan))}`;
+    if (plan.key === "keep") return `Stop working at ${retirementAge}`;
+    return plan.retires === months[1] ? "Stop working now" : `Stop working at ${age(plan.retires)}`;
   };
   // Lasts to SHOWN_AGE, even at the low growth; runs out at the low
   // growth only; or at the expected return too.
@@ -1781,12 +1786,43 @@ function forecastPlans(store) {
       end: plan.values.mid[phase.to - 1],
     }];
   });
-  const rows = result.plans.map((plan) => {
-    const missing = plan.retires === null;
-    const s = missing ? { level: null, title: "", out: null } : status(plan);
-    return { key: plan.key, name: name(plan), level: s.level, title: s.title, out: s.out, missing: missing ? `Not before ${retirementAge}` : null, segments: missing ? [] : segments(plan), plan };
-  });
-  return { result, rows, o };
+  const rows = {};
+  for (const plan of result.plans) {
+    if (plan.retires === null) continue;
+    const s = status(plan);
+    rows[plan.key] = { name: name(plan), level: s.level, title: s.title, label: s.out ? s.out.text : `Lasts to ${F.SHOWN_AGE}`, out: s.out, segments: segments(plan), plan };
+  }
+
+  const years = (n) => `${n} year${n === 1 ? "" : "s"}`;
+  const spare = (plan) => (plan.spare > 0 ? `+${money(plan.spare)}/month to spare` : "nothing to spare");
+  const card = (key, question, answer, line) => {
+    const row = rows[key];
+    return row
+      ? { key, question, answer, line, level: row.level, label: row.label, title: row.title }
+      : { key, question, answer: null, line: `Not before ${retirementAge}`, level: null, label: null, title: null };
+  };
+  let cards;
+  if (o.retired) {
+    cards = [card("keep", "Retired", "now", spare(plans.keep))];
+  } else {
+    const { coast, fi, safe, keep } = plans;
+    // What coasting stops paying in: the pay-in planned for its first month
+    // (the month after the latest, when coasting from now), less what it
+    // still pays in, both in today's money when pay-ins rise with inflation
+    // (the coast pay-in stays the same amount of money).
+    const coasting = coast.phases.find((phase) => phase.kind === "coast");
+    const firstPaid = coasting && Math.max(1, coasting.from);
+    const planned = coasting && keep.phases[0].steps.find((step) => step.from <= firstPaid && firstPaid < step.to);
+    const still = store.settings.payInsRiseWithInflation && coasting ? F.deflated(coastPayIn, store.settings.inflation, firstPaid) : coastPayIn;
+    const stops = planned ? Math.round(planned.amount - still) : 0;
+    cards = [
+      card("coast", "Stop investing", coast.retires && when(coastsFrom(coast)), stops > 0 ? `+${money(stops)}/month` : null),
+      card("fi", "Stop working", fi.retires && when(fi.retires), fi.retires && `${years(retirementAge - age(fi.retires))} before ${retirementAge}`),
+      safe ? card("safe", `Even at ${low}`, safe.retires && String(age(safe.retires)), safe.retires && `${years(age(safe.retires) - age(fi.retires))} later`) : null,
+      card("keep", "At the latest", String(retirementAge), spare(keep)),
+    ].filter(Boolean);
+  }
+  return { result, o, cards, rows };
 }
 
 function viewForecast() {
@@ -1799,31 +1835,34 @@ function viewForecast() {
       h("p", null, "How your portfolio could grow until you retire, and whether it lasts after. The forecast needs:"),
       h("ul", null, missing)));
   }
-  const { result, o } = forecastPlans(store);
-  const kinds = new Set(result.plans.flatMap((plan) => plan.phases.map((phase) => phase.kind)));
-  const other = result.plans.some((plan) => plan.phases.some((phase) => phase.steps.some((step) => step.share !== undefined && step.share < 0.999)));
-  const keyItem = (kind) => h("span", { class: `phase-key ${kind}` }, PHASE_NAMES[kind]);
-  const { inflation } = store.settings;
+  const { o } = forecastPlans(store);
+  const { inflation, coastPayIn, retirementAge } = store.settings;
   const rate = (g) => percentUnit.format(o.rates[g]);
-  const about = info("the forecast",
+  const about = info("when you can stop",
     h("ul", null,
-      h("li", null, `Each plan at the expected return, ${rate("mid")} a year before inflation. The band and the ${rate("low")} result keep the same plan, with ${rate("low")} to ${rate("high")} growth.`),
+      h("li", null, `Stop investing: from then on, ${coastPayIn > 0 ? `paying in ${money(coastPayIn)} a month` : "without paying in"}, the portfolio still reaches the FI number by ${retirementAge} (Coast FI). Under it, what you no longer pay in.`),
+      h("li", null, "Stop working: as soon as the portfolio reaches the FI number."),
+      h("li", null, `Even at ${rate("low")}: the first age, from January, at which stopping work lasts to ${F.SHOWN_AGE} with only ${rate("low")} growth. Shown when stopping at FI runs out then.`),
+      h("li", null, "At the latest: the retirement age, set in ", settingsLink("general"), `. To spare: how much more the portfolio could pay a month from then, in today's money, and still last at ${rate("low")}.`),
+      h("li", null, `Each plan at the expected return, ${rate("mid")} a year before inflation. The band and the ${rate("low")} result keep the same dates, with ${rate("low")} to ${rate("high")} growth.`),
       h("li", null, "Growth is the same every year. Real markets are not, and bad years right after you stop working hurt most."),
       h("li", null, `Amounts a month are as you entered them: pay-ins as in `, settingsLink("data"), ", and what the portfolio pays in today's money, the expenses with buffer less the income that counts then."),
       h("li", null, `Expenses rise by ${percentUnit.format(inflation)} inflation a year. Today's money takes it out of the portfolio's values again: what they would buy now.`),
       h("li", null, store.records.length ? `It starts from the portfolio in ${monthLabel(o.start)}, ${money(o.value)}.` : "It starts from 0, as there are no broker values yet."),
       h("li", null, `Planned one-offs count in their month. A plan lasts when money is left at ${F.SHOWN_AGE}. Taxes are left out.`)));
   return h("div", null,
+    h("div", { class: "answers-head" }, h("h2", null, "When can you stop?", about)),
+    h("div", { id: "forecast-answers", class: "answers", role: "radiogroup", "aria-label": "When can you stop?" }),
     h("section", { class: "card forecast" },
       h("div", { class: "card-head" },
-        h("h2", null, "Plans", about),
-        h("div", { class: "phase-keys" }, [...["invest", "coast", "retired"].filter((k) => kinds.has(k)).map(keyItem), other ? keyItem("other") : null]),
+        h("h2", { id: "forecast-title", class: "plan-title" }),
+        h("div", { id: "forecast-keys", class: "phase-keys" }),
         moneySwitch(drawForecast)),
       h("div", { id: "forecast-chart", class: "forecast-box" })));
 }
 
-// Draws the bars and the picked plan's chart; with focus, focuses the
-// picked plan's bar (after a pick by keyboard or click).
+// Draws the answers, and the picked one's bar and chart; with focus,
+// focuses the picked answer (after a pick by keyboard or click).
 function drawForecast(focus = false) {
   const box = document.getElementById("forecast-chart");
   if (!box) return;
@@ -1834,14 +1873,46 @@ function drawForecast(focus = false) {
   const store = state.store;
   const plans = forecastPlans(store);
   if (!plans) return;
-  const { result, rows, o } = plans;
-  const available = rows.filter((row) => !row.missing);
-  const picked = available.find((row) => row.key === state.forecast.plan) ?? available[0];
-  const { plan } = picked;
+  const { result, cards, rows, o } = plans;
+  const open = cards.filter((c) => c.answer !== null);
+  const picked = open.find((c) => c.key === state.forecast.plan) ?? open.find((c) => c.key === "fi") ?? open[0];
+  const pick = (key) => { setPlan(key); drawForecast(true); };
+
+  // The answers: a radio group, the arrow keys move between them.
+  const buttons = cards.map((c) => {
+    const on = c === picked;
+    return h("button", { type: "button", class: `tile answer${on ? " on" : ""}`, role: "radio", "aria-checked": String(on), tabindex: on ? "0" : "-1",
+      disabled: c.answer === null, title: c.title, "data-key": c.key, onclick: () => { if (!on) pick(c.key); } },
+      h("span", { class: "tile-label" }, c.question),
+      h("span", { class: "tile-value" }, c.answer ?? "–"),
+      c.level ? h("span", { class: `answer-status ${c.level}` }, statusBadge(c.level), c.label) : null,
+      c.line ? h("span", { class: "tile-detail" }, c.line) : null);
+  });
+  const enabled = buttons.filter((b) => !b.disabled);
+  for (const b of enabled) {
+    b.addEventListener("keydown", (event) => {
+      const k = enabled.indexOf(b);
+      const next = { ArrowDown: k + 1, ArrowRight: k + 1, ArrowUp: k - 1, ArrowLeft: k - 1 }[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      pick(enabled[(next + enabled.length) % enabled.length].dataset.key);
+    });
+  }
+  const list = document.getElementById("forecast-answers");
+  list.replaceChildren(...buttons);
+  if (focus) list.querySelector("[aria-checked='true']")?.focus();
+
+  // The picked plan: its name, the key to its phases, its bar and chart.
+  const row = rows[picked.key];
+  const { plan } = row;
+  document.getElementById("forecast-title").replaceChildren(statusBadge(row.level), row.name);
+  const kinds = new Set(plan.phases.map((phase) => phase.kind));
+  const other = plan.phases.some((phase) => phase.steps.some((step) => step.share !== undefined && step.share < 0.999));
+  document.getElementById("forecast-keys").replaceChildren(...["invest", "coast", "retired"].filter((k) => kinds.has(k)).map(phaseKey), ...(other ? [phaseKey("other")] : []));
   const index = (month) => F.monthIndex(month) - F.monthIndex(result.months[0]);
   const last = result.months.length - 1;
   // Steps while retired (a pension starts) get a line and a dot; pay-in
-  // changes stay inside their phase, as on the bars.
+  // changes stay inside their phase, as on the bar.
   const steps = plan.phases.filter((phase) => phase.kind === "retired").flatMap((phase) => phase.steps.slice(1).map((step) => step.from));
   const marks = [...plan.phases.map((phase) => Math.min(phase.to, last + 1) - 1), ...steps.map((i) => i - 1)];
   const outs = [plan.runsOut.low, plan.runsOut.mid].filter((month) => month !== null).map(index);
@@ -1850,10 +1921,7 @@ function drawForecast(focus = false) {
   drawResizing(box, () =>
     renderForecast(box, {
       months: result.months,
-      rows,
-      selected: picked.key,
-      focus,
-      onSelect: (key) => { setPlan(key); drawForecast(true); },
+      row,
       chart: { values: plan.values, rates: { low: rate("low"), mid: rate("mid"), high: rate("high") }, phases: plan.phases, marks, steps, outs },
       ageOf: (month) => F.ageIn(month, store.settings.birthYear),
       format: money,
@@ -1861,7 +1929,6 @@ function drawForecast(focus = false) {
       formatAxis: axisMoney,
       formatMonth: monthLabel,
     }));
-  focus = false;
 }
 
 // ---------------------------------------------------------------- settings
@@ -2119,17 +2186,17 @@ function payInsCard(store) {
     keepingDrafts(() => commit(F.saveSettings(state.store, { payInsRiseWithInflation: on }), on ? "Pay-ins now rise with inflation." : "Pay-ins now stay the same."));
   } });
 
-  // What the Coast plan still pays in after Coast FI: the Forecast shows it.
+  // What Stop investing (Coast) still pays in after Coast FI: the Forecast shows it.
   const coastForm = h("form", { class: "coast-form", onsubmit: (event) => {
     event.preventDefault();
     const amount = F.parseMoney(new FormData(event.currentTarget).get("coastPayIn"));
     if (!amount.ok) return showError(event.currentTarget, `After Coast FI: ${amount.error}.`);
     if (amount.cents < 0) return showError(event.currentTarget, "After Coast FI: enter an amount of 0 or more.");
-    commit(F.saveSettings(state.store, { coastPayIn: amount.cents }), "Saved what the Coast plan pays in after Coast FI.");
+    commit(F.saveSettings(state.store, { coastPayIn: amount.cents }), "Saved what is paid in after Coast FI.");
   } },
     field("After Coast FI, per month",
       h("input", { id: "coast-payin", name: "coastPayIn", class: "amount", inputmode: "decimal", autocomplete: "off", required: true, value: inputMoney(coastPayIn) }),
-      ["What the Coast plan of the ", h("a", { href: "#forecast" }, "Forecast"), " still pays in a month once Coast FI is reached: 0 stops paying in."],
+      ["What the ", h("a", { href: "#forecast" }, "Forecast"), "'s Stop investing still pays in a month once Coast FI is reached: 0 stops paying in."],
       "It stays the same amount of money, also when pay-ins rise with inflation."),
     h("button", { type: "submit" }, "Save"));
 

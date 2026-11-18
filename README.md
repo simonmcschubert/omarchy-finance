@@ -92,10 +92,11 @@ Finance window's browser profile. The data file stays.
   Lean FI and FI), the portfolio's history or its path to FI, the returns,
   the net worth with the emergency fund, and where the income goes. See
   [Dashboard numbers](#dashboard-numbers).
-- **Forecast**: three plans, retiring at FI, coasting and working to the
-  retirement age, as bars on one age line to 120, and the picked plan's
-  portfolio at 6, 8 and 10 % a year before inflation (by default). It only
-  shows: what it goes on is set in Settings. See [Forecast](#forecast).
+- **Forecast**: when you can stop investing and stop working, from the
+  earliest age to the one that lasts even at low growth, each as a plan
+  with its phases on an age line to 120 and its portfolio at 6, 8 and 10 %
+  a year before inflation (by default). It only shows: what it goes on is
+  set in Settings. See [Forecast](#forecast).
 - **Portfolio**: each account's value at the end of each month, and what
   was paid in, under a short summary, with the history. See
   [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
@@ -126,8 +127,8 @@ Finance window's browser profile. The data file stays.
   - Rise with inflation (off by default): off, every pay-in stays the same
     amount of money for good. On, pay-ins are in today's money like your
     expenses, and the projections raise them by the inflation.
-  - After Coast FI, per month (default 0): what the Forecast's Coast plan
-    still pays in once Coast FI is reached. It stays the same amount of
+  - After Coast FI, per month (default 0): what the Forecast's Stop
+    investing still pays in once Coast FI is reached. It stays the same amount of
     money, also with rising pay-ins.
   - Emergency fund (default 6): how many months of expenses to keep in
     cash accounts; 0 sets no target.
@@ -315,10 +316,10 @@ with your age then.
 | --- | --- |
 | FI | The FI number: what the portfolio would need when retiring now. What it pays a month: the expenses that count then, plus the buffer, less the income that does. Once nothing starts or ends any more, that amount × 12 ÷ withdrawal rate (× 25 at 4 %); until then, what it pays on top of that, month by month, such as bridging the years until a pension starts. Never more than the highest monthly amount × 12 ÷ withdrawal rate. Without starts and ends: monthly expenses × 12 ÷ withdrawal rate |
 | Lean FI | The same for the essential expenses only, with the buffer: the FI number for a lean budget. Shown once an active expense is essential |
-| Coast FI | What the portfolio needs now to grow to the FI number by the retirement age without another pay-in, at the expected return, plus what planned one-offs take out before then: as the Coast plan on the Forecast page counts it. Planned pay-ins and one-offs that pay in don't lower it; they only make the portfolio get there sooner. Shown with a year of birth, until retirement |
+| Coast FI | What the portfolio needs now to grow to the FI number by the retirement age without another pay-in, at the expected return, plus what planned one-offs take out before then: as Stop investing on the Forecast page counts it. Planned pay-ins and one-offs that pay in don't lower it; they only make the portfolio get there sooner. Shown with a year of birth, until retirement |
 
 How much it has is the portfolio ÷ what it needs. When, for FI and Lean
-FI, is Time to FI, counted as the Forecast page's Retire at FI counts it.
+FI, is Time to FI, counted as the Forecast page's Stop working counts it.
 From the latest month the portfolio grows by the expected return
 (compounded monthly) and gets the future pay-ins each month (the average
 monthly pay-in of the last 12 months, 0 when that is a withdrawal, or your
@@ -329,8 +330,8 @@ portfolio reaches the FI number of retiring the month after. It counts only
 before retirement ("Not before 67"); without a year of birth, up to 100
 years. Years from two years on. For Coast FI, it is the first month
 from which the portfolio, with the same pay-ins until then and none after,
-grows to the FI number by the retirement age: the month the Forecast page's
-Coast tile names, for the future pay-ins and nothing after Coast FI.
+grows to the FI number by the retirement age: the age the Forecast page's
+Stop investing names, for the future pay-ins and nothing after Coast FI.
 
 The **Portfolio** chart has two views; the one picked last stays picked.
 
@@ -371,13 +372,25 @@ and what is left over, or says how much more than the income those two take.
 
 ![Forecast](docs/forecast.png)
 
-Three plans, one row each, as bars on one age line from now to 120:
+**When can you stop?** Four answers, a card each, and each answer is a
+plan:
 
-| Plan | Phases |
-| --- | --- |
-| Retire at 53 (the age FI is reached) | investing until FI, then retired from the month after |
-| Coast from now (or the age of Coast FI) | investing until Coast FI, then coasting: working, and paying in only the amount set for after Coast FI in Settings (default 0), then retired from the retirement age |
-| Work to 67 (the retirement age) | investing until retirement, then retired |
+| Card | Plan | Its line |
+| --- | --- | --- |
+| Stop investing · now (or the age of Coast FI) | investing until Coast FI, then coasting: working, and paying in only the amount set for after Coast FI in Settings (default 0), then retired from the retirement age | what you no longer pay in then (“+1.400 €/month”) |
+| Stop working · 53 (the age FI is reached) | investing until FI, then retired from the month after | how many years before the retirement age |
+| Even at 6 % · 56 | investing until January of the first age from which the money lasts to 120 even at the low growth, then retired. Only when stopping at FI runs out at the low growth; “–” when no age before the retirement age lasts | how many years after FI |
+| At the latest · 67 (the retirement age) | investing until retirement, then retired | how much more the portfolio could pay a month from then, in today's money, and still last at the low growth (“+1.870 €/month to spare”) |
+
+Each card says whether that plan's money lasts to 120: a check when it does
+even at the low growth (6 % by default), a warning triangle when it runs out
+at the low growth only (“6 %: empty at 83”), a cross when it runs out at the
+expected return. A plan that doesn't happen before retirement says “Not
+before 67”. Once retired, one card says so.
+
+Click a card, or move with the arrow keys, to see its plan in the card
+below: its name, its bar on an age line from now to 120, and its chart. The
+plan picked stays picked in this browser.
 
 Each phase is a stretch of the bar: **Investing** (blue) with what is paid
 in a month, as planned in Settings (`+1.400 € → 2.000 €/month`),
@@ -387,28 +400,24 @@ today's money. Above the bar, what the portfolio has when a phase or step
 ends. A plan that doesn't happen before retirement says “Not before 67”.
 
 While retired, a step splits the bar wherever that amount changes, with its
-cause under it: an income that starts (“+ State pension”, “+ Rürup
-pension”, rent) or an expense that ends. The bar's height splits into what
+cause under it: an income that starts (“+ State pension”, a private
+pension, rent) or an expense that ends. The bar's height splits into what
 the portfolio pays (orange) and what other income pays (aqua), so a large
 pension shows as mostly aqua, a small one as a thin line, and none as
 orange to the end. Nothing in the forecast needs a pension.
 
-The icon before a plan says whether the money lasts to 120: a check when
-it does even at the low growth (6 % by default), a warning triangle when it
-runs out at the low growth only, a cross when it runs out at the expected
-return. Where it runs out, the portfolio's part of the bar turns red
+Where the money runs out, the portfolio's part of the bar turns red
 (“6 %: empty at 83”); other income goes on.
 
-Click a plan, or move with the arrow keys, to see it in the chart under the
-bars, on the same age line: the portfolio at the expected return, colored
-by phase, with a band from 2 points less to 2 points more growth. The band
-and the low and high results keep the plan's dates from the expected return
-(retiring at 53 stays retiring at 53), so they show what happens to the same
-plan when markets do worse or better. A red dot marks where the money runs
-out. Hovering a year, or the arrow keys on the chart, shows the three
-values. The plan picked stays picked in this browser.
+The chart under the bar is on the same age line: the portfolio at the
+expected return, colored by phase, with a band from 2 points less to 2
+points more growth. The band and the low and high results keep the plan's
+dates from the expected return (stopping at 53 stays stopping at 53), so
+they show what happens to the same plan when markets do worse or better. A
+red dot marks where the money runs out. Hovering a year, or the arrow keys
+on the chart, shows the three values.
 
-The switch above the bars shows the portfolio in today's money (the
+The switch above the bar shows the portfolio in today's money (the
 default: what it would buy now, with the inflation since the latest month
 taken out) or in the money of each year. The Path to FI chart on the
 dashboard has the same switch; the choice is remembered in this browser,
@@ -416,7 +425,7 @@ not in the data file.
 
 - It starts from the portfolio in the latest month, and grows it by the
   growth rate every month (8 % a year is about 0.64 % a month), as Time to
-  FI on the dashboard does. Retire at FI retires when that counts FI.
+  FI on the dashboard does. Stop working retires when that counts FI.
 - Retirement starts in January of the year you reach the retirement age.
   Expenses and income that start or end at retirement follow each plan's
   retirement; for Retire at FI that is the month after FI.
