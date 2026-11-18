@@ -1806,12 +1806,14 @@ function forecastPlans(store) {
     cards = [card("keep", "Retired", "now", spare(plans.keep))];
   } else {
     const { coast, fi, safe, keep } = plans;
-    // What coasting stops paying in: the pay-in planned then, less what it
+    // What coasting stops paying in: the pay-in planned for its first month
+    // (the month after the latest, when coasting from now), less what it
     // still pays in, both in today's money when pay-ins rise with inflation
     // (the coast pay-in stays the same amount of money).
     const coasting = coast.phases.find((phase) => phase.kind === "coast");
-    const planned = coasting && keep.phases[0].steps.find((step) => step.from <= coasting.from && coasting.from < step.to);
-    const still = store.settings.payInsRiseWithInflation && coasting ? F.deflated(coastPayIn, store.settings.inflation, coasting.from) : coastPayIn;
+    const firstPaid = coasting && Math.max(1, coasting.from);
+    const planned = coasting && keep.phases[0].steps.find((step) => step.from <= firstPaid && firstPaid < step.to);
+    const still = store.settings.payInsRiseWithInflation && coasting ? F.deflated(coastPayIn, store.settings.inflation, firstPaid) : coastPayIn;
     const stops = planned ? Math.round(planned.amount - still) : 0;
     cards = [
       card("coast", "Stop investing", coast.retires && when(coastsFrom(coast)), stops > 0 ? `+${money(stops)}/month` : null),
