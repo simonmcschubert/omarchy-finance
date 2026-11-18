@@ -849,8 +849,7 @@ function viewDashboard() {
         : m.latestMonth ? `as of ${monthLabel(m.latestMonth)}` : h("a", { href: "#portfolio" }, "Add broker values"),
       nudge),
     tile([`Gains, last ${gainsMonths}`, m.gains === null ? null
-      : info("the gains", `How much the portfolio grew in the last ${gainsMonths} besides what was paid in: the change in value minus the pay-ins and one-offs.`,
-          "The returns are under the chart.")],
+      : info("the gains", `How much the portfolio grew in the last ${gainsMonths} besides what was paid in: the change in value minus the pay-ins and one-offs.`)],
       m.gains === null ? "–" : signedMoney(m.gains.gain),
       m.gains === null ? "needs values for two months"
         : m.gains.paid > 0 ? `besides ${money(m.gains.paid)} paid in`
