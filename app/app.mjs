@@ -1755,13 +1755,17 @@ function viewPortfolio() {
         return render();
       }
       // Left: the focus goes on where it went, in the page for the month:
-      // the field of the same name, or else the control in the same place.
+      // the field of the same name, or else the control in the same place,
+      // with the explanation it opened.
       const to = document.activeElement;
+      const opened = to?.popoverTargetElement?.matches(":popover-open");
       const controls = () => [...document.querySelectorAll("#main :is(a, button, input, select, textarea)")];
       const at = controls().indexOf(to);
       render();
       const same = to?.name ? document.querySelector(`#main [name="${CSS.escape(to.name)}"]`) : null;
-      (same ?? controls()[at])?.focus();
+      const next = same ?? controls()[at];
+      next?.focus();
+      if (opened) next?.popoverTargetElement?.showPopover();
     } }))),
     store.accounts.length === 0
       ? h("p", { class: "muted" }, "Add your ", settingsLink("data", "accounts"), " in Settings first, or ", settingsLink("export", "import past months"), " from a CSV file.")
