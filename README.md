@@ -46,7 +46,7 @@ the restart (local changes in the checkout, for example), the button says
 the changes first; the release notes on GitHub list them. Updates never touch
 the data.
 
-![The update button: check, Update, Restart to update, Updating, Up to date](docs/update.png)
+![The update button: check, Update, Downloading, Updating, Up to date](docs/update.png)
 
 Settings › General › Updates chooses which updates the button offers. **Stable**, the
 default, offers releases. **Preview** offers every change on `main` as soon
