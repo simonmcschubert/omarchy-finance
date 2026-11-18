@@ -1997,13 +1997,14 @@ function forecastPlans(store) {
     }];
   });
   // What the portfolio would need at the plan's turn to last even at the
-  // low growth, up to whole thousands, and how much more that is than it
-  // has then at the low growth. That is more for every plan that runs out
-  // then; what it has at the expected return may not be, when the slower
-  // growth before the turn is what falls short.
+  // low growth: the next whole thousand above what it has to be more than.
+  // And how much more that is than it has then at the low growth, which
+  // is more for every plan that runs out then; what it has at the expected
+  // return may not be, when the slower growth before the turn is what
+  // falls short.
   const up = (cents) => Math.ceil(cents / 100000) * 100000;
   const need = (plan) => {
-    const value = up(plan.lastsWith.low);
+    const value = (Math.floor(plan.lastsWith.low / 100000) + 1) * 100000;
     const more = up(value - plan.values.low[plan.stopInvesting === null ? 0 : index(plan.stopInvesting)]);
     const at = when(coastsFrom(plan));
     return { text: `Lasts even at ${low} with ${money(value)} ${at === "now" ? "now" : `at ${at}`}`, more: more > 0 ? `(${signedMoney(more)})` : null };

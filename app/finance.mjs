@@ -1383,9 +1383,10 @@ export function forecast(params) {
     check(first);
     for (let index = first + 1; index <= lastShown; index++) {
       const out = phase === "out" || index >= retirement;
-      const flow = (out ? -expensesAt(index, retiredFrom) : phase === "coast" ? coastContribution : paidIn(index)) + onceAt(index);
-      v = v * (1 + rate) + flow;
-      flows.push(flow);
+      const flow = out ? -expensesAt(index, retiredFrom) : phase === "coast" ? coastContribution : paidIn(index);
+      const once = onceAt(index);
+      v = v * (1 + rate) + flow + once;
+      flows.push(flow + once);
       if (v <= 0) {
         v = 0;
         if (out) runsOut ??= monthFromIndex(index);

@@ -2037,6 +2037,12 @@ test("forecast: needs is what a month-end value has to top for the money to last
   const topped = (extra) => F.forecast(plan({ growth: 3, expenses: 2500 * EUR, oneOffs: (i) => (i === F.monthIndex("2040-01") ? extra : 0) })).plans.keep;
   assert.equal(topped(keep.needs[k] - keep.values[k] + EUR).runsOut, null);
   assert.notEqual(topped(keep.needs[k] - keep.values[k] - EUR).runsOut, null);
+  // It has to be more than that: at 0 % growth it is exactly what is taken
+  // out until 120, and with exactly that nothing is left then.
+  const flat = F.forecast(plan({ value: 0, growth: 0, fiNumber: 0 })).plans.fi;
+  assert.equal(flat.needs[0], 2000 * EUR * (flat.values.length - 1));
+  assert.notEqual(F.forecast(plan({ value: flat.needs[0], growth: 0, fiNumber: 0 })).plans.fi.runsOut, null);
+  assert.equal(F.forecast(plan({ value: flat.needs[0] + 1, growth: 0, fiNumber: 0 })).plans.fi.runsOut, null);
   // A plan that lasts has more than it needs.
   const lasting = F.forecast(plan({ value: 2000 * EUR * 12 * 40, growth: 3 })).plans.fi;
   assert.equal(lasting.runsOut, null);
