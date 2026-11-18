@@ -283,10 +283,12 @@ function monthField({ id = null, name, value = "", label = null, required = fals
   input.addEventListener("change", () => {
     if (!onpick && typed()) pick(typed());
   });
+  // The picker draws its buttons anew as it moves, which moves the focus out
+  // for a moment: what counts is where the focus is after that.
   wrap.addEventListener("focusout", (event) => {
     if (!onpick || wrap.contains(event.relatedTarget)) return;
     afterClick(() => {
-      if (input.isConnected && typed()) pick(typed(), true);
+      if (input.isConnected && !wrap.contains(document.activeElement) && typed()) pick(typed(), true);
     });
   });
   // All of it is selected on focus, so typing replaces it.
