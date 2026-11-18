@@ -881,6 +881,15 @@ main > div {
 /* Forecast: the answers to "When can you stop?", each a plan, as tiles;
    the picked plan's bar and chart in a card under them. Phases keep the
    chart colors: investing blue, retired orange, other income aqua. */
+/* The question, and on its right the money switch. */
+.answers-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
 .answers-head h2 {
   margin: 0;
 }
