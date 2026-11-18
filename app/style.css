@@ -26,6 +26,8 @@
   /* Runs out only if growth is low: a warning, not a failure. */
   --risk: #e0a020;
   --bad-text: light-dark(#b42318, #ff8a8a);
+  --good-text: light-dark(#087a08, #4cc760);
+  --risk-text: light-dark(#8a5a00, #e0a020);
   --font: "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
 }
 
@@ -700,60 +702,92 @@ main > div {
   fill: var(--fg);
 }
 
-/* Forecast: the plans as bars, and the picked plan's chart. Phases keep
-   the chart colors: investing blue, retired orange, other income aqua. */
-.forecast-box .plan-bars {
-  margin-bottom: 4px;
+/* Forecast: the answers to "When can you stop?", each a plan, as tiles;
+   the picked plan's bar and chart in a card under them. Phases keep the
+   chart colors: investing blue, retired orange, other income aqua. */
+.answers-head h2 {
+  margin: 0;
 }
 
-.plan-row {
+.answers {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .answers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .answers {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tile.answer {
+  font: inherit;
+  color: inherit;
+  text-align: left;
   cursor: pointer;
-  outline: none;
 }
 
-.plan-row.missing {
+.tile.answer:hover:not(:disabled) {
+  border-color: var(--fg-muted);
+}
+
+.tile.answer.on {
+  background: var(--selection);
+  border-color: var(--fg-muted);
+}
+
+.tile.answer:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tile.answer:disabled {
   cursor: default;
 }
 
-.plan-row .row-bg {
-  fill: transparent;
-  stroke: none;
+.tile.answer:disabled .tile-value {
+  color: var(--fg-muted);
 }
 
-.plan-row:hover .row-bg {
-  fill: var(--selection);
-  opacity: 0.5;
-}
-
-.plan-row.on .row-bg {
-  fill: var(--selection);
-  stroke: var(--border);
-  opacity: 1;
-}
-
-.plan-row:focus-visible .row-bg {
-  stroke: var(--accent);
-  stroke-width: 2;
-}
-
-.plan-row.missing .row-bg {
-  fill: transparent;
-}
-
-.plan-name {
-  fill: var(--fg-strong);
+.answer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
-  font-family: var(--font);
-}
-
-.plan-row.on .plan-name {
   font-weight: 600;
 }
 
-.plan-missing {
-  fill: var(--fg-muted);
-  font-size: 12px;
-  font-family: var(--font);
+.answer-status.ok {
+  color: var(--good-text);
+}
+
+.answer-status.risk {
+  color: var(--risk-text);
+}
+
+.answer-status.bad {
+  color: var(--bad-text);
+}
+
+.status-badge {
+  flex: none;
+}
+
+.plan-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.forecast-box .plan-bars {
+  margin-bottom: 4px;
 }
 
 .plan-bar.invest {

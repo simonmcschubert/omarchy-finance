@@ -1446,17 +1446,26 @@ export function fiOutlook(store, now = currentMonth()) {
   const goal = (essential) => (index) => fiNumberIn(store, Math.max(index, nowIndex), { essential });
   const fiNumber = goal(false)(first + 1);
 
-  // forecast() runs, and plans() in each money, once each.
+  // What the portfolio pays in a month, retired from `from`: the same in
+  // every run, so worked out once.
+  const needs = new Map();
+  const need = (index, from) => {
+    const key = `${index} ${from}`;
+    if (!needs.has(key)) needs.set(key, needIn(store, index, from));
+    return needs.get(key);
+  };
+  // forecast() runs, and plans() in each money, once each. extra: what the
+  // portfolio pays more a month while retired, in today's money.
   const runs = new Map();
   const plansIn = new Map();
-  const run = ({ essential = false, growth = "mid", coastContribution = 0, fixed = null } = {}) => {
-    const key = `${essential} ${growth} ${coastContribution} ${fixed?.coast} ${fixed?.fi}`;
+  const run = ({ essential = false, growth = "mid", coastContribution = 0, fixed = null, extra = 0 } = {}) => {
+    const key = `${essential} ${growth} ${coastContribution} ${fixed?.coast} ${fixed?.fi} ${extra}`;
     if (!runs.has(key)) {
       runs.set(key, forecast({
         start, value, birthYear, retirementAge, inflation, coastContribution, fixed,
         contribution: paidIn,
         growth: rates[growth],
-        need: (index, from) => needIn(store, index, from),
+        need: extra ? (index, from) => need(index, from) + extra : need,
         goal: goal(essential),
         oneOffs: (index) => oneOffsIn(store, index),
         takenOut: (index) => oneOffsIn(store, index, { out: true }),
@@ -1568,8 +1577,8 @@ export function fiOutlook(store, now = currentMonth()) {
     // "today"'s. null without a year of birth. Otherwise {
     //   months: shown months, from start to the end of SHOWN_AGE,
     //   retirement: its first month,
-    //   plans: [{ key: "fi" (Retire early), "coast" or "keep", or just
-    //     "keep" once retired,
+    //   plans: [{ key: "fi" (Retire early), "coast", "keep" or "safe", or
+    //     just "keep" once retired,
     //     stopInvesting: the last month paid in in full (null: none after
     //       start), retires: the first month lived off the portfolio; both
     //       null when the plan doesn't happen before retirement (no FI or
@@ -1580,6 +1589,12 @@ export function fiOutlook(store, now = currentMonth()) {
     //     phases: [{ kind: "invest", "coast" or "retired", from, to (indexes
     //       of shown months; the last phase ends at months.length),
     //       steps }] }] }
+    // safe is there only when Retire early runs out at the low growth: it
+    // stops working at the first age (in January) before retirement from
+    // which the money lasts even then, or has retires null when no age
+    // does. keep also has spare: how much more the portfolio could pay a
+    // month while retired (today's money, in steps of 1000 cents) and still
+    // last at the low growth; 0 when it doesn't last.
     // A phase's steps split it where its monthly amount changes: { from,
     // to, amount (a month, as entered: pay-ins as planned, what the
     // portfolio pays in today's money) }; while retired also share (the
@@ -1593,7 +1608,36 @@ export function fiOutlook(store, now = currentMonth()) {
       const coastContribution = store.settings.coastPayIn;
       const main = run({ coastContribution });
       const fixed = { coast: main.plans.coast.coastMonth, fi: main.plans.fi.fiMonth };
+      const runsWith = (dates) => Object.fromEntries(GROWTHS.map((g) => [g, run({ growth: g, coastContribution, fixed: dates })]));
       const results = { mid: main, low: run({ growth: "low", coastContribution, fixed }), high: run({ growth: "high", coastContribution, fixed }) };
+      // The last month worked for a safe plan (December before the age it
+      // stops at): undefined when it isn't needed (Retire early lasts at
+      // the low growth, or doesn't happen), null when no age before
+      // retirement lasts.
+      const safeStop = () => {
+        if (fixed.fi === null || results.low.plans.fi.runsOut === null) return undefined;
+        const from = ageIn(monthFromIndex(monthIndex(fixed.fi) + 1), birthYear) + 1;
+        for (let age = from; (birthYear + age) * 12 < retirement; age++) {
+          const last = monthFromIndex((birthYear + age) * 12 - 1);
+          if (run({ growth: "low", coastContribution, fixed: { coast: null, fi: last } }).plans.fi.runsOut === null) return last;
+        }
+        return null;
+      };
+      // keep's spare, in steps of 1000: the most that lasts, found by
+      // doubling until it doesn't and then halving the gap.
+      const spare = () => {
+        const lasts = (extra) => run({ growth: "low", coastContribution, extra }).plans.keep.runsOut === null;
+        if (!lasts(0)) return 0;
+        let low = 0;
+        let high = 10000;
+        while (lasts(high) && high < MAX_CENTS) [low, high] = [high, high * 2];
+        while (high - low > 1000) {
+          const mid = Math.round((low + high) / 2000) * 1000;
+          if (lasts(mid)) low = mid;
+          else high = mid;
+        }
+        return low;
+      };
       const shown = inMoney(main, kind);
       const n = shown.months.length;
       const at = (i) => first + i; // month index of shown month i
@@ -1634,24 +1678,34 @@ export function fiOutlook(store, now = currentMonth()) {
         }
         return { kind: "retired", from, to: n, steps };
       };
-      const runsOut = (key) => Object.fromEntries(GROWTHS.map((g) => [g, results[g].plans[key].runsOut]));
-      const values = (key) => Object.fromEntries(GROWTHS.map((g) => [g, inMoney(results[g], kind).plans[key].values]));
-      const describe = (key, stopInvesting, retires, phases) => ({ key, stopInvesting, retires, values: values(key), runsOut: runsOut(key), phases: phases.filter((p) => p.to > p.from) });
+      // A plan `key` as forecast() ran it as `plan` in the runs of `set`.
+      const describe = (key, stopInvesting, retires, phases, set = results, plan = key) => ({
+        key, stopInvesting, retires,
+        values: Object.fromEntries(GROWTHS.map((g) => [g, inMoney(set[g], kind).plans[plan].values])),
+        runsOut: Object.fromEntries(GROWTHS.map((g) => [g, set[g].plans[plan].runsOut])),
+        phases: phases.filter((p) => p.to > p.from),
+      });
+      // Stops working after the month `last`: invests until then, and
+      // lives off the portfolio from the month after.
+      const stopping = (key, last, set) => describe(key, monthIndex(last) > first ? last : null, monthFromIndex(monthIndex(last) + 1), [
+        ...(monthIndex(last) > first ? [invest(0, monthIndex(last) - first + 1)] : []),
+        living(monthIndex(last) - first + 1, monthIndex(last) + 1)], set, "fi");
+      const keepPlan = (phases) => ({ ...describe("keep", monthFromIndex(retirement - 1), monthFromIndex(retirement), phases), spare: spare() });
       const ret = retirement - first;
-      if (retired) return remember({ months: shown.months, retirement: monthFromIndex(retirement), plans: [describe("keep", null, start, [living(0, retirement)])] });
+      if (retired) return remember({ months: shown.months, retirement: monthFromIndex(retirement), plans: [{ ...keepPlan([living(0, retirement)]), stopInvesting: null, retires: start }] });
       // Each phase from the month after the one before it ends.
-      const fi = fixed.fi === null ? describe("fi", null, null, [])
-        : describe("fi", monthIndex(fixed.fi) > first ? fixed.fi : null, monthFromIndex(monthIndex(fixed.fi) + 1), [
-          ...(monthIndex(fixed.fi) > first ? [invest(0, monthIndex(fixed.fi) - first + 1)] : []),
-          living(monthIndex(fixed.fi) - first + 1, monthIndex(fixed.fi) + 1)]);
+      const fi = fixed.fi === null ? describe("fi", null, null, []) : stopping("fi", fixed.fi, results);
       const coastFrom = fixed.coast === null ? null : monthIndex(fixed.coast) - first + 1;
       const coasting = fixed.coast === null ? describe("coast", null, null, [])
         : describe("coast", coastFrom > 1 ? fixed.coast : null, monthFromIndex(retirement), [
           ...(coastFrom > 1 ? [invest(0, coastFrom)] : []),
           coast(coastFrom > 1 ? coastFrom : 0, ret),
           living(ret, retirement)]);
-      const keep = describe("keep", monthFromIndex(retirement - 1), monthFromIndex(retirement), [invest(0, ret), living(ret, retirement)]);
-      return remember({ months: shown.months, retirement: monthFromIndex(retirement), plans: [fi, coasting, keep] });
+      const keep = keepPlan([invest(0, ret), living(ret, retirement)]);
+      const safe = safeStop();
+      const safely = safe === undefined ? []
+        : [safe === null ? describe("safe", null, null, [], results, "fi") : stopping("safe", safe, runsWith({ coast: null, fi: safe }))];
+      return remember({ months: shown.months, retirement: monthFromIndex(retirement), plans: [fi, coasting, keep, ...safely] });
     },
   };
 }

@@ -348,12 +348,11 @@ export function renderChart(root, options) {
 }
 
 // ---------------------------------------------------------------- forecast
-// The plans as bars on one age line, and the picked plan's chart under them
-// on the same age line (finance.mjs fiOutlook().plans).
+// The picked plan as a bar, and its chart under it on the same age line
+// (finance.mjs fiOutlook().plans).
 
-const PLAN_ROW = 70; // a plan's row: values above its bar, causes below
+const PLAN_ROW = 70; // the bar's row: values above it, causes below
 const PLAN_BAR = 28;
-const PLAN_AXIS = 24; // ages above the bars
 const PLAN_CHART = 280;
 const PLAN_MARGIN = { right: 20, top: 16, bottom: 40 };
 // Bar texts use 12px: about this wide per character.
@@ -403,34 +402,38 @@ function statusIcon(level, cx, cy) {
   return g;
 }
 
+// The status icon on its own, 16 pixels square, for HTML.
+export function statusBadge(level) {
+  const icon = svg("svg", { class: "status-badge", width: 16, height: 16, viewBox: "0 0 16 16", "aria-hidden": "true" });
+  icon.append(statusIcon(level, 8, 8.5));
+  return icon;
+}
+
 // options:
 // - months: the shown months; ageOf(month)
-// - rows: [{ key, name, level ("ok", "risk", "bad", or null), title (what
-//   the icon means), missing (text instead of a bar, for a plan that
-//   doesn't happen), segments: [{ kind ("invest", "coast" or "retired"),
-//   from, to (indexes; to excluded), texts (the amount a month, longest
-//   first), share (retired: the portfolio's part, 0 to 1), end (the value
-//   at its end, or null), step (it splits a phase), cause: { text, income }
-//   or null }], out: { from, text } or null }]
-// - selected: a row's key; onSelect(key), focus (focus the selected row)
+// - row: the plan's bar, { name, title (whether it lasts, in words),
+//   segments: [{ kind ("invest", "coast" or "retired"), from, to (indexes;
+//   to excluded), texts (the amount a month, longest first), share
+//   (retired: the portfolio's part, 0 to 1), end (the value at its end, or
+//   null), step (it splits a phase), cause: { text, income } or null }],
+//   out: { from, text } or null }
 // - chart: { values: { low, mid, high }, rates: { low, high } (labels),
 //   phases: [{ kind, from, to }], marks: [indexes], steps: [indexes],
-//   outs: [indexes] } for the selected plan
+//   outs: [indexes] }
 // - format(cents), formatShort(cents), formatAxis(cents), formatMonth(month)
 export function renderForecast(root, options) {
-  const { months, rows, selected, chart: plot, ageOf, format, formatShort, formatAxis, formatMonth } = options;
+  const { months, row, chart: plot, ageOf, format, formatShort, formatAxis, formatMonth } = options;
   root.replaceChildren();
   const width = Math.max(320, Math.round(root.clientWidth || 640));
-  const left = width >= 720 ? 200 : 136;
+  const left = width >= 720 ? 84 : 72; // the money axis
   const plotW = width - left - PLAN_MARGIN.right;
   const last = months.length - 1;
   const x = (i) => left + (last === 0 ? plotW / 2 : (Math.min(i, last) * plotW) / last);
   const ticks = ageTicks(months, ageOf, plotW);
   const id = ++ids;
 
-  // ---- the bars
-  const barsH = PLAN_AXIS + rows.length * PLAN_ROW;
-  const bars = svg("svg", { viewBox: `0 0 ${width} ${barsH}`, width, height: barsH, class: "chart plan-bars", role: "radiogroup", "aria-label": "Plans" });
+  // ---- the bar
+  const bars = svg("svg", { width, class: "chart plan-bars", role: "img", "aria-label": `${row.name}: ${row.title}` });
   const defs = svg("defs");
   const hatch = svg("pattern", { id: `coast-${id}`, width: 7, height: 7, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
   hatch.append(svg("rect", { class: "hatch-bg", width: 7, height: 7 }), svg("line", { class: "hatch-line", x1: 0, y1: 0, x2: 0, y2: 7 }));
@@ -438,104 +441,68 @@ export function renderForecast(root, options) {
   red.append(svg("rect", { class: "out-bg", width: 6, height: 6 }), svg("line", { class: "out-line", x1: 0, y1: 0, x2: 0, y2: 6 }));
   defs.append(hatch, red);
   bars.append(defs);
-  for (const i of ticks) {
-    bars.append(svg("line", { class: "grid", x1: x(i), x2: x(i), y1: PLAN_AXIS - 6, y2: barsH }));
-    bars.append(text({ class: "axis", x: x(i), y: 14, "text-anchor": "middle" }, `${ageOf(months[i])}`));
-  }
-  bars.append(text({ class: "axis", x: left - 10, y: 14, "text-anchor": "end" }, "Age"));
 
-  const labels = []; // texts under the bars go last, over the next row
-  const groups = [];
-  rows.forEach((row, n) => {
-    const y0 = PLAN_AXIS + n * PLAN_ROW;
-    const by = y0 + 20;
-    const on = row.key === selected;
-    const g = svg("g", { class: `plan-row${on ? " on" : ""}${row.missing ? " missing" : ""}` });
-    g.append(svg("rect", { class: "row-bg", x: 1, y: y0 - 2, width: width - 2, height: PLAN_ROW - 4, rx: 6 }));
-    if (row.level) g.append(statusIcon(row.level, 16, by + PLAN_BAR / 2));
-    g.append(text({ class: "plan-name", x: row.level ? 32 : 12, y: by + PLAN_BAR / 2 + 4.5 }, row.name));
-    if (row.missing) {
-      g.append(text({ class: "plan-missing", x: left + 4, y: by + PLAN_BAR / 2 + 4.5 }, row.missing));
+  const labels = []; // texts under the bar
+  const by = 20;
+  const g = svg("g");
+  let valueLeft = Infinity; // values above the bar, from the right, clear of each other
+  const ends = [];
+  for (const seg of row.segments) {
+    const x0 = x(seg.from);
+    const x1 = x(seg.to);
+    const w = Math.max(2, x1 - x0 - 2);
+    if (seg.kind === "retired") {
+      const own = PLAN_BAR * seg.share;
+      if (seg.share < 0.999) g.append(svg("rect", { class: "plan-bar other", x: x0 + 1, y: by, width: w, height: PLAN_BAR - own }));
+      g.append(svg("rect", { class: "plan-bar retired", x: x0 + 1, y: by + PLAN_BAR - own, width: w, height: own }));
     } else {
-      g.setAttribute("role", "radio");
-      g.setAttribute("aria-checked", String(on));
-      g.setAttribute("tabindex", on ? "0" : "-1");
-      g.setAttribute("aria-label", `${row.name}: ${row.title}`);
-      g.dataset.key = row.key;
-      const title = svg("title");
-      title.textContent = row.title;
-      g.append(title);
-      groups.push(g);
+      g.append(svg("rect", { class: `plan-bar ${seg.kind}`, x: x0 + 1, y: by, width: w, height: PLAN_BAR, rx: 3, ...(seg.kind === "coast" ? { fill: `url(#coast-${id})` } : {}) }));
     }
-    let valueLeft = Infinity; // values above the bars, from the right, clear of each other
-    const ends = [];
-    for (const seg of row.segments) {
-      const x0 = x(seg.from);
-      const x1 = x(seg.to);
-      const w = Math.max(2, x1 - x0 - 2);
-      if (seg.kind === "retired") {
-        const own = PLAN_BAR * seg.share;
-        if (seg.share < 0.999) g.append(svg("rect", { class: "plan-bar other", x: x0 + 1, y: by, width: w, height: PLAN_BAR - own }));
-        g.append(svg("rect", { class: "plan-bar retired", x: x0 + 1, y: by + PLAN_BAR - own, width: w, height: own }));
-      } else {
-        g.append(svg("rect", { class: `plan-bar ${seg.kind}`, x: x0 + 1, y: by, width: w, height: PLAN_BAR, rx: 3, ...(seg.kind === "coast" ? { fill: `url(#coast-${id})` } : {}) }));
-      }
-      if (seg.step) g.append(svg("line", { class: "notch", x1: x0, x2: x0, y1: by - 3, y2: by + PLAN_BAR + 3 }));
-      const t = fitText(seg.texts, x1 - x0);
-      if (t) g.append(text({ class: `plan-bar-text ${seg.kind}`, x: x0 + 8, y: by + PLAN_BAR / 2 + 4.5 }, t));
-      if (seg.end !== null) ends.push([x1, seg.end]);
-      if (seg.cause) labels.push({ x: x0 + 4, y: by + PLAN_BAR + 14, text: seg.cause.text, class: seg.cause.income ? "plan-cause income" : "plan-cause" });
-    }
-    for (const [x1, value] of ends.reverse()) {
-      const label = formatShort(value);
-      const right = Math.min(x1 - 4, width - 4);
-      if (right > valueLeft - 8) continue;
-      g.append(text({ class: "plan-value", x: right, y: by - 6, "text-anchor": "end" }, label));
-      valueLeft = right - label.length * CHAR_WIDTH;
-    }
-    if (row.out) {
-      // Only the portfolio's part runs out: other income goes on.
-      for (const seg of row.segments) {
-        if (seg.kind !== "retired" || seg.to <= row.out.from) continue;
-        const x0 = x(Math.max(seg.from, row.out.from));
-        const own = PLAN_BAR * seg.share;
-        g.append(svg("rect", { class: "plan-bar out", x: x0, y: by + PLAN_BAR - own, width: Math.max(2, x(seg.to) - x0 - 1), height: own, fill: `url(#out-${id})` }));
-      }
-      const ox = x(row.out.from);
-      const clash = labels.some((l) => l.y === by + PLAN_BAR + 14 && Math.abs(l.x - ox) < l.text.length * CHAR_WIDTH + 8);
-      const outWidth = row.out.text.length * CHAR_WIDTH;
-      labels.push(clash || ox + outWidth > width - 4
-        ? { x: width - 4, y: by + PLAN_BAR + 14, text: row.out.text, class: "plan-out-label", anchor: "end" }
-        : { x: ox, y: by + PLAN_BAR + 14, text: row.out.text, class: "plan-out-label" });
-    }
-    bars.append(g);
-  });
-  for (const l of labels) bars.append(text({ class: l.class, x: l.x, y: l.y, ...(l.anchor ? { "text-anchor": l.anchor } : {}) }, l.text));
-
-  const pick = (g) => {
-    if (g.getAttribute("aria-checked") === "true") return;
-    options.onSelect(g.dataset.key);
-  };
-  for (const g of groups) {
-    g.addEventListener("click", () => pick(g));
-    g.addEventListener("keydown", (event) => {
-      const k = groups.indexOf(g);
-      const next = { ArrowDown: k + 1, ArrowRight: k + 1, ArrowUp: k - 1, ArrowLeft: k - 1 }[event.key];
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        pick(g);
-      } else if (next !== undefined) {
-        event.preventDefault();
-        pick(groups[(next + groups.length) % groups.length]);
-      }
-    });
+    if (seg.step) g.append(svg("line", { class: "notch", x1: x0, x2: x0, y1: by - 3, y2: by + PLAN_BAR + 3 }));
+    const t = fitText(seg.texts, x1 - x0);
+    if (t) g.append(text({ class: `plan-bar-text ${seg.kind}`, x: x0 + 8, y: by + PLAN_BAR / 2 + 4.5 }, t));
+    if (seg.end !== null) ends.push([x1, seg.end]);
+    if (seg.cause) labels.push({ x: x0 + 4, y: by + PLAN_BAR + 14, text: seg.cause.text, class: seg.cause.income ? "plan-cause income" : "plan-cause" });
   }
+  for (const [x1, value] of ends.reverse()) {
+    const label = formatShort(value);
+    const right = Math.min(x1 - 4, width - 4);
+    if (right > valueLeft - 8) continue;
+    g.append(text({ class: "plan-value", x: right, y: by - 6, "text-anchor": "end" }, label));
+    valueLeft = right - label.length * CHAR_WIDTH;
+  }
+  if (row.out) {
+    // Only the portfolio's part runs out: other income goes on.
+    for (const seg of row.segments) {
+      if (seg.kind !== "retired" || seg.to <= row.out.from) continue;
+      const x0 = x(Math.max(seg.from, row.out.from));
+      const own = PLAN_BAR * seg.share;
+      g.append(svg("rect", { class: "plan-bar out", x: x0, y: by + PLAN_BAR - own, width: Math.max(2, x(seg.to) - x0 - 1), height: own, fill: `url(#out-${id})` }));
+    }
+    // Where it runs out, under the bar: clear of the causes there, else
+    // at the right end, else a line lower.
+    const ox = x(row.out.from);
+    const line = by + PLAN_BAR + 14;
+    const span = (l) => {
+      const w = l.text.length * CHAR_WIDTH;
+      return l.anchor === "end" ? [l.x - w, l.x] : [l.x, l.x + w];
+    };
+    const clear = (l) => labels.every((o) => o.y !== l.y || span(o)[1] + 8 <= span(l)[0] || span(l)[1] + 8 <= span(o)[0]);
+    const fits = ox + row.out.text.length * CHAR_WIDTH <= width - 4;
+    const at = (y) => (fits ? { x: ox, y } : { x: width - 4, y, anchor: "end" });
+    const places = [at(line), { x: width - 4, y: line, anchor: "end" }, at(line + 14)].map((l) => ({ ...l, text: row.out.text, class: "plan-out-label" }));
+    labels.push(places.find(clear) ?? places.at(-1));
+  }
+  bars.append(g);
+  for (const l of labels) bars.append(text({ class: l.class, x: l.x, y: l.y, ...(l.anchor ? { "text-anchor": l.anchor } : {}) }, l.text));
+  const barsH = Math.max(PLAN_ROW, ...labels.map((l) => l.y + 6));
+  bars.setAttribute("viewBox", `0 0 ${width} ${barsH}`);
+  bars.setAttribute("height", barsH);
 
-  // ---- the picked plan's chart
+  // ---- its chart
   const box = document.createElement("div");
   box.className = "chart-box";
   root.append(bars, box);
-  if (!plot) return focusPicked();
   const height = PLAN_CHART;
   const plotTop = PLAN_MARGIN.top;
   const plotH = height - plotTop - PLAN_MARGIN.bottom;
@@ -546,7 +513,7 @@ export function renderForecast(root, options) {
   const y = (v) => plotTop + plotH - (Math.min(v, yMax * 1.5) / yMax) * plotH;
   const chart = svg("svg", {
     viewBox: `0 0 ${width} ${height}`, width, height, class: "chart plan-chart", role: "img", tabindex: 0,
-    "aria-label": "The picked plan's portfolio by year, at the expected return with a band for less and more growth. Use the arrow keys to read each year.",
+    "aria-label": "The plan's portfolio by year, at the expected return with a band for less and more growth. Use the arrow keys to read each year.",
   });
   const clip = svg("clipPath", { id: `plan-clip-${id}` });
   clip.append(svg("rect", { x: left, y: plotTop - 2, width: plotW, height: plotH + 4 }));
@@ -652,9 +619,4 @@ export function renderForecast(root, options) {
     event.preventDefault();
     show(current === -1 ? 0 : snap(current + step));
   });
-  return focusPicked();
-
-  function focusPicked() {
-    if (options.focus) groups.find((g) => g.dataset.key === selected)?.focus();
-  }
 }

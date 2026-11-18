@@ -59,9 +59,9 @@ the investment rate and every projection.
 in today's money and rise with inflation in the projections, like expenses.
 Off, they stay the same amount of money for good.
 
-**Coast pay-in** (`coastPayIn`, 0 by default): what the Coast plan still
-pays in a month once Coast FI is reached. It stays the same amount of money,
-also with rising pay-ins.
+**Coast pay-in** (`coastPayIn`, 0 by default): what the Coast plan (Stop
+investing) still pays in a month once Coast FI is reached. It stays the
+same amount of money, also with rising pay-ins.
 
 **One-off**: money paid in or out once, such as an inheritance or a house
 deposit. It is either recorded with a month's values or planned for a
@@ -113,12 +113,19 @@ rise. **Today's money**: the same amounts with inflation taken out again.
 
 Today's money is the default; the choice is kept in the browser.
 
-**Plans** (the Forecast page, `fiOutlook().plans()`), named by what you do:
-- _Retire at FI_ (“Retire at 53”) pays in until FI and lives off the
+**Plans** (the Forecast page, `fiOutlook().plans()`), each the answer to
+“When can you stop?” on a card of its own:
+- _Coast_ (“Stop investing · now”) pays in until Coast FI, then only the
+  coast pay-in until retirement.
+- _Retire at FI_ (“Stop working · 53”) pays in until FI and lives off the
   portfolio from the month after.
-- _Coast_ (“Coast from now”) pays in until Coast FI, then only the coast
-  pay-in until retirement.
-- _Work to 67_ (the retirement age) pays in until retirement.
+- _Safe_ (“Even at 6 % · 56”), only when Retire at FI runs out at the low
+  growth: stops working in January of the first age before retirement from
+  which the money lasts even then; none when no age does.
+- _Work to 67_ (“At the latest · 67”, the retirement age) pays in until
+  retirement. Its **spare** is how much more the portfolio could pay a
+  month from then (today's money, in steps of 10) and still last at the
+  low growth.
 
 The low and high growth run each plan with the dates of the expected
 return, so they show what happens to the same plan. A plan **lasts** when
