@@ -2084,14 +2084,6 @@ test("fiOutlook plans: each plan's phases, with a pension as a step while retire
   assert.deepEqual(stopAfter(safe.stopInvesting).values, safe.values.low);
   assert.notEqual(stopAfter(F.addMonths(safe.stopInvesting, -12)).runsOut, null, "a year sooner runs out at 3 %");
 
-  // What keep could pay more a month while retired and still last at 3 %,
-  // to 10: as much more spending from retirement lasts, 10 more doesn't.
-  assert.ok(keep.spare > 0 && keep.spare % 1000 === 0, keep.spare);
-  const spending = (amount) => F.fiOutlook({ ...s, expenses: [...s.expenses, { id: "more", name: "More", category: "", amount, everyMonths: 1, active: true, essential: false, from: { at: "retirement" }, until: null }] }, "2026-11")
-    .plans("nominal").plans.find((p) => p.key === "keep").runsOut.low;
-  assert.equal(spending(keep.spare), null);
-  assert.notEqual(spending(keep.spare + 1000), null);
-
   // Today's money: the values without the inflation since the start.
   const prices = F.fiOutlook({ ...s, settings: { ...s.settings, inflation: 2 } }, "2026-11");
   const nominal = prices.plans("nominal").plans[2].values.mid;
@@ -2126,7 +2118,6 @@ test("fiOutlook plans: retired already, plans that don't happen, and without a y
   assert.deepEqual(retired.plans.map((p) => [p.key, p.stopInvesting, p.retires]), [["keep", null, "2026-10"]]);
   assert.deepEqual(retired.plans[0].phases.map((p) => [p.kind, p.from]), [["retired", 0]]);
   assert.ok(retired.plans[0].runsOut.mid < "2032-01", "2,000 a month from 100,000 runs out within 5 years");
-  assert.equal(retired.plans[0].spare, 0);
   // No FI and no Coast FI before retirement: only Keep investing happens.
   const far = F.fiOutlook(outlookStore({ value: 1000 * EUR, payIn: 100 * EUR, goal: 2000000 * EUR, rate: 5, settings: { birthYear: 1990 } }), "2026-11").plans("nominal");
   assert.deepEqual(far.plans.map((p) => [p.key, p.retires]), [["fi", null], ["coast", null], ["keep", "2057-01"]]);
@@ -2138,14 +2129,12 @@ test("fiOutlook plans: a safe plan only when stopping at FI runs out at the low 
   // FI now, and it lasts at 3 % too: no safe plan.
   const rich = outlook({ value: 1000000 * EUR, goal: 600000 * EUR, rate: 5, settings: { birthYear: 1990 } }).plans("nominal");
   assert.deepEqual(rich.plans.map((p) => [p.key, p.runsOut.low]), [["fi", null], ["coast", null], ["keep", null]]);
-  assert.ok(rich.plans[2].spare > 0);
   // FI at 66, and at 3 % no age before 67 lasts, nor does working to 67.
   const late = outlook({ value: 50000 * EUR, payIn: 500 * EUR, goal: 600000 * EUR, rate: 5, settings: { birthYear: 1990 } }).plans("nominal");
   const plans = Object.fromEntries(late.plans.map((p) => [p.key, p]));
   assert.ok(plans.fi.retires !== null && plans.fi.runsOut.low !== null, "FI happens and runs out at 3 %");
   assert.deepEqual([plans.safe.stopInvesting, plans.safe.retires, plans.safe.phases], [null, null, []]);
   assert.notEqual(plans.keep.runsOut.low, null);
-  assert.equal(plans.keep.spare, 0);
 });
 
 test("fiOutlook plans: FI in the last month before retirement doesn't happen before it", () => {

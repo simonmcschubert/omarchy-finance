@@ -123,9 +123,7 @@ Today's money is the default; the choice is kept in the browser.
   growth: stops working in January of the first age before retirement from
   which the money lasts even then; none when no age does.
 - _Work to 67_ (“At the latest · 67”, the retirement age) pays in until
-  retirement. Its **spare** is how much more the portfolio could pay a
-  month from then (today's money, in steps of 10) and still last at the
-  low growth.
+  retirement.
 
 The low and high growth run each plan with the dates of the expected
 return, so they show what happens to the same plan. A plan **lasts** when

@@ -17,17 +17,18 @@
   /* Charts have colors of their own, so that their lines stay apart in
      every theme, grey ones too: three hues that people with color blindness
      tell apart too, a step lighter or darker for the theme's color scheme,
-     and a green and a red for gains and losses. */
-  --series-1: light-dark(#2a78d6, #3987e5);
-  --series-2: light-dark(#eb6834, #d95926);
-  --series-3: light-dark(#1baf7a, #199e70);
-  --good: #0ca30c;
-  --bad: #d03b3b;
+     and a green and a red for gains and losses. Muted, to sit calmly in a
+     monochrome theme. */
+  --series-1: light-dark(#4e739c, #6b8cb3);
+  --series-2: light-dark(#a56c4a, #b48164);
+  --series-3: light-dark(#478570, #60a08a);
+  --good: light-dark(#4f8a59, #60a06a);
+  --bad: light-dark(#a54b4b, #b86161);
   /* Runs out only if growth is low: a warning, not a failure. */
-  --risk: #e0a020;
-  --bad-text: light-dark(#b42318, #ff8a8a);
-  --good-text: light-dark(#087a08, #4cc760);
-  --risk-text: light-dark(#8a5a00, #e0a020);
+  --risk: light-dark(#a3843f, #ba9b5e);
+  --bad-text: light-dark(#8f3636, #d59090);
+  --good-text: light-dark(#3d7046, #81bb8b);
+  --risk-text: light-dark(#7d6328, #c9ad72);
   --font: "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
 }
 
@@ -728,19 +729,32 @@ main > div {
 }
 
 .tile.answer {
+  position: relative;
   font: inherit;
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.tile.answer:hover:not(:disabled) {
+.tile.answer:not(.on):hover:not(:disabled) {
   border-color: var(--fg-muted);
 }
 
+/* The picked one: a brighter border and a corner. */
 .tile.answer.on {
-  background: var(--selection);
-  border-color: var(--fg-muted);
+  border-color: var(--fg);
+}
+
+.tile.answer.on::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 18px;
+  height: 18px;
+  border-top-right-radius: 8px;
+  background: var(--fg);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
 }
 
 .tile.answer:focus-visible {
@@ -757,11 +771,11 @@ main > div {
 }
 
 .answer-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   font-size: 13px;
-  font-weight: 600;
+}
+
+.answer-status.none {
+  color: var(--fg-muted);
 }
 
 .answer-status.ok {
