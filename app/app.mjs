@@ -1723,6 +1723,15 @@ function viewPortfolio() {
     onsubmit: (event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
+      // A month typed and not switched to yet: Save shows that month first,
+      // and saves nothing, so values never go to a month the field no
+      // longer shows.
+      const typed = F.parseMonth(data.get("month"));
+      if (typed && typed !== month) {
+        state.month = typed;
+        state.focus = "#month-pick";
+        return render();
+      }
       const entries = [];
       const errors = [];
       for (const account of store.accounts) {
