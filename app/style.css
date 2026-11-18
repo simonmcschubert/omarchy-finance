@@ -294,6 +294,7 @@ button.month-title:hover,
 }
 
 .month-cell {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -313,19 +314,28 @@ button.month-title:hover,
 
 /* This month, or this year. */
 .month-cell[aria-current="date"] {
+  border-style: dashed;
   border-color: var(--fg-muted);
 }
 
-/* The month in the field. */
+/* The month in the field: a brighter border and a corner, as the
+   Forecast's picked plan. */
 .month-cell[aria-pressed="true"],
 .month-cell[aria-pressed="true"]:hover {
-  background: var(--accent);
-  border-color: var(--accent);
+  border-style: solid;
+  border-color: var(--fg);
 }
 
-.month-cell[aria-pressed="true"] .month-num,
-.month-cell[aria-pressed="true"] .month-name {
-  color: var(--bg);
+.month-cell[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 12px;
+  height: 12px;
+  border-top-right-radius: 6px;
+  background: var(--fg);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
 }
 
 .month-foot {
