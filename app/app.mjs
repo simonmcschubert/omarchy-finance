@@ -150,10 +150,10 @@ const isInvested = (account) => account.kind === "invested";
 // In this order on Ctrl+1 to Ctrl+6.
 const VIEWS = [
   ["dashboard", "Dashboard"],
+  ["forecast", "Forecast"],
+  ["portfolio", "Portfolio"],
   ["expenses", "Expenses"],
   ["income", "Income"],
-  ["portfolio", "Portfolio"],
-  ["forecast", "Forecast"],
   ["settings", "Settings"],
 ];
 
