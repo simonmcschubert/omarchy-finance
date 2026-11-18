@@ -34,9 +34,11 @@ directory, so keep it where it is. It asks for `sudo` once, to install the
 Finance looks for a new release 15 seconds after its server starts and every
 four hours. The update button, a circle of arrows at the right end of the top
 bar, checks now when clicked; hover it to see the installed version. When
-there is a release, the button turns into a down arrow with **Update**. Click
-it to download the release, then click **Restart to update** to install it:
-Finance restarts its server with the release and reloads the window. When the
+there is a release, the button turns into a down arrow with **Update**. One
+click downloads and installs it: Finance restarts its server with the release
+and reloads the window. A release downloaded otherwise (`update download` in
+a terminal, or a window closed while it downloaded) shows **Restart to
+update** instead, which installs it the same way. When the
 new server does not answer, Finance goes back to the version it had. A
 notification confirms the update or says why it failed. When it fails before
 the restart (local changes in the checkout, for example), the button says
