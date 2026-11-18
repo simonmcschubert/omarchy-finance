@@ -311,8 +311,9 @@ month without values.
 
 **Milestones** lists the milestones on the way to FI, in the order the
 portfolio reaches them. Each says what the portfolio needs (and how much
-is still to go), how much of it the portfolio has, and when it gets there,
-with your age then.
+is still to go), how much of it the portfolio has, and when it gets there:
+how long from this month (which can be after the latest month with
+values), and the month with your age then.
 
 | Milestone | Needs |
 | --- | --- |
@@ -350,8 +351,8 @@ The **Portfolio** chart has two views; the one picked last stays picked.
   to the FI number, and never past retirement. From the latest month on, the
   FI number is what FI needs at each month's end, that of retiring the month
   after, risen by the inflation. The line under the chart
-  says when each reaches the FI number; its ⓘ, what the FI number is by
-  then.
+  says when each reaches the FI number, at the expected return also how
+  long that is from this month; its ⓘ, what the FI number is by then.
   Its switch shows the projection in today's money (the default) or in the
   money of each year, as on the Forecast page.
 
@@ -437,12 +438,14 @@ dashboard has the same switch; the choice is remembered in this browser,
 not in the data file.
 
 **Pay in more or less** shows what paying in more or less does: a bar for
-each amount a month, from now to the age you could stop working (as Stop
-working counts it, at the expected return), on an age line to the
-retirement age, and how much sooner or later that is than with the average
-pay-in of the last 12 months (bold): months under a year, else years to
-a tenth. Each age has the month in that year next to it, so rows at the
-same age add up; hovering a bar shows the year too. The others are 2, 1½, ½ and 0 times
+each amount a month, from now to when you could stop working (as Stop
+working counts it, at the expected return), with how long that is from
+this month after it, and how much sooner or later that is than with the
+average pay-in of the last 12 months (bold). Both are in months under a
+year, else in years to a tenth; sooner or later is the difference of the
+tenths shown, so the rows add up. The line under the bars counts years
+from now, with your age then under it, and ends at the retirement age;
+hovering a bar shows its month and your age. The others are 2, 1½, ½ and 0 times
 the average, each paid in every month from now on (rising with inflation
 when pay-ins do); with an average of 0, round amounts near a quarter of the
 expenses. **Plan** is what you pay in
