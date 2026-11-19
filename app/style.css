@@ -1275,9 +1275,10 @@ main > div {
 /* Pay in more or less: a bar per amount, from now to when you could stop
    working, on a line of years from now to the retirement age. The rows
    share the columns: the amount, the bar, sooner or later. --at is where
-   on the line, 0 to 1; the line leaves room after it for how long. */
+   on the line, 0 to 1; the line leaves room after it for how long and
+   the age then. */
 .payin-rows {
-  --payin-room: 72px;
+  --payin-room: 96px;
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr) max-content;
   column-gap: 16px;
@@ -1337,6 +1338,13 @@ main > div {
 }
 
 .payin-unit {
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+
+/* The age at the stop, without a unit. */
+.payin-age {
+  margin-left: 2px;
   color: var(--fg-muted);
   font-weight: 400;
 }

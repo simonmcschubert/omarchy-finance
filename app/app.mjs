@@ -2162,13 +2162,11 @@ function drawForecast(focus = false) {
 }
 
 // Pay in more or less: a bar for each amount a month, from now to when you
-// could stop working (fiOutlook's payIns), with how long that is from now,
-// on a line of years from now (and your age then) that ends at the
-// retirement age, and how much sooner or later that is than with the
-// average pay-in. Your plan from Settings is a row of its own when it isn't
-// the average every month. null when there is nothing to compare.
-const TIMES = { 2: "2×", 1.5: "1½×", 1: "average", 0.5: "½×", 0: "nothing" };
-
+// could stop working (fiOutlook's payIns), with how long that is from now
+// and your age then, on a line of years from now (with the ages along it)
+// that ends at the retirement age, and how much sooner or later that is than
+// with the average pay-in. Your plan from Settings is a row of its own when
+// it isn't the average every month. null when there is nothing to compare.
 function payInCard(store) {
   const o = outlook(store);
   const scenarios = o.payIns();
@@ -2194,6 +2192,8 @@ function payInCard(store) {
     const t = tenthsAhead(row);
     return [tenths.format(t / 10), " ", h("span", { class: "payin-unit" }, t === 10 ? "year" : "years")];
   };
+  // How long, then the age at the stop, without a unit.
+  const ending = (row) => [length(row), " ", h("span", { class: "payin-age" }, String(F.ageIn(row.retires, birthYear)))];
 
   // Sooner or later than with the average: months under a year, else the
   // difference of the tenths the bars end with, so the numbers add up.
@@ -2216,8 +2216,6 @@ function payInCard(store) {
     payIn.rises ? "Rising with inflation." : null);
   const label = (row) => {
     if (row.plan) return ["Plan", planInfo()];
-    // With amounts hidden, how many times the average.
-    if (hidden() && row.factor !== null) return TIMES[row.factor];
     return row.average ? [money(row.amount), h("span", { class: "sub" }, " average")] : money(row.amount);
   };
 
@@ -2226,13 +2224,13 @@ function payInCard(store) {
   const when = (row) => (row.retires === null ? Infinity : F.monthIndex(row.retires));
   rows.sort((a, b) => when(a) - when(b));
 
-  // After the bar, how long from now; hovering the bar or that shows the
-  // month and the age.
+  // After the bar, how long from now and the age then; hovering the bar or
+  // that shows the month and the age.
   const line = (row) => {
     const tip = row.retires === null ? never : `Stop working in ${monthLabel(row.retires)}, at ${F.ageIn(row.retires, birthYear)}`;
     const bar = h("span", { class: `payin-bar${row.retires === null ? " never" : ""}`, title: tip });
     bar.style.setProperty("--at", row.retires === null ? "1" : at(F.monthIndex(row.retires)));
-    const time = row.retires === null ? null : h("span", { class: "payin-time", title: tip }, length(row));
+    const time = row.retires === null ? null : h("span", { class: "payin-time", title: tip }, ending(row));
     time?.style.setProperty("--at", bar.style.getPropertyValue("--at"));
     return h("div", { class: `payin-row${row.average ? " average" : ""}`, role: "listitem" },
       h("span", { class: "payin-label" }, label(row)),
@@ -2261,12 +2259,13 @@ function payInCard(store) {
 
   const about = info("pay in more or less",
     `When you could stop working if you paid in the same amount every month from now on, at the expected return of ${percentUnit.format(o.rates.mid)}: the month after FI, as Stop working counts it.`,
+    `From ${money(F.PAY_IN_STEPS[0])} to ${money(F.PAY_IN_STEPS.at(-1))} a month, in steps of ${money(F.PAY_IN_STEPS[1])}.`,
     scenarios.average > 0
-      ? `Average: what you paid in a month over ${payInMonths(scenarios.months)}. The others are 2, 1½, ½ and 0 times it.`
-      : `Average: you paid in nothing a month over ${scenarios.months ? payInMonths(scenarios.months) : "the months so far"}, so the others are round amounts.`,
+      ? `Average: what you paid in a month over ${payInMonths(scenarios.months)}.`
+      : `Average: you paid in nothing a month over ${scenarios.months ? payInMonths(scenarios.months) : "the months so far"}.`,
     payIn.rises ? "Like your pay-ins, they rise with inflation." : null,
     scenarios.plan ? ["Plan: what you pay in as set in ", settingsLink("data"), ", with its changes."] : null,
-    "After each bar, how long from now; under the line, your age then. Times are in months under a year, else in years to a tenth.",
+    "After each bar, how long from now and your age then; under the line, your age along the way. Times are in months under a year, else in years to a tenth.",
     "Planned one-offs count in every row.");
   return h("section", { class: "card payins" },
     h("div", { class: "card-head" }, h("h2", null, "Pay in more or less", about)),

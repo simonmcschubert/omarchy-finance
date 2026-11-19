@@ -138,9 +138,10 @@ then at the low growth. `forecast()`'s _needs_ give it for every month.
 
 **Pay-in scenarios** (`fiOutlook().payIns()`, “Pay in more or less” on
 the Forecast): when you could stop working, as _Retire at FI_ counts it,
-paying in the same amount every month from now on: 2, 1½, 1, ½ and 0 times
-the average pay-in (round amounts when the average is 0). The _plan_ row
-is the pay-in plan, there when it isn't the average every month.
+paying in the same amount every month from now on: 0 to 3,000 in steps of
+500 (`PAY_IN_STEPS`) and the average pay-in, a row of its own unless it is
+one of them. The _plan_ row is the pay-in plan, there when it isn't the
+average every month.
 
 **Phases**: _Investing_, _Coasting_ and _Retired_. A pension or other
 income that starts, or an expense that ends, is a _step_ inside Retired,

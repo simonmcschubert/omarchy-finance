@@ -440,20 +440,19 @@ not in the data file.
 **Pay in more or less** shows what paying in more or less does: a bar for
 each amount a month, from now to when you could stop working (as Stop
 working counts it, at the expected return), with how long that is from
-this month after it, and how much sooner or later that is than with the
-average pay-in of the last 12 months (bold). Both are in months under a
-year, else in years to a tenth; sooner or later is the difference of the
-tenths shown, so the rows add up. The line under the bars counts years
-from now, with your age then under it, and ends at the retirement age;
-hovering a bar shows its month and your age. The others are 2, 1½, ½ and 0 times
-the average, each paid in every month from now on (rising with inflation
-when pay-ins do); with an average of 0, round amounts near a quarter of the
-expenses. **Plan** is what you pay in
-as set in Settings, with its changes (its ⓘ lists them): it is a row when
-that isn't the average every month, and stops when the Stop working card
-does. A hatched bar doesn't reach FI before the retirement age. With
-amounts hidden, the rows say 2×, 1½×, average, ½× and nothing. The card
-isn't there once FI is reached, or once retired.
+this month and your age then after it ("12,4 years 49"), and how much
+sooner or later that is than with the average pay-in of the last 12 months
+(bold). Both are in months under a year, else in years to a tenth; sooner
+or later is the difference of the tenths shown, so the rows add up. The
+line under the bars counts years from now, with your age then under it,
+and ends at the retirement age; hovering a bar shows its month and your
+age. The amounts are 0 to 3.000 in steps of 500, and the average among
+them (it takes the place of the one it equals), each paid in every month
+from now on (rising with inflation when pay-ins do). **Plan** is what you
+pay in as set in Settings, with its changes (its ⓘ lists them): it is a
+row when that isn't the average every month, and stops when the Stop
+working card does. A hatched bar doesn't reach FI before the retirement
+age. The card isn't there once FI is reached, or once retired.
 
 - It starts from the portfolio in the latest month, and grows it by the
   growth rate every month (8 % a year is about 0.64 % a month), as Time to
