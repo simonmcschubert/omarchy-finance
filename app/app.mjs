@@ -2214,9 +2214,12 @@ function payInCard(store) {
       h("li", null, `Now: ${money(payIn.invested)} a month`),
       payIn.changes.map((c) => h("li", null, `From ${monthLabel(c.month)}, at ${F.ageIn(c.month, birthYear)}: ${c.average ? "the average, " : ""}${money(c.amount)}`))),
     payIn.rises ? "Rising with inflation." : null);
+  // An average that would show as one of the steps shows its cents.
+  const looksLikeStep = (cents) => !F.PAY_IN_STEPS.includes(cents) && F.PAY_IN_STEPS.includes(Math.round(cents / 100) * 100);
   const label = (row) => {
     if (row.plan) return ["Plan", planInfo()];
-    return row.average ? [money(row.amount), h("span", { class: "sub" }, " average")] : money(row.amount);
+    if (!row.average) return money(row.amount);
+    return [looksLikeStep(row.amount) ? moneyExact(row.amount) : money(row.amount), h("span", { class: "sub" }, " average")];
   };
 
   // Sooner first; a tie keeps this order, the plan before the average.
@@ -2260,9 +2263,7 @@ function payInCard(store) {
   const about = info("pay in more or less",
     `When you could stop working if you paid in the same amount every month from now on, at the expected return of ${percentUnit.format(o.rates.mid)}: the month after FI, as Stop working counts it.`,
     `From ${money(F.PAY_IN_STEPS[0])} to ${money(F.PAY_IN_STEPS.at(-1))} a month, in steps of ${money(F.PAY_IN_STEPS[1])}.`,
-    scenarios.average > 0
-      ? `Average: what you paid in a month over ${payInMonths(scenarios.months)}.`
-      : `Average: you paid in nothing a month over ${scenarios.months ? payInMonths(scenarios.months) : "the months so far"}.`,
+    `Average: what you paid in a month over ${scenarios.months ? payInMonths(scenarios.months) : "the months so far"}.`,
     payIn.rises ? "Like your pay-ins, they rise with inflation." : null,
     scenarios.plan ? ["Plan: what you pay in as set in ", settingsLink("data"), ", with its changes."] : null,
     "After each bar, how long from now and your age then; under the line, your age along the way. Times are in months under a year, else in years to a tenth.",
