@@ -366,20 +366,36 @@ nav {
 }
 
 nav a {
+  position: relative;
   color: var(--fg);
   text-decoration: none;
-  padding: 4px 10px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
   border-radius: 6px;
 }
 
 nav a:hover {
-  background: var(--selection);
+  border-color: var(--fg-muted);
 }
 
-nav a.active {
-  background: var(--selection);
+/* The open view: a brighter border and a corner, as the Forecast's picked
+   plan. */
+nav a.active,
+nav a.active:hover {
+  border-color: var(--fg);
   color: var(--fg-strong);
-  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+nav a.active::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 10px;
+  height: 10px;
+  border-top-right-radius: 6px;
+  background: var(--fg);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
 }
 
 /* The tabs of Settings, over a line. */
