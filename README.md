@@ -99,6 +99,10 @@ Finance window's browser profile. The data file stays.
   with its phases on an age line to 120 and its portfolio at 6, 8 and 10 %
   a year before inflation (by default). It only shows: what it goes on is
   set in Settings. See [Forecast](#forecast).
+- **What if**: what one change would do to your plan, without changing it:
+  stopping at an age you pick, paying in or spending more or less, a
+  one-off you haven't planned, another return or inflation, and buying a
+  flat. See [What if](#what-if).
 - **Portfolio**: each account's value at the end of each month, and what
   was paid in, under a short summary, with the history. See
   [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
@@ -106,9 +110,7 @@ Finance window's browser profile. The data file stays.
   come, until they end, under a short summary of the totals. See
   [Expenses and income](#expenses-and-income). Portfolio, Expenses and
   Income are for entering; the Dashboard and the Forecast show what it
-  comes to. At the foot of Expenses, **Buying a flat** shows what buying
-  one would change, without changing the plan; see
-  [Buying a flat](#buying-a-flat).
+  comes to, and What if what a change would.
 - **Settings**, in three tabs. **Data**, what the numbers go on:
   - Safe withdrawal rate (default 4 %) and a buffer on expenses for irregular
     costs (default 10 %).
@@ -170,8 +172,8 @@ it, or press Enter on it, to open it; Esc or a click elsewhere closes it.
 
 ![The ⓘ next to FI, open: the FI number and how it is worked out](docs/info.png)
 
-`Ctrl+1` to `Ctrl+6` open Dashboard, Forecast, Portfolio, Expenses, Income and
-Settings. `Ctrl+Shift+H`, or the eye at the right end of the top bar, hides
+`Ctrl+1` to `Ctrl+7` open Dashboard, Forecast, What if, Portfolio, Expenses,
+Income and Settings. `Ctrl+Shift+H`, or the eye at the right end of the top bar, hides
 every amount (as `••• €`, in charts and amount fields too) and keeps the
 percentages, for sharing the screen; again shows them. The choice is kept in
 this browser.
@@ -245,54 +247,6 @@ you stop working:
 Both numbers can be changed; income tax is left out.
 
 ![Income: a salary until retirement, and the state pension helper](docs/income.png)
-
-### Buying a flat
-
-**Buying a flat (Germany)**, at the foot of Expenses, is a what-if: it
-compares your plan as it is (renting) with the same plan and a flat. Your
-plan never counts it: the Dashboard and the Forecast stay as they are.
-**Save** keeps its fields in the data file for next time; **Delete**
-clears them.
-
-- **The flat**: the month you buy it (and move in), the price, the
-  purchase costs (default 10 %: Grunderwerbsteuer 3,5 to 6,5 % by state,
-  notary and land registry about 2 %, an agent up to 3,57 %), and your own
-  money, costs included. The own money comes from the latest values of
-  your cash accounts first, then out of the portfolio as a one-off in that
-  month; never from the emergency fund. The loan is the price and the
-  costs, less the own money.
-- **The loan**: the interest a year, fixed for a number of years (the
-  Zinsbindung), then the interest after that (empty: the same). The
-  repayment is either **% at first** (a year, the anfängliche Tilgung: the
-  payment is the loan × (interest + repayment) ÷ 12, worked out again for
-  what is left when the fixed years end), or an **amount a month**, the
-  whole payment, the same until the loan is paid off. Either way the
-  payment never rises with inflation; in today's money it gets smaller
-  every year.
-- **Each month**: Hausgeld and Grundsteuer, and subletting (rent you take
-  in, after tax; optional). Both are in today's money and rise with
-  inflation; subletting counts for good, also once you've stopped working.
-- **Stops then**: the expenses that stop when you buy, such as the rent:
-  from that month on, within their own months (a rent that ends before
-  saves nothing). Those that start at retirement aren't offered.
-
-What you pay in changes each month by what housing costs more than the
-expenses that stop, in the money of that month: the payment, plus Hausgeld
-less subletting and those expenses, which rise with inflation while the
-payment doesn't. Once the loan is paid off, the payment drops out of it:
-you usually pay in more then. A pay-in never goes below 0, and planned
-pay-in changes after the purchase change by the same.
-
-The card then says, as you type: the loan, what it pays a month and from
-when, when it is paid off and the interest in all; where the own money
-comes from; the housing cost and what you pay in, in the month you buy;
-when you could stop working (as Stop working on the Forecast counts it)
-and from when the money lasts even at the low growth, with the flat and
-without; and the FI number once the loan is paid off, with and without. A
-payment that doesn't cover the interest after the fixed years never pays
-the loan off: the card says so and compares nothing.
-
-![Buying a flat: a loan with 10 fixed years, the rent that stops, and what it changes](docs/flat.png)
 
 ### Portfolio, net worth and returns
 
@@ -491,23 +445,6 @@ month taken out) or in the money of each year. The Path to FI chart on the
 dashboard has the same switch; the choice is remembered in this browser,
 not in the data file.
 
-**Pay in more or less** shows what paying in more or less does: a bar for
-each amount a month, from now to when you could stop working (as Stop
-working counts it, at the expected return), with how long that is from
-this month and your age then after it ("12,4 years 49"), and how much
-sooner or later that is than with the average pay-in of the last 12 months
-(bold). Both are in months under a year, else in years to a tenth; sooner
-or later is the difference of the tenths shown, so the rows add up. The
-line under the bars counts years from now, with your age then under it,
-and ends at the retirement age; hovering a bar shows its month and your
-age. The amounts are 0 to 3.000 in steps of 500, and the average among
-them (it takes the place of the one it equals), each paid in every month
-from now on (rising with inflation when pay-ins do). **Plan** is what you
-pay in as set in Settings, with its changes (its ⓘ lists them): it is a
-row when that isn't the average every month, and stops when the Stop
-working card does. A hatched bar doesn't reach FI before the retirement
-age. The card isn't there once FI is reached, or once retired.
-
 - It starts from the portfolio in the latest month, and grows it by the
   growth rate every month (8 % a year is about 0.64 % a month), as Time to
   FI on the dashboard does. Stop working retires when that counts FI.
@@ -530,7 +467,127 @@ today's money and rise with inflation, like expenses. They are saved; a
 one-off that has happened goes under Portfolio.
 
 The page has nothing to fill in: the amount after Coast FI, the planned
-one-offs, the year of birth and the retirement age are in Settings.
+one-offs, the year of birth and the retirement age are in Settings. What
+other choices would do is on What if.
+
+### What if
+
+![What if: stopping at an age you pick, and paying in or spending more or less](docs/what-if.png)
+
+Each card changes one thing and compares your plan with it. None of them
+changes your plan: the Dashboard and the Forecast stay as they are. Like
+the Forecast, the cards need your year of birth and your expenses; Buying
+a flat works without them, but compares no ages then. Each counts when
+you could stop working as the Forecast's Stop working does, at the
+expected return, and with your planned one-offs.
+
+**Stop working at an age you pick**: type an age, from this year's (now)
+to the retirement age, and see the plan that stops working in January of
+the year you turn it, whatever the portfolio has then, and lives off it
+from then on. Until then you pay in as planned in Settings. It is drawn as
+the Forecast draws its plans: the name with a check, warning or cross and
+whether the money lasts, the bar of the phases on the age line to 120, and
+the chart with the band from 2 points less to 2 points more growth. When
+the money runs out, the line under the name says what the portfolio would
+need when you stop to last even at the low growth, as on the Forecast. It
+starts at the age Stop working stops at (the retirement age when that is
+none), and keeps the age you pick until the window closes. The switch at
+its top shows today's money or the money of each year, as on the Forecast.
+
+**Pay in more or less** shows what paying in more or less does: a bar for
+each amount a month, from now to when you could stop working (as Stop
+working counts it, at the expected return), with how long that is from
+this month and your age then after it ("12,4 years 49"), and how much
+sooner or later that is than with the average pay-in of the last 12 months
+(bold). Both are in months under a year, else in years to a tenth; sooner
+or later is the difference of the tenths shown, so the rows add up. The
+line under the bars counts years from now, with your age then under it,
+and ends at the retirement age; hovering a bar shows its month and your
+age. The amounts are 0 to 3.000 in steps of 500, and the average among
+them (it takes the place of the one it equals), each paid in every month
+from now on (rising with inflation when pay-ins do). **Plan** is what you
+pay in as set in Settings, with its changes (its ⓘ lists them): it is a
+row when that isn't the average every month, and stops when the Stop
+working card does. A hatched bar doesn't reach FI before the retirement
+age. The card isn't there once FI is reached, or once retired.
+
+**Spend more or less** is the same for spending: every expense, and the
+buffer with it, 30 % less to 30 % more in steps of 10, from now on and for
+good. Your income stays the same, so what you spend less you pay in while
+you work, on top of what you pay in as planned; what you spend more comes
+out of it, never below 0. That rises with inflation, like the expenses.
+Spending less counts twice: you pay in more, and the FI number falls with
+your expenses. Next to each share, what it changes a month now (with the
+buffer); **As now** (bold) is your plan as it is, with your expenses this
+month. The card isn't there without expenses that count now, once FI is
+reached, or once retired.
+
+**A one-off you haven't planned**: a month (this month or later, after the
+latest month with values) and an amount, negative for money taken out,
+such as an inheritance, a bonus or a car. As you type, it says when you
+could stop working with it instead of without, and from when the money
+lasts even at the low growth, and how much sooner or later each is: “Stop
+working at 49 instead of 52 (2,4 years sooner) · even at 6 %: at 52
+instead of 55 (3 years sooner)”. The amount is in today's money and rises
+with inflation until its month, like a planned one-off. Nothing is saved:
+to count it, add it to the planned one-offs in Settings › Data.
+
+**Growth and inflation**: a table of the age you could stop working at,
+with the expected return from 2 points less to 2 points more (a row each)
+and inflation from 1 point less to 1 point more, never below 0 (a column
+each). Yours from Settings is framed. Under an age, where the money runs
+out at that return after stopping then; nothing when it lasts to 120, and
+“–” when you can't stop before the retirement age. Hovering a cell shows
+the month. Higher inflation raises the expenses, the FI number and the
+planned one-offs; pay-ins rise with it only when they are set to. Unlike
+the Forecast's band, which keeps the dates of the expected return, each
+return here has its own: when you could stop at it.
+
+#### Buying a flat
+
+**Buying a flat (Germany)** compares your plan as it is (renting) with
+the same plan and a flat. **Save** keeps its fields in the data file for
+next time; **Delete** clears them.
+
+- **The flat**: the month you buy it (and move in), the price, the
+  purchase costs (default 10 %: Grunderwerbsteuer 3,5 to 6,5 % by state,
+  notary and land registry about 2 %, an agent up to 3,57 %), and your own
+  money, costs included. The own money comes from the latest values of
+  your cash accounts first, then out of the portfolio as a one-off in that
+  month; never from the emergency fund. The loan is the price and the
+  costs, less the own money.
+- **The loan**: the interest a year, fixed for a number of years (the
+  Zinsbindung), then the interest after that (empty: the same). The
+  repayment is either **% at first** (a year, the anfängliche Tilgung: the
+  payment is the loan × (interest + repayment) ÷ 12, worked out again for
+  what is left when the fixed years end), or an **amount a month**, the
+  whole payment, the same until the loan is paid off. Either way the
+  payment never rises with inflation; in today's money it gets smaller
+  every year.
+- **Each month**: Hausgeld and Grundsteuer, and subletting (rent you take
+  in, after tax; optional). Both are in today's money and rise with
+  inflation; subletting counts for good, also once you've stopped working.
+- **Stops then**: the expenses that stop when you buy, such as the rent:
+  from that month on, within their own months (a rent that ends before
+  saves nothing). Those that start at retirement aren't offered.
+
+What you pay in changes each month by what housing costs more than the
+expenses that stop, in the money of that month: the payment, plus Hausgeld
+less subletting and those expenses, which rise with inflation while the
+payment doesn't. Once the loan is paid off, the payment drops out of it:
+you usually pay in more then. A pay-in never goes below 0, and planned
+pay-in changes after the purchase change by the same.
+
+The card then says, as you type: the loan, what it pays a month and from
+when, when it is paid off and the interest in all; where the own money
+comes from; the housing cost and what you pay in, in the month you buy;
+when you could stop working (as Stop working on the Forecast counts it)
+and from when the money lasts even at the low growth, with the flat and
+without; and the FI number once the loan is paid off, with and without. A
+payment that doesn't cover the interest after the fixed years never pays
+the loan off: the card says so and compares nothing.
+
+![Buying a flat: a loan with 10 fixed years, the rent that stops, and what it changes](docs/flat.png)
 
 ### Importing past months
 

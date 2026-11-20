@@ -1544,6 +1544,79 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
   // when the portfolio is there.
   const fiMonth = (result, number) => (retired ? (value >= number ? start : null) : result.plans.fi.fiMonth);
   const inMoney = (result, kind) => (kind === "today" ? inTodaysMoney(result, inflation) : result);
+  // When the Stop working plan of a run stops: the month after FI, or null
+  // when FI doesn't come before the month before retirement.
+  const stops = (result) => {
+    const month = result.plans.fi.fiMonth;
+    return month !== null && monthIndex(month) + 1 < retirement ? monthFromIndex(monthIndex(month) + 1) : null;
+  };
+  // The runs at each growth with the dates of `fixed` ({ coast, fi }), as
+  // plans() runs them.
+  const runsWith = (fixed) => Object.fromEntries(GROWTHS.map((g) => [g, run({ growth: g, coastContribution: store.settings.coastPayIn, fixed })]));
+
+  // What plans() and stopAfter() describe their plans with, their values in
+  // "nominal" money or "today"'s.
+  const planParts = (kind) => {
+    const coastContribution = store.settings.coastPayIn;
+    const n = run().months.length;
+    const at = (i) => first + i; // month index of shown month i
+    // Splits [from, to) where amount(i) changes.
+    const stepsOf = (from, to, amount, extra = () => ({})) => {
+      const steps = [];
+      for (let i = from; i < to; i++) {
+        const a = amount(i);
+        if (steps.length && steps.at(-1).amount === a) continue;
+        if (steps.length) steps.at(-1).to = i;
+        steps.push({ from: i, to, amount: a, ...extra(i) });
+      }
+      return steps;
+    };
+    const invest = (from, to) => ({ kind: "invest", from, to, steps: stepsOf(Math.max(from, 1), to, (i) => Math.max(0, plan.at(at(i)))).map((s, k) => (k ? s : { ...s, from })) });
+    const coast = (from, to) => ({ kind: "coast", from, to, steps: [{ from, to, amount: coastContribution }] });
+    // Living off the portfolio from shown month `from`, retired from the
+    // month index `since`.
+    const living = (from, since) => {
+      const changed = (index) => [...store.expenses, ...store.income]
+        .filter((item) => item.active !== false)
+        .flatMap((item) => {
+          const { from: begins, until } = itemWindow(item, birthYear, since);
+          const type = store.income.includes(item) ? "income" : "expenses";
+          return begins === index ? [{ name: item.name, kind: type, starts: true }] : until === index ? [{ name: item.name, kind: type, starts: false }] : [];
+        });
+      // What the portfolio pays (as forecast() takes it out) and its
+      // share can only change where an expense or income starts or ends.
+      const steps = [];
+      for (const index of [at(from), ...changesAfter(store, since).filter((i) => i > at(from) && i < at(n))]) {
+        const b = budget(store, index, since);
+        const amount = Math.round(b.need);
+        const share = b.expenses.total > 0 ? Math.min(1, b.need / b.expenses.total) : 1;
+        const last = steps.at(-1);
+        if (last && last.amount === amount && last.share === share) continue;
+        if (last) last.to = index - first;
+        steps.push({ from: index - first, to: n, amount, share, changes: changed(index) });
+      }
+      return { kind: "retired", from, to: n, steps };
+    };
+    // A plan `key` as forecast() ran it as `plan` in the runs of `set`.
+    const describe = (key, stopInvesting, retires, phases, set, plan = key) => {
+      const turn = stopInvesting === null ? 0 : monthIndex(stopInvesting) - first;
+      const runs = Object.fromEntries(GROWTHS.map((g) => [g, inMoney(set[g], kind).plans[plan]]));
+      const each = (f) => Object.fromEntries(GROWTHS.map((g) => [g, f(runs[g], g)]));
+      return {
+        key, stopInvesting, retires,
+        values: each((run) => run.values),
+        runsOut: each((_, g) => set[g].plans[plan].runsOut),
+        lastsWith: each((run) => run.needs[turn]),
+        phases: phases.filter((p) => p.to > p.from),
+      };
+    };
+    // Stops working after the month `last`: invests until then, and
+    // lives off the portfolio from the month after.
+    const stopping = (key, last, set) => describe(key, monthIndex(last) > first ? last : null, monthFromIndex(monthIndex(last) + 1), [
+      ...(monthIndex(last) > first ? [invest(0, monthIndex(last) - first + 1)] : []),
+      living(monthIndex(last) - first + 1, monthIndex(last) + 1)], set, "fi");
+    return { invest, coast, living, describe, stopping };
+  };
 
   return {
     start,
@@ -1680,7 +1753,6 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
       // A plan happens when it changes course before retirement: FI or
       // Coast FI in the last month before it would change nothing.
       const before = (month) => month !== null && monthIndex(month) + 1 < retirement;
-      const runsWith = (dates) => Object.fromEntries(GROWTHS.map((g) => [g, run({ growth: g, coastContribution, fixed: dates })]));
       const results = { mid: main, low: run({ growth: "low", coastContribution, fixed }), high: run({ growth: "high", coastContribution, fixed }) };
       // The last month worked for a safe plan (December before the age it
       // stops at): undefined when it isn't needed (Retire early lasts at
@@ -1695,79 +1767,52 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
         }
         return null;
       };
+      const { invest, coast, living, describe, stopping } = planParts(kind);
       const shown = inMoney(main, kind);
-      const n = shown.months.length;
-      const at = (i) => first + i; // month index of shown month i
-      // Splits [from, to) where amount(i) changes.
-      const stepsOf = (from, to, amount, extra = () => ({})) => {
-        const steps = [];
-        for (let i = from; i < to; i++) {
-          const a = amount(i);
-          if (steps.length && steps.at(-1).amount === a) continue;
-          if (steps.length) steps.at(-1).to = i;
-          steps.push({ from: i, to, amount: a, ...extra(i) });
-        }
-        return steps;
-      };
-      const invest = (from, to) => ({ kind: "invest", from, to, steps: stepsOf(Math.max(from, 1), to, (i) => Math.max(0, plan.at(at(i)))).map((s, k) => (k ? s : { ...s, from })) });
-      const coast = (from, to) => ({ kind: "coast", from, to, steps: [{ from, to, amount: coastContribution }] });
-      // Living off the portfolio from shown month `from`, retired from the
-      // month index `since`.
-      const living = (from, since) => {
-        const changed = (index) => [...store.expenses, ...store.income]
-          .filter((item) => item.active !== false)
-          .flatMap((item) => {
-            const { from: begins, until } = itemWindow(item, birthYear, since);
-            const type = store.income.includes(item) ? "income" : "expenses";
-            return begins === index ? [{ name: item.name, kind: type, starts: true }] : until === index ? [{ name: item.name, kind: type, starts: false }] : [];
-          });
-        // What the portfolio pays (as forecast() takes it out) and its
-        // share can only change where an expense or income starts or ends.
-        const steps = [];
-        for (const index of [at(from), ...changesAfter(store, since).filter((i) => i > at(from) && i < at(n))]) {
-          const b = budget(store, index, since);
-          const amount = Math.round(b.need);
-          const share = b.expenses.total > 0 ? Math.min(1, b.need / b.expenses.total) : 1;
-          const last = steps.at(-1);
-          if (last && last.amount === amount && last.share === share) continue;
-          if (last) last.to = index - first;
-          steps.push({ from: index - first, to: n, amount, share, changes: changed(index) });
-        }
-        return { kind: "retired", from, to: n, steps };
-      };
-      // A plan `key` as forecast() ran it as `plan` in the runs of `set`.
-      const describe = (key, stopInvesting, retires, phases, set = results, plan = key) => {
-        const turn = stopInvesting === null ? 0 : monthIndex(stopInvesting) - first;
-        const runs = Object.fromEntries(GROWTHS.map((g) => [g, inMoney(set[g], kind).plans[plan]]));
-        const each = (f) => Object.fromEntries(GROWTHS.map((g) => [g, f(runs[g], g)]));
-        return {
-          key, stopInvesting, retires,
-          values: each((run) => run.values),
-          runsOut: each((_, g) => set[g].plans[plan].runsOut),
-          lastsWith: each((run) => run.needs[turn]),
-          phases: phases.filter((p) => p.to > p.from),
-        };
-      };
-      // Stops working after the month `last`: invests until then, and
-      // lives off the portfolio from the month after.
-      const stopping = (key, last, set) => describe(key, monthIndex(last) > first ? last : null, monthFromIndex(monthIndex(last) + 1), [
-        ...(monthIndex(last) > first ? [invest(0, monthIndex(last) - first + 1)] : []),
-        living(monthIndex(last) - first + 1, monthIndex(last) + 1)], set, "fi");
       const ret = retirement - first;
-      if (retired) return remember({ months: shown.months, retirement: monthFromIndex(retirement), plans: [describe("keep", null, start, [living(0, retirement)])] });
+      if (retired) return remember({ months: shown.months, retirement: monthFromIndex(retirement), plans: [describe("keep", null, start, [living(0, retirement)], results)] });
       // Each phase from the month after the one before it ends.
-      const fi = before(fixed.fi) ? stopping("fi", fixed.fi, results) : describe("fi", null, null, []);
+      const fi = before(fixed.fi) ? stopping("fi", fixed.fi, results) : describe("fi", null, null, [], results);
       const coastFrom = before(fixed.coast) ? monthIndex(fixed.coast) - first + 1 : null;
-      const coasting = coastFrom === null ? describe("coast", null, null, [])
+      const coasting = coastFrom === null ? describe("coast", null, null, [], results)
         : describe("coast", coastFrom > 1 ? fixed.coast : null, monthFromIndex(retirement), [
           ...(coastFrom > 1 ? [invest(0, coastFrom)] : []),
           coast(coastFrom > 1 ? coastFrom : 0, ret),
-          living(ret, retirement)]);
-      const keep = describe("keep", monthFromIndex(retirement - 1), monthFromIndex(retirement), [invest(0, ret), living(ret, retirement)]);
+          living(ret, retirement)], results);
+      const keep = describe("keep", monthFromIndex(retirement - 1), monthFromIndex(retirement), [invest(0, ret), living(ret, retirement)], results);
       const safe = safeStop();
       const safely = safe === undefined ? []
         : [safe === null ? describe("safe", null, null, [], results, "fi") : stopping("safe", safe, runsWith({ coast: null, fi: safe }))];
       return remember({ months: shown.months, retirement: monthFromIndex(retirement), plans: [fi, coasting, keep, ...safely] });
+    },
+
+    // The What if page's Stop working at an age: stops working after the
+    // month `last` (null, or a month up to `start`: now), whatever the
+    // portfolio has then, and lives off it from the month after; from the
+    // month before retirement on, that is working until retirement. As
+    // plans() describes its plans, in "nominal" money or "today"'s: {
+    //   months, retirement: as plans() has them,
+    //   plan: a plan with the key "pick", at the expected return and
+    //     RETURN_SPREAD points less and more, with the same dates,
+    // }; null without a year of birth, or once retired.
+    stopAfter(last, kind = "nominal") {
+      if (!Number.isFinite(retirement) || retired) return null;
+      const month = last === null || monthIndex(last) <= first ? start : monthFromIndex(Math.min(monthIndex(last), retirement - 1));
+      const { stopping } = planParts(kind);
+      return { months: inMoney(run(), kind).months, retirement: monthFromIndex(retirement), plan: stopping("pick", month, runsWith({ coast: null, fi: month })) };
+    },
+
+    // When the Stop working plan stops, at the expected return: { retires:
+    // the first month lived off the portfolio, the month after FI, or null
+    // when FI doesn't come before the month before retirement; runsOut:
+    // the first month with nothing left after it, or null when it lasts
+    // to the end of SHOWN_AGE (also when it doesn't stop) }. null without
+    // a year of birth, or once retired. The What if page compares it.
+    stopsWorking() {
+      if (!Number.isFinite(retirement) || retired) return null;
+      const result = run();
+      const retires = stops(result);
+      return { retires, runsOut: retires === null ? null : result.plans.fi.runsOut };
     },
 
     // The Forecast's pay-in scenarios: when you could stop working when
@@ -1790,10 +1835,6 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
       if (!Number.isFinite(retirement) || retired) return null;
       const mean = averagePayIn(series);
       const average = Math.max(0, Math.round(mean?.average ?? 0));
-      const stops = (result) => {
-        const month = result.plans.fi.fiMonth;
-        return month !== null && monthIndex(month) + 1 < retirement ? monthFromIndex(monthIndex(month) + 1) : null;
-      };
       if (run({ payIn: average }).plans.fi.fiMonth === start) return null;
       const amounts = [...new Set([...PAY_IN_STEPS, average])]
         .sort((a, b) => b - a)
@@ -1816,8 +1857,98 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
 // whole units of the currency in steps of 500.
 export const PAY_IN_STEPS = [0, 500, 1000, 1500, 2000, 2500, 3000].map((units) => units * 100);
 
+// ---------------------------------------------------------------- what if
+// The What if page: each what-if changes one thing, works out the plan with
+// it, and compares that with the plan as it is. None of them changes the
+// plan. Buying a flat (below) is one too.
+
+// When you could stop working with an outlook, as the Forecast's plans
+// count it: { work: when Stop working stops, low: from when the money
+// lasts even at the low growth (Even at …'s when it is there, else
+// work's) }, each the first month lived off the portfolio, or null when
+// not before retirement. null without a year of birth, or once retired.
+export function stopsIn(outlook) {
+  const plans = outlook.retired ? null : outlook.plans("nominal");
+  if (!plans) return null;
+  const fi = plans.plans.find((p) => p.key === "fi");
+  const safe = plans.plans.find((p) => p.key === "safe");
+  return { work: fi.retires, low: safe ? safe.retires : fi.retires };
+}
+
+// A one-off you haven't planned: { month, amount } paid in (or taken out,
+// below 0) once, in today's money, like a planned one-off. Returns { plan,
+// oneOff }: stopsIn the plan as it is, and with the one-off as well.
+export function oneOffWhatIf(store, oneOff, now = currentMonth()) {
+  const events = [...store.events, { id: "what-if", name: "What if", month: oneOff.month, amount: oneOff.amount }];
+  return { plan: stopsIn(fiOutlook(store, now)), oneOff: stopsIn(fiOutlook({ ...store, events }, now)) };
+}
+
+// The shares spent more or less that the spending what-if compares, in
+// percent: 30 % less to 30 % more in steps of 10.
+export const SPENDING_STEPS = Object.freeze([-30, -20, -10, 0, 10, 20, 30]);
+
+// Spend more or less: when you could stop working if every expense were a
+// share more or less from now on, for good, with your income the same. What
+// you spend less you pay in while you work, on top of the pay-in plan; what
+// you spend more comes out of it, never below 0. Both in the money of each
+// month, as the expenses rise with inflation. null without a year of birth,
+// once retired, without expenses that count now, or when FI is reached at
+// the start. Otherwise {
+//   monthly: the expenses with buffer this month,
+//   rows: [{ percent, monthly: what that changes a month now, retires: as
+//     stopsWorking() counts it }], in the order of SPENDING_STEPS; the 0
+//     row is the plan as it is,
+// }.
+export function spendingWhatIf(store, now = currentMonth()) {
+  const outlook = fiOutlook(store, now);
+  const plan = outlook.stopsWorking();
+  const monthly = budget(store, monthIndex(now)).expenses.total;
+  if (plan === null || !(monthly > 0) || plan.retires === addMonths(outlook.start, 1)) return null;
+  const { inflation } = store.settings;
+  const first = monthIndex(outlook.start);
+  // The expenses with buffer in the month of `index`, in today's money, as
+  // the plan counts them while working.
+  const totals = new Map();
+  const total = (index) => {
+    if (!totals.has(index)) totals.set(index, budget(store, index).expenses.total);
+    return totals.get(index);
+  };
+  const row = (percent) => {
+    if (percent === 0) return { percent, monthly: 0, retires: plan.retires };
+    const share = percent / 100;
+    const expenses = store.expenses.map((item) => ({ ...item, amount: item.amount * (1 + share) }));
+    const payIn = (index, amount) => Math.max(0, amount - inflated(total(index) * share, inflation, index - first));
+    return { percent, monthly: monthly * share, retires: fiOutlook({ ...store, expenses }, now, { payIn }).stopsWorking().retires };
+  };
+  return { monthly, rows: SPENDING_STEPS.map(row) };
+}
+
+// Growth and inflation: when you could stop working, as stopsWorking()
+// counts it, at an expected return from 2 points less to 2 points more
+// than the one in Settings, and inflation from 1 point less to 1 point
+// more (never below 0). null without a year of birth, or once retired.
+// Otherwise {
+//   returns, inflations: the percentages a year, from low to high,
+//   cells: one row per return, one cell per inflation: { growth,
+//     inflation, retires, runsOut, plan (the one with the Settings') },
+// }.
+export function growthWhatIf(store, now = currentMonth()) {
+  const { expectedReturn, inflation } = store.settings;
+  if (fiOutlook(store, now).stopsWorking() === null) return null;
+  // Whole points around a value, kept to its two decimals.
+  const around = (value, spread) => Array.from({ length: 2 * spread + 1 }, (_, k) => Math.round((value + k - spread) * 100) / 100).filter((v) => v >= 0);
+  const returns = around(expectedReturn, 2);
+  const inflations = around(inflation, 1);
+  const cells = returns.map((growth) => inflations.map((rate) => {
+    const settings = { ...store.settings, expectedReturn: growth, inflation: rate };
+    const { retires, runsOut } = fiOutlook({ ...store, settings }, now).stopsWorking();
+    return { growth, inflation: rate, retires, runsOut, plan: growth === expectedReturn && rate === inflation };
+  }));
+  return { returns, inflations, cells };
+}
+
 // ---------------------------------------------------------------- flat
-// Buying a flat, as a what-if: the plan never counts it. The Expenses page
+// Buying a flat, as a what-if: the plan never counts it. The What if page
 // compares the plan as it is (renting) with the plan and the flat.
 //
 // A flat (store.flat, or one being typed): {
@@ -2028,18 +2159,11 @@ export function flatWhatIf(store, flat, now = currentMonth()) {
     : store.events;
   const buying = { ...store, expenses, income, events };
 
-  const stops = (outlook) => {
-    const plans = outlook.retired ? null : outlook.plans("nominal");
-    if (!plans) return null;
-    const fi = plans.plans.find((p) => p.key === "fi");
-    const safe = plans.plans.find((p) => p.key === "safe");
-    return { work: fi.retires, low: safe ? safe.retires : fi.retires };
-  };
   const paidOff = buy + months;
   return {
     ...result,
-    renting: stops(fiOutlook(store, now)),
-    buying: stops(fiOutlook(buying, now, { payIn: paidIn })),
+    renting: stopsIn(fiOutlook(store, now)),
+    buying: stopsIn(fiOutlook(buying, now, { payIn: paidIn })),
     fiNumber: { renting: fiNumberIn(store, paidOff), buying: fiNumberIn(buying, paidOff) },
     store: buying,
     paidIn,

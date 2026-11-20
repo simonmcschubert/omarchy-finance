@@ -2578,3 +2578,139 @@ test("buying a flat, as a what-if: the loan, the own money, the pay-ins, and whe
   assert.deepEqual([unborn.loan, unborn.renting, unborn.buying], [280000 * EUR, null, null]);
   assert.ok(unborn.fiNumber.buying < unborn.fiNumber.renting);
 });
+
+// ---------------------------------------------------------------- what if
+
+test("stopAfter: stop working at an age you pick, as the Forecast describes its plans", () => {
+  const s = renting();
+  const o = F.fiOutlook(s, "2026-11");
+  for (const money of ["nominal", "today"]) {
+    const plans = o.plans(money);
+    const plan = (key) => plans.plans.find((p) => p.key === key);
+    const picked = (last) => {
+      const result = o.stopAfter(last, money);
+      assert.deepEqual([result.months, result.retirement], [plans.months, plans.retirement], `the same months, ${money}`);
+      return { ...result.plan, key: null };
+    };
+    // Stopping when Stop working and Even at … stop is those plans.
+    assert.deepEqual(picked(plan("fi").stopInvesting), { ...plan("fi"), key: null }, `Stop working, ${money}`);
+    assert.ok(plan("safe"), "Stop working runs out at the low growth");
+    assert.deepEqual(picked(plan("safe").stopInvesting), { ...plan("safe"), key: null }, `Even at, ${money}`);
+    // From the month before retirement on, it works until retirement.
+    assert.deepEqual(picked("2056-12"), { ...plan("keep"), key: null }, `At the latest, ${money}`);
+    assert.deepEqual(picked("2070-01"), picked("2056-12"), "after retirement");
+  }
+  // Now, or a month gone by: it stops paying in at once.
+  const now = o.stopAfter(null).plan;
+  assert.deepEqual([now.key, now.stopInvesting, now.retires, now.phases.map((p) => p.kind)], ["pick", null, "2026-11", ["retired"]]);
+  assert.deepEqual(o.stopAfter("2026-10").plan, now);
+  assert.deepEqual(o.stopAfter("2020-01").plan, now);
+  // Sooner runs out sooner.
+  const at = (age) => o.stopAfter(F.monthFromIndex((1990 + age) * 12 - 1)).plan.runsOut.mid;
+  assert.ok(at(40) !== null && at(40) < at(45), "40 runs out before 45");
+  // Without a year of birth, and once retired: nothing to stop.
+  assert.equal(F.fiOutlook({ ...s, settings: { ...s.settings, birthYear: null } }, "2026-11").stopAfter("2040-12"), null);
+  assert.equal(F.fiOutlook({ ...s, settings: { ...s.settings, birthYear: 1950 } }, "2026-11").stopAfter("2040-12"), null);
+});
+
+test("stopsWorking: when Stop working stops, and whether its money lasts at the expected return", () => {
+  const s = renting();
+  const o = F.fiOutlook(s, "2026-11");
+  const fi = o.plans("nominal").plans.find((p) => p.key === "fi");
+  assert.deepEqual(o.stopsWorking(), { retires: fi.retires, runsOut: fi.runsOut.mid });
+  assert.equal(o.stopsWorking().retires, "2043-09");
+  // It runs out at the expected return when growth is low.
+  const low = F.fiOutlook({ ...s, settings: { ...s.settings, expectedReturn: 4 } }, "2026-11");
+  const slow = low.plans("nominal").plans.find((p) => p.key === "fi");
+  assert.ok(slow.runsOut.mid !== null, "runs out at 4 %");
+  assert.deepEqual(low.stopsWorking(), { retires: slow.retires, runsOut: slow.runsOut.mid });
+  // Not before retirement: nothing runs out, as nothing stops.
+  const late = F.fiOutlook({ ...s, records: s.records.map((r) => ({ ...r, value: Math.round(r.value / 10), payIn: 100 * EUR })) }, "2026-11");
+  assert.deepEqual(late.stopsWorking(), { retires: null, runsOut: null });
+  assert.equal(F.fiOutlook({ ...s, settings: { ...s.settings, birthYear: null } }, "2026-11").stopsWorking(), null);
+  assert.equal(F.fiOutlook({ ...s, settings: { ...s.settings, birthYear: 1950 } }, "2026-11").stopsWorking(), null);
+});
+
+test("a one-off you haven't planned: when you could stop with it, against the plan", () => {
+  const s = renting();
+  const inheritance = { month: "2030-01", amount: 100000 * EUR };
+  const r = F.oneOffWhatIf(s, inheritance, "2026-11");
+  assert.deepEqual(r.plan, { work: "2043-09", low: "2047-01" }, "the plan as it is, as the flat has it");
+  // The same as planning it.
+  const planned = F.saveEvent(s, { id: null, name: "Inheritance", ...inheritance }).store;
+  assert.deepEqual(r.oneOff, F.stopsIn(F.fiOutlook(planned, "2026-11")));
+  assert.ok(r.oneOff.work < r.plan.work && r.oneOff.low < r.plan.low, "sooner");
+  // Taken out, later.
+  const car = F.oneOffWhatIf(s, { month: "2028-06", amount: -40000 * EUR }, "2026-11");
+  assert.ok(car.oneOff.work > car.plan.work, "later");
+  assert.deepEqual(s.events, [], "the plan is left alone");
+  // Without a year of birth: no ages to compare.
+  assert.deepEqual(F.oneOffWhatIf({ ...s, settings: { ...s.settings, birthYear: null } }, inheritance, "2026-11"), { plan: null, oneOff: null });
+});
+
+test("spend more or less: the FI number and what you pay in change together", () => {
+  // Without inflation, what you spend less is the same amount every month.
+  const s = { ...renting(), settings: { ...renting().settings, inflation: 0 } };
+  const r = F.spendingWhatIf(s, "2026-11");
+  // 900 + 250 + 1.190 and 10 % buffer; health insurance only from retirement.
+  assert.equal(r.monthly, 2574 * EUR);
+  assert.deepEqual(r.rows.map((row) => row.percent), [...F.SPENDING_STEPS]);
+  const row = (percent) => r.rows.find((x) => x.percent === percent);
+  close(row(-10).monthly, -257.4 * EUR, "10 % less a month");
+  assert.equal(row(0).monthly, 0);
+  assert.equal(row(0).retires, F.fiOutlook(s, "2026-11").stopsWorking().retires, "0 % is the plan");
+  // Each is the plan with every expense a share more or less, and the
+  // pay-in up or down by that.
+  const scaled = (share, payIn) => ({ ...s, expenses: s.expenses.map((e) => ({ ...e, amount: e.amount * (1 + share) })), settings: { ...s.settings, futurePayIn: payIn } });
+  assert.equal(row(-10).retires, F.fiOutlook(scaled(-0.1, 165740), "2026-11").stopsWorking().retires);
+  assert.equal(row(30).retires, F.fiOutlook(scaled(0.3, 62780), "2026-11").stopsWorking().retires);
+  // Less is sooner, more is later.
+  const stops = r.rows.map((x) => x.retires ?? "9999-99");
+  assert.ok(stops.every((month, i) => i === 0 || stops[i - 1] < month), `sooner with less: ${stops}`);
+
+  // Spending more than is paid in pays in nothing, never less.
+  const big = { ...s, expenses: s.expenses.map((e) => (e.id === "live" ? { ...e, amount: 5000 * EUR } : e)) };
+  const more = F.spendingWhatIf({ ...big, records: big.records.map((rec) => ({ ...rec, value: rec.value * 4 })) }, "2026-11");
+  const floor = { ...big, records: big.records.map((rec) => ({ ...rec, value: rec.value * 4 })), expenses: big.expenses.map((e) => ({ ...e, amount: e.amount * 1.3 })), settings: { ...s.settings, futurePayIn: 0 } };
+  assert.equal(more.rows.at(-1).retires, F.fiOutlook(floor, "2026-11").stopsWorking().retires);
+
+  // With inflation, what you spend less rises with it, as the expenses do:
+  // sooner than paying in the same more every month.
+  const inflating = renting();
+  const level = { ...inflating, expenses: inflating.expenses.map((e) => ({ ...e, amount: e.amount * 0.9 })), settings: { ...inflating.settings, futurePayIn: 165740 } };
+  assert.deepEqual([F.spendingWhatIf(inflating, "2026-11").rows[2].retires, F.fiOutlook(level, "2026-11").stopsWorking().retires], ["2041-03", "2041-05"]);
+
+  // Nothing to compare: without a year of birth, once retired, without
+  // expenses, or at FI already.
+  assert.equal(F.spendingWhatIf({ ...s, settings: { ...s.settings, birthYear: null } }, "2026-11"), null);
+  assert.equal(F.spendingWhatIf({ ...s, settings: { ...s.settings, birthYear: 1950 } }, "2026-11"), null);
+  assert.equal(F.spendingWhatIf({ ...s, expenses: [] }, "2026-11"), null);
+  assert.equal(F.spendingWhatIf({ ...s, records: s.records.map((rec) => ({ ...rec, value: rec.value * 100 })) }, "2026-11"), null);
+});
+
+test("growth and inflation: when you could stop at other returns and inflation", () => {
+  const s = renting();
+  const r = F.growthWhatIf(s, "2026-11");
+  assert.deepEqual([r.returns, r.inflations], [[6, 7, 8, 9, 10], [2, 3, 4]]);
+  // Each cell is the plan with that return and inflation.
+  for (const row of r.cells) {
+    for (const cell of row) {
+      const settings = { ...s.settings, expectedReturn: cell.growth, inflation: cell.inflation };
+      assert.deepEqual({ retires: cell.retires, runsOut: cell.runsOut }, F.fiOutlook({ ...s, settings }, "2026-11").stopsWorking());
+    }
+  }
+  // The one with the Settings' is the plan.
+  assert.deepEqual(r.cells.flat().filter((c) => c.plan).map((c) => [c.growth, c.inflation, c.retires]), [[8, 3, "2043-09"]]);
+  // More growth is sooner; more inflation, with pay-ins that don't rise, later.
+  const month = (c) => c.retires ?? "9999-99";
+  for (let i = 1; i < r.cells.length; i++) r.cells[i].forEach((c, k) => assert.ok(month(c) <= month(r.cells[i - 1][k]), `${c.growth} % before ${c.growth - 1} %`));
+  for (const row of r.cells) row.forEach((c, k) => assert.ok(k === 0 || month(c) >= month(row[k - 1]), `${c.inflation} % after ${c.inflation - 1} %`));
+  // At 6 % with 4 % inflation, stopping at FI runs out; with the Settings' it lasts.
+  assert.deepEqual([r.cells[0][2].retires, r.cells[0][2].runsOut, r.cells[2][1].runsOut], ["2048-12", "2084-11", null]);
+
+  // Percentages with decimals keep them; inflation never goes below 0.
+  const odd = F.growthWhatIf({ ...s, settings: { ...s.settings, expectedReturn: 7.3, inflation: 0.5 } }, "2026-11");
+  assert.deepEqual([odd.returns, odd.inflations], [[5.3, 6.3, 7.3, 8.3, 9.3], [0.5, 1.5]]);
+  assert.equal(odd.cells.flat().filter((c) => c.plan).length, 1);
+  assert.equal(F.growthWhatIf({ ...s, settings: { ...s.settings, birthYear: null } }, "2026-11"), null);
+});

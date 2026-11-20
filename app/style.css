@@ -1272,9 +1272,10 @@ main > div {
   background: var(--series-3);
 }
 
-/* Pay in more or less: a bar per amount, from now to when you could stop
-   working, on a line of years from now to the retirement age. The rows
-   share the columns: the amount, the bar, sooner or later. --at is where
+/* Pay in more or less, and Spend more or less on What if: a bar per amount
+   or share, from now to when you could stop working, on a line of years
+   from now to the retirement age. The rows share the columns: the amount,
+   the bar, sooner or later. --at is where
    on the line, 0 to 1; the line leaves room after it for how long and
    the age then. */
 .payin-rows {
@@ -1301,6 +1302,12 @@ main > div {
 .payin-row.average .payin-label,
 .payin-row.average .payin-time {
   font-weight: 600;
+}
+
+/* Spend more or less: what a share is a month, after it. */
+.payin-label .payin-sub {
+  color: var(--fg-muted);
+  font-weight: 400;
 }
 
 .payin-track {
@@ -2006,7 +2013,7 @@ table.entry th {
   }
 }
 
-/* ---- helpers on the Income and Expenses pages */
+/* ---- helpers on the Income and Expenses pages, and the forms on What if */
 
 .helper-form {
   display: grid;
@@ -2077,6 +2084,93 @@ table.entry th {
 
 .flat-result p {
   margin: 4px 0;
+}
+
+/* ---- What if */
+
+/* Stop working at an age you pick: the age over the plan, drawn as on the
+   Forecast. The plan's name is a heading inside the card, with whether its
+   money lasts after it. */
+.stop-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 4px 16px;
+  margin-bottom: 12px;
+}
+
+.stop-form input {
+  width: 6em;
+}
+
+.stop-error {
+  margin: 0 0 7px;
+  color: var(--red);
+}
+
+h3.plan-title {
+  margin: 0;
+  flex-wrap: wrap;
+}
+
+.plan-status {
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.plan-status.ok {
+  color: var(--good-text);
+}
+
+.plan-status.risk {
+  color: var(--risk-text);
+}
+
+.plan-status.bad {
+  color: var(--bad-text);
+}
+
+/* Growth and inflation: the age you could stop at, a cell for each return
+   and inflation; yours from Settings framed. */
+.growth-table {
+  width: auto;
+  margin-top: 4px;
+}
+
+.growth-table th,
+.growth-table td {
+  padding: 6px 14px;
+}
+
+.growth-table thead th:not(:first-child),
+.growth-table td {
+  text-align: center;
+}
+
+.growth-cell {
+  color: var(--fg-strong);
+}
+
+.growth-cell.never {
+  color: var(--fg-muted);
+}
+
+.growth-cell.plan {
+  background: var(--selection);
+  outline: 1px solid var(--fg);
+  outline-offset: -1px;
+  font-weight: 600;
+}
+
+.growth-age,
+.growth-out {
+  display: block;
+}
+
+.growth-out {
+  color: var(--bad-text);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 /* ---- future pay-ins in Settings */
