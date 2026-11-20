@@ -1548,8 +1548,9 @@ function flatCard() {
   // from retirement, which each plan reaches at its own time), the largest
   // first, and any ended already that it ends.
   const lists = F.budget(store, thisMonth()).expenses;
-  const open = [...lists.now, ...lists.later].filter((item) => !(item.from && "at" in item.from));
+  const open = [...lists.now, ...lists.later];
   const endable = [...open, ...store.expenses.filter((item) => saved?.stops.includes(item.id) && !open.includes(item))]
+    .filter((item) => !(item.from && "at" in item.from))
     .sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name));
   const result = h("div", { class: "helper-result flat-result", "aria-live": "polite" });
 
@@ -1653,7 +1654,7 @@ function flatCard() {
   };
 
   const repaymentKind = h("select", { name: "repaymentKind", "aria-label": "Repayment as" },
-    h("option", { value: "percent", selected: !("amount" in (saved?.repayment ?? {})) || null }, "% a year at first"),
+    h("option", { value: "percent", selected: !("amount" in (saved?.repayment ?? {})) || null }, "% at first"),
     h("option", { value: "amount", selected: "amount" in (saved?.repayment ?? {}) || null }, `${whole.formatToParts(0).find((part) => part.type === "currency")?.value ?? store.settings.currency} a month`));
   const repaymentValue = saved ? ("amount" in saved.repayment ? inputMoney(saved.repayment.amount) : plain.format(saved.repayment.percent)) : "";
   const input = (name, value, props = {}) => h("input", { name, inputmode: "decimal", autocomplete: "off", value, ...props });
@@ -1689,7 +1690,7 @@ function flatCard() {
     field("Then, a year (%)", input("interestAfter", percentText(saved?.interestAfter), { placeholder: "the same" }),
       "The interest after the fixed years, to see what a higher one does. Empty: the same."),
     field("Repayment", h("div", { class: "flat-repayment" }, input("repayment", repaymentValue, { required: true, placeholder: "2", class: saved && "amount" in saved.repayment ? "amount" : null }), repaymentKind),
-      "% a year at first: the anfängliche Tilgung. The payment is the loan × (interest + repayment) ÷ 12; when the fixed years end, it's worked out again for what is left, at the new interest.",
+      "% at first: the anfängliche Tilgung, a year. The payment is the loan × (interest + repayment) ÷ 12; when the fixed years end, it's worked out again for what is left, at the new interest.",
       "An amount a month: the whole payment, interest included, the same until the loan is paid off.",
       "Either way the payment stays the same amount of money: it doesn't rise with inflation."),
     h("h3", null, "Each month"),

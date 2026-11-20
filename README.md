@@ -263,7 +263,7 @@ clears them.
   costs, less the own money.
 - **The loan**: the interest a year, fixed for a number of years (the
   Zinsbindung), then the interest after that (empty: the same). The
-  repayment is either **% a year at first** (the anfängliche Tilgung: the
+  repayment is either **% at first** (a year, the anfängliche Tilgung: the
   payment is the loan × (interest + repayment) ÷ 12, worked out again for
   what is left when the fixed years end), or an **amount a month**, the
   whole payment, the same until the loan is paid off. Either way the
