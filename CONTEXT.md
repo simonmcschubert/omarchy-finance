@@ -74,6 +74,28 @@ coming month. One-offs count as paid in, but never for the average pay-in.
 Cash accounts are not part of it. Files from before version 16 had no
 emergency-fund accounts: their cash accounts became them.
 
+## Buying a flat
+
+**Flat** (`store.flat`, `flatWhatIf()`): a what-if on the Expenses page.
+It compares the plan (_renting_) with the plan and the flat (_buying_), and
+the plan never counts it. One at a time.
+
+**Own money**: what is paid for the flat without the loan, costs included.
+It comes from the cash accounts first, then out of the portfolio as a
+one-off, never from the emergency fund.
+
+**Loan** (`loanSchedule()`): the price and the costs, less the own money.
+Its interest is fixed for the **fixed years** (the Zinsbindung), then the
+interest after them applies. The **repayment** is a percentage a year at
+first (the payment worked out again when the fixed years end) or an
+amount a month to the end. The payment never rises with inflation.
+
+**Subletting**: rent taken in for the flat, after tax, from the month it is
+bought, for good.
+
+The housing cost changes what is paid in, month by month in the money of
+then: less while the loan runs, more once it is paid off.
+
 ## FI
 
 **Withdrawal rate**: the share of the portfolio taken out a year. Its

@@ -106,7 +106,9 @@ Finance window's browser profile. The data file stays.
   come, until they end, under a short summary of the totals. See
   [Expenses and income](#expenses-and-income). Portfolio, Expenses and
   Income are for entering; the Dashboard and the Forecast show what it
-  comes to.
+  comes to. At the foot of Expenses, **Buying a flat** shows what buying
+  one would change, without changing the plan; see
+  [Buying a flat](#buying-a-flat).
 - **Settings**, in three tabs. **Data**, what the numbers go on:
   - Safe withdrawal rate (default 4 %) and a buffer on expenses for irregular
     costs (default 10 %).
@@ -243,6 +245,54 @@ you stop working:
 Both numbers can be changed; income tax is left out.
 
 ![Income: a salary until retirement, and the state pension helper](docs/income.png)
+
+### Buying a flat
+
+**Buying a flat (Germany)**, at the foot of Expenses, is a what-if: it
+compares your plan as it is (renting) with the same plan and a flat. Your
+plan never counts it: the Dashboard and the Forecast stay as they are.
+**Save** keeps its fields in the data file for next time; **Delete**
+clears them.
+
+- **The flat**: the month you buy it (and move in), the price, the
+  purchase costs (default 10 %: Grunderwerbsteuer 3,5 to 6,5 % by state,
+  notary and land registry about 2 %, an agent up to 3,57 %), and your own
+  money, costs included. The own money comes from the latest values of
+  your cash accounts first, then out of the portfolio as a one-off in that
+  month; never from the emergency fund. The loan is the price and the
+  costs, less the own money.
+- **The loan**: the interest a year, fixed for a number of years (the
+  Zinsbindung), then the interest after that (empty: the same). The
+  repayment is either **% at first** (a year, the anfängliche Tilgung: the
+  payment is the loan × (interest + repayment) ÷ 12, worked out again for
+  what is left when the fixed years end), or an **amount a month**, the
+  whole payment, the same until the loan is paid off. Either way the
+  payment never rises with inflation; in today's money it gets smaller
+  every year.
+- **Each month**: Hausgeld and Grundsteuer, and subletting (rent you take
+  in, after tax; optional). Both are in today's money and rise with
+  inflation; subletting counts for good, also once you've stopped working.
+- **Stops then**: the expenses that stop when you buy, such as the rent:
+  from that month on, within their own months (a rent that ends before
+  saves nothing). Those that start at retirement aren't offered.
+
+What you pay in changes each month by what housing costs more than the
+expenses that stop, in the money of that month: the payment, plus Hausgeld
+less subletting and those expenses, which rise with inflation while the
+payment doesn't. Once the loan is paid off, the payment drops out of it:
+you usually pay in more then. A pay-in never goes below 0, and planned
+pay-in changes after the purchase change by the same.
+
+The card then says, as you type: the loan, what it pays a month and from
+when, when it is paid off and the interest in all; where the own money
+comes from; the housing cost and what you pay in, in the month you buy;
+when you could stop working (as Stop working on the Forecast counts it)
+and from when the money lasts even at the low growth, with the flat and
+without; and the FI number once the loan is paid off, with and without. A
+payment that doesn't cover the interest after the fixed years never pays
+the loan off: the card says so and compares nothing.
+
+![Buying a flat: a loan with 10 fixed years, the rent that stops, and what it changes](docs/flat.png)
 
 ### Portfolio, net worth and returns
 

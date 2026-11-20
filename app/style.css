@@ -2028,6 +2028,57 @@ table.entry th {
   margin-top: 10px;
 }
 
+/* Buying a flat: the fields in three groups, each under a heading of its
+   own across the grid, and the expenses it ends as a row of checkboxes. */
+.flat-form h3,
+.flat-form .flat-stops,
+.flat-form .form-actions {
+  grid-column: 1 / -1;
+}
+
+.flat-form h3 {
+  margin: 8px 0 0;
+}
+
+.flat-stops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.flat-stops legend {
+  color: var(--fg-muted);
+  padding: 0;
+  margin-bottom: 6px;
+}
+
+.flat-stops .check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.flat-repayment {
+  display: flex;
+  gap: 6px;
+}
+
+.flat-repayment input {
+  flex: 1 1 64px;
+  min-width: 64px;
+}
+
+.flat-repayment select {
+  min-width: 0;
+}
+
+.flat-result p {
+  margin: 4px 0;
+}
+
 /* ---- future pay-ins in Settings */
 
 .payin-form {
