@@ -511,6 +511,7 @@ const state = {
   editing: { expenses: null, income: null }, // item id being edited
   editingEvent: null, // planned one-off being edited
   editingPayIn: null, // "now" or the id of a planned pay-in change being edited
+  flatOpen: false, // whether the Buying a flat card on Expenses is open
   renaming: null, // { list: "accounts" | "expenses" | "income", key: account id or category name }
   month: null,
   importText: "",
@@ -1535,6 +1536,177 @@ function healthCard() {
       form, result));
 }
 
+// ---- Buying a flat: a what-if. It compares the plan as it is (renting)
+// with the plan and the flat, as F.flatWhatIf counts it, and never changes
+// the plan: Save keeps the fields in the data file (store.flat), for next
+// time.
+function flatCard() {
+  const store = state.store;
+  const saved = store.flat;
+  const { birthYear, retirementAge, expectedReturn } = store.settings;
+  // The expenses the flat can end: those that count now, the largest first,
+  // and any ended already that it ends.
+  const now = F.budget(store, thisMonth()).expenses.now;
+  const endable = [...now, ...store.expenses.filter((item) => saved?.stops.includes(item.id) && !now.includes(item))]
+    .sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name));
+  const result = h("div", { class: "helper-result flat-result", "aria-live": "polite" });
+
+  const percentText = (value) => (value === undefined ? "" : plain.format(value));
+  const read = (form) => {
+    const data = new FormData(form);
+    const text = (name) => String(data.get(name) ?? "").trim();
+    const month = F.parseMonth(text("month"));
+    const price = F.parseMoney(text("price"));
+    const costs = F.parsePercent(text("costsPercent"));
+    const own = F.parseMoney(text("ownMoney"));
+    const interest = F.parsePercent(text("interest"));
+    const years = Number(text("fixedYears"));
+    const after = text("interestAfter") === "" ? interest : F.parsePercent(text("interestAfter"));
+    const byAmount = data.get("repaymentKind") === "amount";
+    const repayment = byAmount ? F.parseMoney(text("repayment")) : F.parsePercent(text("repayment"));
+    const optional = (name) => (text(name) === "" ? { ok: true, cents: 0 } : F.parseMoney(text(name)));
+    const running = optional("running");
+    const subletting = optional("subletting");
+    const L = F.FLAT_LIMITS;
+    if (!month) return { error: `Buy in: enter ${MONTH_HINT}.` };
+    if (month <= F.currentMonth()) return { error: "Buy in: a month to come." };
+    if (!price.ok || price.cents <= 0) return { error: "Price: enter an amount." };
+    if (!costs.ok || costs.value > L.costsPercent) return { error: `Purchase costs: enter a percentage up to ${L.costsPercent}.` };
+    if (!own.ok || own.cents < 0) return { error: "Own money: enter an amount, or 0." };
+    if (!interest.ok || interest.value > L.interest) return { error: `Interest: enter a percentage up to ${L.interest}.` };
+    if (!/^[0-9]+$/.test(text("fixedYears")) || years < L.fixedYears.min || years > L.fixedYears.max) return { error: `Fixed for: whole years from ${L.fixedYears.min} to ${L.fixedYears.max}.` };
+    if (!after.ok || after.value > L.interest) return { error: `Then: enter a percentage up to ${L.interest}, or leave it empty for the same.` };
+    if (byAmount ? !repayment.ok || repayment.cents <= 0 : !repayment.ok || repayment.value <= 0 || repayment.value > L.repayment) {
+      return { error: byAmount ? "Repayment: enter the amount you pay a month." : `Repayment: enter a percentage above 0, up to ${L.repayment}.` };
+    }
+    if (!running.ok || running.cents < 0) return { error: "Hausgeld and Grundsteuer: enter an amount, or leave it empty." };
+    if (!subletting.ok || subletting.cents < 0) return { error: "Subletting: enter an amount, or leave it empty." };
+    return {
+      flat: {
+        month, price: price.cents, costsPercent: costs.value, ownMoney: own.cents,
+        interest: interest.value, fixedYears: years, interestAfter: after.value,
+        repayment: byAmount ? { amount: repayment.cents } : { percent: repayment.value },
+        running: running.cents, subletting: subletting.cents, stops: data.getAll("stops").map(String),
+      },
+    };
+  };
+
+  // The age a plan stops at: "at 54", or "54" after "instead of".
+  const ageAt = (month, bare = false) => (month === null ? `not before ${retirementAge}` : `${bare ? "" : "at "}${F.ageIn(month, birthYear)}`);
+  // How much sooner or later `month` is than `than`, in brackets.
+  const shift = (month, than) => {
+    if (month === null || than === null) return "";
+    const months = F.monthIndex(month) - F.monthIndex(than);
+    if (months === 0) return " (the same)";
+    const by = Math.abs(months) < 12 ? monthsText(Math.abs(months)) : tenthsText(yearTenths(Math.abs(months)));
+    return ` (${by} ${months < 0 ? "sooner" : "later"})`;
+  };
+  const lines = (flat) => {
+    const r = F.flatWhatIf(store, flat);
+    const s = r.schedule;
+    const out = [];
+    if (r.loan === 0) out.push("No loan: the own money pays the price and the costs.");
+    else if (s.months === null) {
+      const payment = s.payments.at(-1).amount;
+      const late = s.payments.length > 1 || payment > (r.loan * flat.interest) / 1200;
+      out.push(`Loan ${money(r.loan)} · ${money(payment)} a month doesn't cover the interest${late ? ` of ${percentUnit.format(flat.interestAfter)} after the fixed years` : ""}: it's never paid off.`);
+    } else {
+      const [first, ...later] = s.payments;
+      const changes = later.map((p) => `, ${money(p.amount)} from ${monthLabel(p.month)}`).join("");
+      const at = birthYear === null ? "" : `, at ${F.ageIn(s.paidOff, birthYear)}`;
+      out.push(`Loan ${money(r.loan)} · ${money(first.amount)} a month${changes} · paid off ${monthLabel(s.paidOff)}${at} · ${money(s.interest)} interest`);
+    }
+    const c = r.cash;
+    const parts = [c.fromCash > 0 ? `${money(c.fromCash)} from cash` : null, c.fromPortfolio > 0 ? `${money(c.fromPortfolio)} from the portfolio` : null].filter(Boolean);
+    if (parts.length) {
+      const more = c.fromPortfolio > c.portfolio ? ", more than it has now" : "";
+      out.push(`Own money: ${parts.join(", ")}${more}${c.accounts ? " · the emergency fund stays" : ""}`);
+    }
+    const sublet = flat.subletting > 0 ? ", after subletting" : "";
+    const paidOff = r.payIn.after === null ? "" : `, ${money(r.housing.after)} once paid off`;
+    out.push(`Housing ${money(r.housing.before)} → ${money(r.housing.during)} a month${sublet}${paidOff} · pays in ${money(r.payIn.during)} instead of ${money(r.payIn.before)}`);
+    if (r.renting && r.buying) {
+      const low = F.growthRates(expectedReturn).low;
+      out.push(`Stop working ${ageAt(r.buying.work)} instead of ${ageAt(r.renting.work, true)}${shift(r.buying.work, r.renting.work)} · `
+        + `even at ${percentUnit.format(low)}: ${ageAt(r.buying.low)} instead of ${ageAt(r.renting.low, true)}${shift(r.buying.low, r.renting.low)}`);
+      out.push(`Once it's paid off, the FI number is ${money(r.fiNumber.buying)} instead of ${money(r.fiNumber.renting)}, in today's money.`);
+    } else if (s.months !== null && birthYear === null) {
+      out.push(["When you could stop working needs your year of birth, in ", settingsLink("general"), "."]);
+    }
+    return out;
+  };
+
+  let timer = null;
+  const show = (form) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const r = read(form);
+      const started = ["month", "price"].some((name) => String(new FormData(form).get(name)).trim() !== "");
+      result.replaceChildren(...(r.error ? (started ? [h("p", null, r.error)] : []) : lines(r.flat).map((line) => h("p", null, line))));
+    }, 120);
+  };
+
+  const repaymentKind = h("select", { name: "repaymentKind", "aria-label": "Repayment as", onchange: (event) => show(event.target.form) },
+    h("option", { value: "percent", selected: !("amount" in (saved?.repayment ?? {})) || null }, "% a year at first"),
+    h("option", { value: "amount", selected: "amount" in (saved?.repayment ?? {}) || null }, `${whole.formatToParts(0).find((part) => part.type === "currency")?.value ?? store.settings.currency} a month`));
+  const repaymentValue = saved ? ("amount" in saved.repayment ? inputMoney(saved.repayment.amount) : plain.format(saved.repayment.percent)) : "";
+  const input = (name, value, props = {}) => h("input", { name, inputmode: "decimal", autocomplete: "off", value, ...props });
+  const form = h("form", {
+    class: "helper-form flat-form",
+    oninput: (event) => show(event.currentTarget),
+    onsubmit: (event) => {
+      event.preventDefault();
+      const r = read(event.currentTarget);
+      if (r.error) return showError(event.currentTarget, r.error);
+      const done = F.saveFlat(store, r.flat);
+      if (!done.ok) return showError(event.currentTarget, `${done.error}.`);
+      commit(done.store, "Saved the flat. Your plan doesn't count it: the Dashboard and the Forecast stay as they are.");
+    },
+  },
+    h("h3", null, "The flat"),
+    field("Buy in", monthField({ name: "month", required: true, value: saved?.month ?? "", onpick: () => show(form) }),
+      "The month you pay for it and move in: the expenses below stop the month before."),
+    field("Price", input("price", saved ? inputMoney(saved.price) : "", { class: "amount", required: true, placeholder: inputMoney(35000000) })),
+    field("Purchase costs (%)", input("costsPercent", percentText(saved?.costsPercent ?? 10), { required: true }),
+      "Grunderwerbsteuer 3,5 to 6,5 % by state, notary and land registry about 2 %, an agent up to 3,57 %."),
+    field("Own money", input("ownMoney", saved ? inputMoney(saved.ownMoney) : "", { class: "amount", required: true, placeholder: inputMoney(10500000) }),
+      "What you pay without the loan, costs included. It comes from your cash accounts first, then out of the portfolio, never from the emergency fund.",
+      "The loan is the price and the costs, less the own money."),
+    h("h3", null, "The loan"),
+    field("Interest a year (%)", input("interest", percentText(saved?.interest), { required: true, placeholder: plain.format(3.8) })),
+    field("Fixed for, years", input("fixedYears", saved ? String(saved.fixedYears) : "10", { inputmode: "numeric", required: true }),
+      "The Zinsbindung: how long the interest stays the same."),
+    field("Then, a year (%)", input("interestAfter", percentText(saved?.interestAfter), { placeholder: "the same" }),
+      "The interest after the fixed years, to see what a higher one does. Empty: the same."),
+    field("Repayment", h("div", { class: "flat-repayment" }, input("repayment", repaymentValue, { required: true, placeholder: "2" }), repaymentKind),
+      "% a year at first: the anfängliche Tilgung. The payment is the loan × (interest + repayment) ÷ 12; when the fixed years end, it's worked out again for what is left, at the new interest.",
+      "An amount a month: the whole payment, interest included, the same until the loan is paid off.",
+      "Either way the payment stays the same amount of money: it doesn't rise with inflation."),
+    h("h3", null, "Each month"),
+    field("Hausgeld and Grundsteuer", input("running", saved?.running ? inputMoney(saved.running) : "", { class: "amount", placeholder: inputMoney(45000) }),
+      "What you pay as the owner, in today's money: it rises with inflation like your expenses."),
+    field("Subletting, after tax", input("subletting", saved?.subletting ? inputMoney(saved.subletting) : "", { class: "amount", placeholder: inputMoney(0) }),
+      "Rent you take in, such as for a room, after tax. It counts from the month you buy, for good, and rises with inflation like income."),
+    endable.length ? h("fieldset", { class: "flat-stops" },
+      h("legend", null, "Stops then"),
+      endable.map((item) => h("label", { class: "check" },
+        h("input", { type: "checkbox", name: "stops", value: item.id, checked: saved?.stops.includes(item.id) || null }),
+        `${item.name} (${money(F.monthlyAmount(item))})`))) : null,
+    h("div", { class: "form-actions" },
+      h("button", { type: "submit", class: "primary" }, saved ? "Save" : "Save the flat"),
+      saved ? h("button", { type: "button", class: "link danger", onclick: () => {
+        if (!confirm("Delete the flat?")) return;
+        commit(F.deleteFlat(store), "Deleted the flat.");
+      } }, "Delete") : null));
+  queueMicrotask(() => show(form));
+  const details = h("details", { open: state.flatOpen || null, ontoggle: (event) => { state.flatOpen = event.currentTarget.open; } },
+    h("summary", null, h("h2", null, "Buying a flat (Germany)")),
+    h("p", null, "What if you bought a flat? This compares your plan as it is with the same plan and the flat: the loan, the rent that stops, and what you pay in. ",
+      "Your plan doesn't count it: the Dashboard and the Forecast stay as they are."),
+    form, result);
+  return h("section", { class: "card" }, details);
+}
+
 function viewItems(kind) {
   const store = state.store;
   const names = KINDS[kind];
@@ -1696,7 +1868,7 @@ function viewItems(kind) {
           h("thead", null, h("tr", null, h("th", null, "Name"), h("th", { class: "num" }, "Amount"), h("th", null, "Paid"), h("th", { class: "num" }, "Per month"), h("th"))),
           h("tbody", null, rows))))
       : null,
-    kind === "income" ? pensionCard() : healthCard());
+    kind === "income" ? pensionCard() : [healthCard(), flatCard()]);
 }
 
 // ---------------------------------------------------------------- portfolio
