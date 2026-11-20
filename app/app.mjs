@@ -2291,7 +2291,7 @@ function drawWhatIf() {
   error.textContent = "";
   state.whatIf.age = age;
   const { months, plan } = o.stopAfter(F.monthFromIndex((birthYear + age) * 12 - 1), inTodaysMoney() ? "today" : "nominal");
-  const name = plan.retires === months[1] ? "Stop working now" : `Stop working at ${F.ageIn(plan.retires, birthYear)}`;
+  const name = F.monthIndex(plan.retires) <= thisMonth() ? "Stop working now" : `Stop working at ${F.ageIn(plan.retires, birthYear)}`;
   const els = { title: document.getElementById("stop-title"), need: document.getElementById("stop-need"), keys: document.getElementById("stop-keys"), box };
   drawPlan(els, months, planRow(store, o, months, plan, name), { status: true });
 }

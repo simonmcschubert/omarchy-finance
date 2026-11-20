@@ -1555,10 +1555,9 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
   const runsWith = (fixed) => Object.fromEntries(GROWTHS.map((g) => [g, run({ growth: g, coastContribution: store.settings.coastPayIn, fixed })]));
 
   // What plans() and stopAfter() describe their plans with, their values in
-  // "nominal" money or "today"'s.
-  const planParts = (kind) => {
+  // "nominal" money or "today"'s; n: how many months are shown.
+  const planParts = (kind, n) => {
     const coastContribution = store.settings.coastPayIn;
-    const n = run().months.length;
     const at = (i) => first + i; // month index of shown month i
     // Splits [from, to) where amount(i) changes.
     const stepsOf = (from, to, amount, extra = () => ({})) => {
@@ -1767,8 +1766,8 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
         }
         return null;
       };
-      const { invest, coast, living, describe, stopping } = planParts(kind);
       const shown = inMoney(main, kind);
+      const { invest, coast, living, describe, stopping } = planParts(kind, shown.months.length);
       const ret = retirement - first;
       if (retired) return remember({ months: shown.months, retirement: monthFromIndex(retirement), plans: [describe("keep", null, start, [living(0, retirement)], results)] });
       // Each phase from the month after the one before it ends.
@@ -1787,8 +1786,9 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
     },
 
     // The What if page's Stop working at an age: stops working after the
-    // month `last` (null, or a month up to `start`: now), whatever the
-    // portfolio has then, and lives off it from the month after; from the
+    // month `last`, whatever the portfolio has then, and lives off it from
+    // the month after. Never before the month before `now`, as the months
+    // since `start` are worked already (null: then, now), and from the
     // month before retirement on, that is working until retirement. As
     // plans() describes its plans, in "nominal" money or "today"'s: {
     //   months, retirement: as plans() has them,
@@ -1797,9 +1797,12 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
     // }; null without a year of birth, or once retired.
     stopAfter(last, kind = "nominal") {
       if (!Number.isFinite(retirement) || retired) return null;
-      const month = last === null || monthIndex(last) <= first ? start : monthFromIndex(Math.min(monthIndex(last), retirement - 1));
-      const { stopping } = planParts(kind);
-      return { months: inMoney(run(), kind).months, retirement: monthFromIndex(retirement), plan: stopping("pick", month, runsWith({ coast: null, fi: month })) };
+      const earliest = Math.max(first, nowIndex - 1);
+      const month = monthFromIndex(Math.min(last === null ? earliest : Math.max(monthIndex(last), earliest), retirement - 1));
+      const set = runsWith({ coast: null, fi: month });
+      const shown = inMoney(set.mid, kind);
+      const { stopping } = planParts(kind, shown.months.length);
+      return { months: shown.months, retirement: monthFromIndex(retirement), plan: stopping("pick", month, set) };
     },
 
     // When the Stop working plan stops, at the expected return: { retires:
@@ -1892,8 +1895,7 @@ export const SPENDING_STEPS = Object.freeze([-30, -20, -10, 0, 10, 20, 30]);
 // you spend less you pay in while you work, on top of the pay-in plan; what
 // you spend more comes out of it, never below 0. Both in the money of each
 // month, as the expenses rise with inflation. null without a year of birth,
-// once retired, without expenses that count now, or when FI is reached at
-// the start. Otherwise {
+// or once retired. Otherwise {
 //   monthly: the expenses with buffer this month,
 //   rows: [{ percent, monthly: what that changes a month now, retires: as
 //     stopsWorking() counts it }], in the order of SPENDING_STEPS; the 0
@@ -1903,7 +1905,7 @@ export function spendingWhatIf(store, now = currentMonth()) {
   const outlook = fiOutlook(store, now);
   const plan = outlook.stopsWorking();
   const monthly = budget(store, monthIndex(now)).expenses.total;
-  if (plan === null || !(monthly > 0) || plan.retires === addMonths(outlook.start, 1)) return null;
+  if (plan === null) return null;
   const { inflation } = store.settings;
   const first = monthIndex(outlook.start);
   // The expenses with buffer in the month of `index`, in today's money, as
@@ -1936,9 +1938,9 @@ export function growthWhatIf(store, now = currentMonth()) {
   const { expectedReturn, inflation } = store.settings;
   if (fiOutlook(store, now).stopsWorking() === null) return null;
   // Whole points around a value, kept to its two decimals.
-  const around = (value, spread) => Array.from({ length: 2 * spread + 1 }, (_, k) => Math.round((value + k - spread) * 100) / 100).filter((v) => v >= 0);
+  const around = (value, spread) => Array.from({ length: 2 * spread + 1 }, (_, k) => Math.round((value + k - spread) * 100) / 100);
   const returns = around(expectedReturn, 2);
-  const inflations = around(inflation, 1);
+  const inflations = around(inflation, 1).filter((v) => v >= 0);
   const cells = returns.map((growth) => inflations.map((rate) => {
     const settings = { ...store.settings, expectedReturn: growth, inflation: rate };
     const { retires, runsOut } = fiOutlook({ ...store, settings }, now).stopsWorking();

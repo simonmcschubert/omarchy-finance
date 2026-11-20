@@ -484,7 +484,8 @@ expected return, and with your planned one-offs.
 **Stop working at an age you pick**: type an age, from this year's (now)
 to the retirement age, and see the plan that stops working in January of
 the year you turn it, whatever the portfolio has then, and lives off it
-from then on. Until then you pay in as planned in Settings. It is drawn as
+from then on; never before this month, as the months until now are worked
+already. Until then you pay in as planned in Settings. It is drawn as
 the Forecast draws its plans: the name with a check, warning or cross and
 whether the money lasts, the bar of the phases on the age line to 120, and
 the chart with the band from 2 points less to 2 points more growth. When
@@ -519,8 +520,7 @@ out of it, never below 0. That rises with inflation, like the expenses.
 Spending less counts twice: you pay in more, and the FI number falls with
 your expenses. Next to each share, what it changes a month now (with the
 buffer); **As now** (bold) is your plan as it is, with your expenses this
-month. The card isn't there without expenses that count now, once FI is
-reached, or once retired.
+month. The card isn't there once retired.
 
 **A one-off you haven't planned**: a month (this month or later, after the
 latest month with values) and an amount, negative for money taken out,
