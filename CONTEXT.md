@@ -76,7 +76,7 @@ emergency-fund accounts: their cash accounts became them.
 
 ## Buying a flat
 
-**Flat** (`store.flat`, `flatWhatIf()`): a what-if on the Expenses page.
+**Flat** (`store.flat`, `flatWhatIf()`): a what-if on the What if page.
 It compares the plan (_renting_) with the plan and the flat (_buying_), and
 the plan never counts it. One at a time.
 
@@ -164,11 +164,30 @@ picked plan that runs out: “Lasts even at 6 % with 781.000 € at 53
 then at the low growth. `forecast()`'s _needs_ give it for every month.
 
 **Pay-in scenarios** (`fiOutlook().payIns()`, “Pay in more or less” on
-the Forecast): when you could stop working, as _Retire at FI_ counts it,
+What if): when you could stop working, as _Retire at FI_ counts it,
 paying in the same amount every month from now on: 0 to 3,000 in steps of
 500 (`PAY_IN_STEPS`) and the average pay-in, a row of its own unless it is
 one of them. The _plan_ row is the pay-in plan, there when it isn't the
 average every month.
+
+**What if** (the page): each **what-if** changes one thing, works out the
+plan with it, and compares when you could stop working with the plan as
+it is. None of them changes the plan. `stopsIn()` gives both dates the
+comparisons use: when Stop working stops, and from when the money lasts
+even at the low growth.
+- _Stop working at an age_ (`fiOutlook().stopAfter()`): stops working in
+  January of the age picked, whatever the portfolio has then, drawn as
+  the Forecast draws its plans.
+- _Spend more or less_ (`spendingWhatIf()`): every expense a share more
+  or less (`SPENDING_STEPS`), for good, with the income the same: what is
+  spent less is paid in while working, what is spent more comes out of
+  the pay-in, never below 0.
+- _A one-off you haven't planned_ (`oneOffWhatIf()`): a one-off that is
+  not saved.
+- _Growth and inflation_ (`growthWhatIf()`): the expected return 2 points
+  less to 2 more and inflation 1 point less to 1 more, each with its own
+  dates (`stopsWorking()`), unlike the low and high growth of the plans.
+- _Pay in more or less_ and the _Flat_, above.
 
 **Phases**: _Investing_, _Coasting_ and _Retired_. A pension or other
 income that starts, or an expense that ends, is a _step_ inside Retired,
