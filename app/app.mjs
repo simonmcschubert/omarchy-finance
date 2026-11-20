@@ -473,16 +473,21 @@ function toggleHidden() {
 // focus.
 function keepingDrafts(draw = render) {
   const forms = () => [...document.querySelectorAll("#main form")];
-  const drafts = forms().map((form) => [...form.elements].filter((el) => el.name).map((el) => [el.name, el.type === "checkbox" ? el.checked : el.value]));
+  const drafts = forms().map((form) => [...form.elements].filter((el) => el.name).map((el) => [el.name, el.type === "checkbox" ? [el.value, el.checked] : el.value]));
   const active = document.activeElement;
   const focused = active?.form ? [forms().indexOf(active.form), active.name] : null;
   draw();
   forms().forEach((form, i) => {
     for (const [name, value] of drafts[i] ?? []) {
+      // Checkboxes by name and value: several can share a name.
+      if (Array.isArray(value)) {
+        const box = [...form.elements].find((el) => el.type === "checkbox" && el.name === name && el.value === value[0]);
+        if (box) box.checked = value[1];
+        continue;
+      }
       const el = form.elements.namedItem(name);
       if (!el || el instanceof RadioNodeList) continue;
-      if (el.type === "checkbox") el.checked = value;
-      else el.value = value;
+      el.value = value;
       // A choice shows its field: a start or end, the future pay-in.
       if (el.tagName === "SELECT" && el.closest(".bound")) el.dispatchEvent(new Event("change"));
     }
@@ -1645,6 +1650,9 @@ function flatCard() {
 
   let timer = null;
   const show = (form) => {
+    // An amount a month is hidden with the other amounts; a percentage isn't.
+    // Also after a redraw that kept what was typed (keepingDrafts).
+    form.elements.repayment.classList.toggle("amount", form.elements.repaymentKind.value === "amount");
     clearTimeout(timer);
     timer = setTimeout(() => {
       const r = read(form);
@@ -1660,11 +1668,7 @@ function flatCard() {
   const input = (name, value, props = {}) => h("input", { name, inputmode: "decimal", autocomplete: "off", value, ...props });
   const form = h("form", {
     class: "helper-form flat-form",
-    oninput: (event) => {
-      // An amount a month is hidden with the other amounts; a percentage isn't.
-      if (event.target === repaymentKind) event.currentTarget.elements.repayment.classList.toggle("amount", repaymentKind.value === "amount");
-      show(event.currentTarget);
-    },
+    oninput: (event) => show(event.currentTarget),
     onsubmit: (event) => {
       event.preventDefault();
       const r = read(event.currentTarget);
