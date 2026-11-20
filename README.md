@@ -491,8 +491,9 @@ whether the money lasts, the bar of the phases on the age line to 120, and
 the chart with the band from 2 points less to 2 points more growth. When
 the money runs out, the line under the name says what the portfolio would
 need when you stop to last even at the low growth, as on the Forecast. It
-starts at the age Stop working stops at (the retirement age when that is
-none), and keeps the age you pick until the window closes. The switch at
+starts at the first age whose January is no sooner than Stop working stops
+(the retirement age when that is none), and keeps the age you pick until
+the window closes. The switch at
 its top shows today's money or the money of each year, as on the Forecast.
 
 **Pay in more or less** shows what paying in more or less does: a bar for

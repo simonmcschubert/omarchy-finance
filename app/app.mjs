@@ -2233,13 +2233,14 @@ function viewWhatIf() {
 }
 
 // The ages you can pick to stop working at: from this year's (now) to the
-// retirement age. And the one picked, or else the age Stop working stops
-// at, or the retirement age.
+// retirement age. And the one picked, or else the first whose January is
+// no sooner than Stop working stops (so the two never differ under one
+// name), or the retirement age.
 function stopAges(store) {
   const { birthYear, retirementAge } = store.settings;
   const min = Math.min(F.ageIn(F.currentMonth(), birthYear), retirementAge);
   const stops = outlook(store).stopsWorking()?.retires ?? null;
-  const fallback = stops === null ? retirementAge : F.ageIn(stops, birthYear);
+  const fallback = stops === null ? retirementAge : F.ageIn(stops, birthYear) + (stops.endsWith("-01") ? 0 : 1);
   const picked = state.whatIf.age ?? fallback;
   return { min, max: retirementAge, picked: Math.min(Math.max(picked, min), retirementAge) };
 }
