@@ -4,14 +4,16 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 15;
+export const VERSION = 16;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
 // What an account holds. Only invested accounts are the portfolio: the FI
-// number, Time to FI and the forecast count them alone. Net worth counts
-// them all, debts (what is still owed) taken off.
-export const ACCOUNT_KINDS = Object.freeze(["invested", "cash", "property", "pension", "debt"]);
+// number, Time to FI and the forecast count them alone. Emergency-fund
+// accounts are the emergency fund; cash is money that may be spent, such as
+// savings for a flat. Net worth counts them all, debts (what is still owed)
+// taken off.
+export const ACCOUNT_KINDS = Object.freeze(["invested", "cash", "emergency", "property", "pension", "debt"]);
 
 // How numbers are shown, named by how they write a million.
 export const NUMBER_FORMATS = Object.freeze(["1.000.000,00", "1,000,000.00"]);
@@ -25,7 +27,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   inflation: 3,
   birthYear: null, // not set until entered; the forecast needs it
   retirementAge: 67,
-  emergencyMonths: 6, // the emergency fund to keep in cash, in months of expenses
+  emergencyMonths: 6, // the emergency fund to keep, in months of expenses
   // What is paid in a month from now on, in cents, for the investment rate
   // and every projection; null: the average pay-in of the last 12 months.
   // Planned changes (store.payInChanges) take over from their month on.
@@ -264,6 +266,14 @@ function upgradeFromVersion14(value) {
   return next;
 }
 
+// Version 15 had no emergency-fund accounts: cash was the emergency fund, so
+// every cash account becomes one.
+function upgradeFromVersion15(value) {
+  const next = { ...value, version: 16 };
+  if (Array.isArray(value.accounts)) next.accounts = value.accounts.map((account) => (isObject(account) && account.kind === "cash" ? { ...account, kind: "emergency" } : account));
+  return next;
+}
+
 // Version 10 had broker accounts only: every account is invested.
 function upgradeFromVersion10(value) {
   const next = { ...value, version: 11 };
@@ -310,6 +320,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 12) value = upgradeFromVersion12(value);
     if (isObject(value) && value.version === 13) value = upgradeFromVersion13(value);
     if (isObject(value) && value.version === 14) value = upgradeFromVersion14(value);
+    if (isObject(value) && value.version === 15) value = upgradeFromVersion15(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -767,8 +778,8 @@ export function portfolioSeries(store) {
 
 // Net worth by month, from the first to the last month with a value of any
 // account: each account with its last value, as in portfolioSeries.
-// Returns [{ month, total, kinds: { invested, cash, property, pension, debt
-// } }], total being all of them less the debts.
+// Returns [{ month, total, kinds: { invested, cash, emergency, property,
+// pension, debt } }], total being all of them less the debts.
 export function netWorthSeries(store) {
   if (store.records.length === 0) return [];
   const kindOf = new Map(store.accounts.map((a) => [a.id, a.kind ?? "invested"]));
@@ -785,14 +796,15 @@ export function netWorthSeries(store) {
     for (const record of byMonth.get(index) ?? []) latest.set(record.account, record.value);
     const kinds = Object.fromEntries(ACCOUNT_KINDS.map((kind) => [kind, 0]));
     for (const [account, value] of latest) kinds[kindOf.get(account)] += value;
-    series.push({ month: monthFromIndex(index), total: kinds.invested + kinds.cash + kinds.property + kinds.pension - kinds.debt, kinds });
+    const total = sum(ACCOUNT_KINDS.map((kind) => (kind === "debt" ? -kinds[kind] : kinds[kind])));
+    series.push({ month: monthFromIndex(index), total, kinds });
   }
   return series;
 }
 
-// How long `cash` pays `expenses` (a month): { cash, months (null without
-// expenses), target (months), short (what is missing to the target, 0 when
-// none) }.
+// How long `cash`, the emergency fund, pays `expenses` (a month): { cash,
+// months (null without expenses), target (months), short (what is missing
+// to the target, 0 when none) }.
 export function emergencyFund(cash, expenses, target) {
   return { cash, months: expenses > 0 ? cash / expenses : null, target, short: Math.max(0, target * expenses - cash) };
 }
@@ -1175,11 +1187,11 @@ export function metrics(store, now = currentMonth()) {
     series,
     // Net worth in the latest month with any value, and the month before.
     netWorth: worth.slice(-2),
-    // The emergency fund: the cash accounts' latest values, in months of
-    // this month's expenses, and how much is missing to the target. null
-    // without a cash account.
-    emergency: store.accounts.some((a) => a.kind === "cash")
-      ? emergencyFund(worth.at(-1)?.kinds.cash ?? 0, expenses, store.settings.emergencyMonths)
+    // The emergency fund: the emergency-fund accounts' latest values, in
+    // months of this month's expenses, and how much is missing to the
+    // target. null without an emergency-fund account. Cash is left out.
+    emergency: store.accounts.some((a) => a.kind === "emergency")
+      ? emergencyFund(worth.at(-1)?.kinds.emergency ?? 0, expenses, store.settings.emergencyMonths)
       : null,
     latestMonth: last ? last.month : null,
     portfolio: last ? last.value : null,

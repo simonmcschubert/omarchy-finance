@@ -39,8 +39,11 @@ the buffer, less the income that counts then, never below 0.
 
 ## Portfolio
 
-**Portfolio**: the latest values of the invested accounts. Cash, property,
-pension and debt accounts count only for **net worth**.
+**Portfolio**: the latest values of the invested accounts. Cash, emergency
+fund, property, pension and debt accounts count only for **net worth**.
+
+**Cash**: money that may be spent, such as savings for a flat. _Avoid_:
+calling it the emergency fund.
 
 **Pay-in**: what is paid into the invested accounts in a month. The
 **average pay-in** covers the last 12 months, or fewer with a shorter
@@ -67,7 +70,9 @@ same amount of money, also with rising pay-ins.
 deposit. It is either recorded with a month's values or planned for a
 coming month. One-offs count as paid in, but never for the average pay-in.
 
-**Emergency fund**: the cash accounts, in months of expenses.
+**Emergency fund**: the emergency-fund accounts, in months of expenses.
+Cash accounts are not part of it. Files from before version 16 had no
+emergency-fund accounts: their cash accounts became them.
 
 ## FI
 

@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
 
 STORE = {
-    "version": 15,
+    "version": 16,
     "settings": {
         "withdrawalRate": 4,
         "bufferPercent": 10,

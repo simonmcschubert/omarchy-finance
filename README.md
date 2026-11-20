@@ -133,7 +133,7 @@ Finance window's browser profile. The data file stays.
     investing still pays in once Coast FI is reached. It stays the same amount of
     money, also with rising pay-ins.
   - Emergency fund (default 6): how many months of expenses to keep in
-    cash accounts; 0 sets no target.
+    emergency-fund accounts; 0 sets no target.
   - Planned one-offs; see [Forecast](#forecast).
   - Categories, one list for expenses and one for income. A new data file
     starts with a few common ones. Renaming a category renames it on every
@@ -247,13 +247,16 @@ Both numbers can be changed; income tax is left out.
 ### Portfolio, net worth and returns
 
 Each account holds something: **invested** (brokers, ETF savings plans:
-the portfolio), **cash** (Tagesgeld, the emergency fund), **property**,
-**pension assets** (Riester, Rürup, a company pension: locked until
-retirement) or **debt** (what is still owed, such as a mortgage). Only
+the portfolio), **cash** (money you may spend, such as savings for a
+flat), **emergency fund** (Tagesgeld you keep for emergencies),
+**property**, **pension assets** (Riester, Rürup, a company pension: locked
+until retirement) or **debt** (what is still owed, such as a mortgage). Only
 invested accounts are the portfolio that the FI number, Time to FI and the
 forecast count; all of them, debts taken off, are the net worth. Accounts
 are set up in Settings; those from before kinds, and new ones from a CSV
-import without a kind, are invested.
+import without a kind, are invested. Cash accounts from before the
+emergency fund had a kind of its own became emergency-fund accounts: set
+those you may spend to cash.
 
 Per month, enter each account's value at month end. For invested accounts
 also what was paid in that month (negative for withdrawals), and a
@@ -287,9 +290,10 @@ from the middle of their month. A column no row has yet, such as 5 years
 with a shorter history, is left out.
 
 **Emergency fund**, at the foot of Net worth on the dashboard: the latest
-values of the cash accounts ÷ this month's expenses with buffer, how much
-of the months set in Settings that is, and how much is missing. It shows
-once there is a cash account and an expense that counts this month.
+values of the emergency-fund accounts ÷ this month's expenses with buffer,
+how much of the months set in Settings that is, and how much is missing.
+It shows once there is an emergency-fund account and an expense that
+counts this month.
 
 ### Dashboard numbers
 
@@ -487,7 +491,7 @@ copied from a spreadsheet. One row per account and month:
 date;account;value;pay_in;one_off;kind
 31.01.2025;Trade Republic;12.345,67;500;0;invested
 31.01.2025;ING;58.000;0;50.000;invested
-31.01.2025;Tagesgeld;10.000;;;cash
+31.01.2025;Tagesgeld;10.000;;;emergency
 ```
 
 - Semicolons, commas or tabs between columns.
@@ -497,7 +501,7 @@ date;account;value;pay_in;one_off;kind
   digits is a thousands separator: `1.234` is 1234.
 - `pay_in` and `one_off` are optional; empty means 0.
 - `kind` is optional: what a new account holds (`invested`, `cash`,
-  `property`, `pension` or `debt`; empty means invested). Accounts that
+  `emergency`, `property`, `pension` or `debt`; empty means invested). Accounts that
   exist keep their own.
 - New account names become new accounts. A row for a month and account that
   already exist replaces the old values.

@@ -570,7 +570,7 @@ test("parseStore accepts what the app writes and refuses unknown fields", () => 
     [{ ...roundTrip, events: [{ id: "e", name: "", month: "2031-01", amount: 100 }] }, /has no name/],
     [{ ...roundTrip, events: [{ id: "e", name: "A", month: "2031-01", amount: 1 }, { id: "e", name: "B", month: "2031-01", amount: 1 }] }, /repeated id/],
     [{ ...roundTrip, accounts: [...roundTrip.accounts, { id: "x", name: "broker", kind: "cash" }] }, /repeats the name/],
-    [{ ...roundTrip, accounts: [{ ...roundTrip.accounts[0], kind: "crypto" }] }, /kind must be invested, cash, property, pension, debt/],
+    [{ ...roundTrip, accounts: [{ ...roundTrip.accounts[0], kind: "crypto" }] }, /kind must be invested, cash, emergency, property, pension, debt/],
     [{ ...roundTrip, accounts: [(({ kind, ...rest }) => rest)(roundTrip.accounts[0])] }, /missing "kind"/],
     [[], /not an object/],
   ];
@@ -1092,13 +1092,14 @@ test("a version 10 file is upgraded: every account is invested", () => {
 
 test("net worth: every kind of account, debts taken off; the portfolio is the invested ones", () => {
   let s = F.emptyStore();
-  for (const [name, kind] of [["Broker", "invested"], ["Tagesgeld", "cash"], ["Flat", "property"], ["Rürup", "pension"], ["Mortgage", "debt"]]) {
+  for (const [name, kind] of [["Broker", "invested"], ["Tagesgeld", "cash"], ["Reserve", "emergency"], ["Flat", "property"], ["Rürup", "pension"], ["Mortgage", "debt"]]) {
     s = F.saveAccount(s, null, name, kind).store;
   }
   const id = Object.fromEntries(s.accounts.map((a) => [a.name, a.id]));
   s = F.saveMonth(s, "2026-09", [
     { account: id.Broker, value: 50000, payIn: 0 },
     { account: id.Tagesgeld, value: 10000, payIn: 0 },
+    { account: id.Reserve, value: 6000, payIn: 0 },
     { account: id.Flat, value: 300000, payIn: 0 },
     { account: id.Mortgage, value: 200000, payIn: 0 },
   ]);
@@ -1108,14 +1109,14 @@ test("net worth: every kind of account, debts taken off; the portfolio is the in
     { account: id.Mortgage, value: 199000, payIn: 1000 },
   ]);
   assert.deepEqual(F.netWorthSeries(s), [
-    { month: "2026-09", total: 160000, kinds: { invested: 50000, cash: 10000, property: 300000, pension: 0, debt: 200000 } },
-    { month: "2026-10", total: 171000, kinds: { invested: 52000, cash: 10000, property: 300000, pension: 8000, debt: 199000 } },
+    { month: "2026-09", total: 166000, kinds: { invested: 50000, cash: 10000, emergency: 6000, property: 300000, pension: 0, debt: 200000 } },
+    { month: "2026-10", total: 177000, kinds: { invested: 52000, cash: 10000, emergency: 6000, property: 300000, pension: 8000, debt: 199000 } },
   ]);
   // The portfolio, its pay-ins and the FI progress are the broker's alone.
   assert.deepEqual(F.portfolioSeries(s).map((m) => [m.value, m.payIn]), [[50000, 0], [52000, 1000]]);
   const m = F.metrics({ ...s, settings: { ...F.DEFAULT_SETTINGS } });
   assert.equal(m.portfolio, 52000);
-  assert.deepEqual(m.netWorth.map((n) => n.total), [160000, 171000]);
+  assert.deepEqual(m.netWorth.map((n) => n.total), [166000, 177000]);
   assert.equal(F.parseStore(JSON.parse(JSON.stringify(s))).ok, true);
 
   // Changing the kind moves an account between portfolio and the rest.
@@ -1151,6 +1152,20 @@ test("a version 13 file is upgraded: no planned pay-in changes, and pay-ins stay
   assert.deepEqual(result.store, { ...v13, version: F.VERSION, settings: { ...v13.settings, payInsRiseWithInflation: false, coastPayIn: 0 }, payInChanges: [] });
   assert.match(F.parseStore({ ...v13, settings: { ...v13.settings, payInsRiseWithInflation: true } }).error, /unknown field "payInsRiseWithInflation"/);
   assert.match(F.parseStore({ ...v13, payInChanges: [] }).error, /unknown field "payInChanges"/);
+});
+
+test("a version 15 file is upgraded: cash accounts become the emergency fund", () => {
+  const v15 = {
+    ...F.emptyStore(),
+    version: 15,
+    accounts: [{ id: "b", name: "Broker", kind: "invested" }, { id: "t", name: "Tagesgeld", kind: "cash" }, { id: "m", name: "Mortgage", kind: "debt" }],
+  };
+  const result = F.parseStore(v15);
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.store, { ...v15, version: F.VERSION, accounts: [v15.accounts[0], { ...v15.accounts[1], kind: "emergency" }, v15.accounts[2]] });
+  assert.equal(v15.accounts[1].kind, "cash", "the parsed value is left alone");
+  const cash = F.saveAccount(result.store, null, "Flat savings", "cash").store;
+  assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(cash))), { ok: true, store: cash }, "a new cash account stays cash");
 });
 
 test("a version 14 file is upgraded: the Coast plan pays in nothing after Coast FI", () => {
@@ -1336,7 +1351,7 @@ test("an own future pay-in replaces the average everywhere: investment rate, mil
   assert.equal(F.fiOutlook(fresh, "2026-11").milestones().fi.months, null, "no portfolio to project from");
 });
 
-test("emergency fund: the cash accounts in months of expenses, and what is missing", () => {
+test("emergency fund: the emergency-fund accounts in months of expenses, and what is missing", () => {
   assert.deepEqual(F.emergencyFund(6000, 2000, 6), { cash: 6000, months: 3, target: 6, short: 6000 });
   assert.deepEqual(F.emergencyFund(15000, 2000, 6), { cash: 15000, months: 7.5, target: 6, short: 0 });
   assert.equal(F.emergencyFund(5000, 0, 6).months, null);
@@ -1344,13 +1359,15 @@ test("emergency fund: the cash accounts in months of expenses, and what is missi
   let s = F.emptyStore();
   s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "", amount: 2000 * EUR, everyMonths: 1, from: null, until: null, active: true, essential: false }).store;
   s = F.saveAccount(s, null, "Broker", "invested").store;
-  assert.equal(F.metrics(s).emergency, null, "no cash account");
-  s = F.saveAccount(s, null, "Tagesgeld", "cash").store;
-  s = F.saveAccount(s, null, "Savings", "cash").store;
-  const [broker, tagesgeld, savings] = s.accounts.map((a) => a.id);
-  s = F.saveMonth(s, "2026-09", [{ account: broker, value: 50000 * EUR, payIn: 0 }, { account: tagesgeld, value: 4000 * EUR, payIn: 0 }]);
+  s = F.saveAccount(s, null, "Flat savings", "cash").store;
+  assert.equal(F.metrics(s).emergency, null, "no emergency-fund account: cash isn't one");
+  s = F.saveAccount(s, null, "Tagesgeld", "emergency").store;
+  s = F.saveAccount(s, null, "Savings", "emergency").store;
+  const [broker, flat, tagesgeld, savings] = s.accounts.map((a) => a.id);
+  s = F.saveMonth(s, "2026-09", [{ account: broker, value: 50000 * EUR, payIn: 0 }, { account: flat, value: 30000 * EUR, payIn: 0 }, { account: tagesgeld, value: 4000 * EUR, payIn: 0 }]);
   s = F.saveMonth(s, "2026-10", [{ account: savings, value: 7000 * EUR, payIn: 0 }]);
-  // 11,000 in cash, 2,200 a month with the buffer: 5 months of 6.
+  // 11,000 in the emergency fund (the 30,000 cash left out), 2,200 a month
+  // with the buffer: 5 months of 6.
   const e = F.metrics(s).emergency;
   assert.equal(e.cash, 11000 * EUR);
   close(e.months, 5, "months");
