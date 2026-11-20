@@ -2617,6 +2617,12 @@ test("stopAfter: stop working at an age you pick, as the Forecast describes its 
   // Without a year of birth, and once retired: nothing to stop.
   assert.equal(F.fiOutlook({ ...s, settings: { ...s.settings, birthYear: null } }, "2026-11").stopAfter("2040-12"), null);
   assert.equal(F.fiOutlook({ ...s, settings: { ...s.settings, birthYear: 1950 } }, "2026-11").stopAfter("2040-12"), null);
+  // Retirement in Jan. 2027, after the latest values: in December you can
+  // still stop, from then on, and from January on not at all.
+  const sixties = { ...s, settings: { ...s.settings, birthYear: 1960 } };
+  assert.equal(F.fiOutlook(sixties, "2026-12").stopAfter(null).plan.retires, "2026-12");
+  assert.equal(F.fiOutlook(sixties, "2027-01").stopAfter(null), null);
+  assert.equal(F.fiOutlook(sixties, "2027-03").stopAfter(null), null);
 });
 
 test("stopsWorking: when Stop working stops, and whether its money lasts at the expected return", () => {

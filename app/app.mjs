@@ -2246,10 +2246,10 @@ function stopAges(store) {
 
 // Stop working at an age you pick: from January of that age, whatever the
 // portfolio has then (stopAfter), drawn as the Forecast draws its plans by
-// drawWhatIf. null once retired.
+// drawWhatIf. null once retirement has come, as stopAfter() has it.
 function stopAtCard(store) {
   const o = outlook(store);
-  if (o.retired || o.retirement === null) return null;
+  if (o.retired || o.retirement === null || F.monthIndex(o.retirement) <= thisMonth()) return null;
   const { min, max, picked } = stopAges(store);
   const rate = (g) => percentUnit.format(o.rates[g]);
   const about = info("stopping at an age you pick",

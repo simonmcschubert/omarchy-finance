@@ -1794,9 +1794,10 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
     //   months, retirement: as plans() has them,
     //   plan: a plan with the key "pick", at the expected return and
     //     RETURN_SPREAD points less and more, with the same dates,
-    // }; null without a year of birth, or once retired.
+    // }; null without a year of birth, or once retirement has come, by
+    // `start` or by `now`.
     stopAfter(last, kind = "nominal") {
-      if (!Number.isFinite(retirement) || retired) return null;
+      if (!Number.isFinite(retirement) || retired || nowIndex >= retirement) return null;
       const earliest = Math.max(first, nowIndex - 1);
       const month = monthFromIndex(Math.min(last === null ? earliest : Math.max(monthIndex(last), earliest), retirement - 1));
       const set = runsWith({ coast: null, fi: month });
