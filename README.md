@@ -272,23 +272,25 @@ clears them.
 - **Each month**: Hausgeld and Grundsteuer, and subletting (rent you take
   in, after tax; optional). Both are in today's money and rise with
   inflation; subletting counts for good, also once you've stopped working.
-- **Stops then**: the expenses that end the month before you buy, such as
-  the rent.
+- **Stops then**: the expenses that stop when you buy, such as the rent:
+  from that month on, within their own months (a rent that ends before
+  saves nothing).
 
-What you pay in changes by the housing cost: while the loan runs, you pay
-in less by the payment + Hausgeld − the rent that stops − subletting; once
-it is paid off, more by the rent − Hausgeld + subletting. A pay-in never
-goes below 0, and planned pay-in changes after the purchase change by the
-same.
+What you pay in changes each month by what housing costs more than the
+expenses that stop, in the money of that month: the payment, plus Hausgeld
+less subletting and those expenses, which rise with inflation while the
+payment doesn't. So you pay in less while the loan runs, a little less
+each year, and more once it is paid off. A pay-in never goes below 0, and
+planned pay-in changes after the purchase change by the same.
 
 The card then says, as you type: the loan, what it pays a month and from
 when, when it is paid off and the interest in all; where the own money
-comes from; the housing cost before, while the loan runs and after, and
-what you pay in; when you could stop working (as Stop working on the
-Forecast counts it) and from when the money lasts even at the low growth,
-with the flat and without; and the FI number once the loan is paid off,
-with and without. A loan whose payment doesn't cover the interest is never
-paid off: the card says so and compares nothing.
+comes from; the housing cost and what you pay in, in the month you buy;
+when you could stop working (as Stop working on the Forecast counts it)
+and from when the money lasts even at the low growth, with the flat and
+without; and the FI number once the loan is paid off, with and without. A
+payment that doesn't cover the interest after the fixed years never pays
+the loan off: the card says so and compares nothing.
 
 ![Buying a flat: a loan with 10 fixed years, the rent that stops, and what it changes](docs/flat.png)
 

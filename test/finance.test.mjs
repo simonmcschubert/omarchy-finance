@@ -2421,6 +2421,11 @@ test("a loan, month by month: what it pays, for how long, and the interest", () 
   assert.deepEqual(F.loanSchedule({ loan, interest: 3.8, fixedYears: 10, interestAfter: 3.8, repayment: { amount: 800 * EUR } }), never);
   assert.equal(F.loanSchedule({ loan, interest: 3.8, fixedYears: 10, interestAfter: 9, repayment: { amount: 135333 } }).months, null);
   assert.deepEqual(F.loanSchedule({ loan: 0, interest: 3.8, fixedYears: 10, interestAfter: 3.8, repayment: { percent: 2 } }), { payments: [], months: 0, last: 0, interest: 0 });
+  // Below the interest in the fixed years, the loan grows until then; a
+  // lower interest after them can still pay it off.
+  assert.equal(F.loanSchedule({ loan: 100000 * EUR, interest: 6, fixedYears: 1, interestAfter: 0, repayment: { amount: 500 * EUR } }).months, 212);
+  // A last month with nothing left to pay is no month.
+  assert.equal(F.loanSchedule({ loan: 20113740, interest: 4, fixedYears: 40, interestAfter: 4, repayment: { amount: 1500 * EUR } }).months, 178);
 });
 
 // The flat of the what-if below, and a plan to buy it with: born 1990,
@@ -2451,6 +2456,7 @@ test("a flat is checked when read, kept apart from the plan, and deleted", () =>
   const saved = F.saveFlat(s, FLAT);
   assert.equal(saved.ok, true, saved.error);
   assert.deepEqual(saved.store.flat, FLAT);
+  assert.equal(F.saveFlat(s, { ...FLAT, interestAfter: null }).ok, true, "empty: the same interest");
   assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(saved.store))), { ok: true, store: saved.store });
   assert.deepEqual(F.metrics(saved.store, "2026-11").fiNumber, F.metrics(s, "2026-11").fiNumber, "the plan doesn't count it");
   for (const [flat, error] of [
@@ -2463,6 +2469,8 @@ test("a flat is checked when read, kept apart from the plan, and deleted", () =>
     [{ ...FLAT, stops: ["gone"] }, /stops names an unknown expense/],
     [{ ...FLAT, stops: ["rent", "rent"] }, /stops must be a list/],
     [{ ...FLAT, extra: 1 }, /flat has unknown field "extra"/],
+    [{ ...FLAT, ownMoney: 388501 * EUR }, /ownMoney must be at most the price and the costs/],
+    [{ ...FLAT, interestAfter: 21 }, /interestAfter must be null or from 0 to 20/],
   ]) {
     assert.match(F.parseStore({ ...saved.store, flat }).error, error);
     assert.equal(F.saveFlat(s, flat).ok, false);
@@ -2483,46 +2491,70 @@ test("a version 16 file is upgraded: no flat to buy", () => {
 test("buying a flat, as a what-if: the loan, the own money, the pay-ins, and when you could stop", () => {
   const s = renting();
   const r = F.flatWhatIf(s, FLAT, "2026-11");
+  // Today's money is that of Oct. 2026, the latest month: Jan. 2028 is 15
+  // months on.
+  const at = (month) => F.monthIndex(month) - F.monthIndex("2026-10");
+  const then = (amount, month) => F.inflated(amount, 3, at(month));
   assert.equal(r.costs, 38500 * EUR);
   assert.equal(r.loan, 280000 * EUR);
   assert.deepEqual(r.schedule.payments, [{ month: "2028-01", amount: 135333 }, { month: "2038-01", amount: 132502 }]);
   assert.equal(r.schedule.paidOff, "2062-02");
   // The cash first, the rest from the portfolio; the emergency fund stays.
   assert.deepEqual(r.cash, { accounts: true, fromCash: 30000 * EUR, fromPortfolio: 78500 * EUR, portfolio: s.records[24].value });
-  // 1.150 rent stops; 1.353,33 + 450 instead. The 653,33 more come out of
-  // the pay-in; once paid off, 700 a month more go in.
-  assert.deepEqual(r.housing, { before: 1150 * EUR, during: 180333, after: 450 * EUR });
-  assert.deepEqual(r.payIn, { before: 1400 * EUR, during: 74667, after: 2100 * EUR });
+  // In Jan. 2028: 1.150 rent stops, 1.353,33 + 450 instead (the rent and
+  // the 450 risen by then), and the difference comes out of the pay-in.
+  close(r.housing.before, then(1150 * EUR, "2028-01"), "housing before");
+  close(r.housing.during, 135333 + then(450 * EUR, "2028-01"), "housing during");
+  assert.equal(r.payIn.before, 1400 * EUR);
+  close(r.payIn.during, 1400 * EUR - 135333 + then(700 * EUR, "2028-01"), "pay-in during");
   assert.deepEqual(r.renting, F.flatWhatIf(s, { ...FLAT, stops: [] }, "2026-11").renting, "renting is the plan as it is");
   assert.deepEqual(r.renting, { work: "2043-09", low: "2047-01" });
-  assert.deepEqual(r.buying, { work: "2047-11", low: "2050-01" });
+  assert.deepEqual(r.buying, { work: "2046-10", low: "2049-01" });
   // Paid off at 72, the pension pays almost all: the FI number falls.
   assert.equal(Math.round(r.fiNumber.renting / EUR), 322200);
   assert.equal(Math.round(r.fiNumber.buying / EUR), 91200);
 
-  // The plan with the flat.
+  // Month by month, the pay-in follows the housing cost in the money of
+  // then: the rent saved rises, the payment doesn't, and it ends.
+  assert.equal(r.paidIn(F.monthIndex("2027-12")), 1400 * EUR);
+  close(r.paidIn(F.monthIndex("2038-01")), 1400 * EUR - 132502 + then(700 * EUR, "2038-01"), "after the fixed years");
+  close(r.paidIn(F.monthIndex("2062-02")), 1400 * EUR - 5953 + then(700 * EUR, "2062-02"), "the last payment, what is left");
+  close(r.paidIn(F.monthIndex("2062-03")), 1400 * EUR + then(700 * EUR, "2062-03"), "paid off");
+  close(r.paidIn(F.monthIndex("2062-03"), 0), then(700 * EUR, "2062-03"), "applied to what the plan pays in");
+
+  // The plan with the flat: the rent and Nebenkosten are taken back out
+  // from the month bought, within their own months.
   const b = r.store;
-  assert.deepEqual(b.expenses.filter((e) => ["rent", "nk"].includes(e.id)).map((e) => e.until), [{ month: "2027-12" }, { month: "2027-12" }]);
+  assert.deepEqual(b.expenses.slice(0, 4), s.expenses, "the plan's own expenses stay");
+  assert.deepEqual(b.expenses.filter((e) => e.id.startsWith("flat-stops-")).map((e) => [e.amount, e.from, e.until]), [[-900 * EUR, { month: "2028-01" }, null], [-250 * EUR, { month: "2028-01" }, null]]);
+  assert.equal(F.budget(b, F.monthIndex("2028-01")).expenses.monthly, 1190 * EUR + 450 * EUR + b.expenses.find((e) => e.id === "flat-loan-" + F.monthIndex("2028-01")).amount);
   assert.deepEqual(b.expenses.find((e) => e.id === "flat-running"), { id: "flat-running", name: "Hausgeld and Grundsteuer", category: "", amount: 450 * EUR, everyMonths: 1, from: { month: "2028-01" }, until: null, active: true, essential: true });
   const loan = b.expenses.filter((e) => e.name === "Loan");
   assert.deepEqual([loan[0].from, loan[0].until, loan.at(-1).from, loan.at(-1).until], [{ month: "2028-01" }, { month: "2028-12" }, { month: "2062-02" }, { month: "2062-02" }]);
-  // Each year at its middle month's value in today's money (Oct. 2026).
+  // Each year at its middle month's value in today's money.
   close(loan[0].amount, F.deflated(135333, 3, 20.5), "the first year");
-  close(loan.at(-1).amount, F.deflated(5953, 3, F.monthIndex("2062-02") - F.monthIndex("2026-10")), "the last month");
+  close(loan.at(-1).amount, F.deflated(5953, 3, at("2062-02")), "the last month");
   assert.deepEqual(b.events, [{ id: "flat-own-money", name: "Own money for the flat", month: "2028-01", amount: -F.deflated(78500 * EUR, 3, 15) }]);
-  assert.deepEqual(b.payInChanges.map((c) => [c.from.month, c.amount]), [["2028-01", 74667], ["2038-01", 77498], ["2062-03", 210000]]);
   assert.deepEqual(s.expenses, renting().expenses, "the store is left alone");
 
   // A planned pay-in change after buying is cut by the same.
-  const raise = { ...s, payInChanges: [{ id: "p", from: { month: "2035-01" }, amount: 2000 * EUR }] };
-  assert.deepEqual(F.flatWhatIf(raise, FLAT, "2026-11").store.payInChanges.map((c) => [c.from.month, c.amount]),
-    [["2028-01", 74667], ["2035-01", 134667], ["2038-01", 137498], ["2062-03", 270000]]);
+  const raise = F.flatWhatIf({ ...s, payInChanges: [{ id: "p", from: { month: "2035-01" }, amount: 2000 * EUR }] }, FLAT, "2026-11");
+  close(raise.paidIn(F.monthIndex("2035-01")), 2000 * EUR - 135333 + then(700 * EUR, "2035-01"), "a raise");
+
+  // A rent that ends before the flat is bought saves nothing.
+  const moved = F.flatWhatIf({ ...s, expenses: s.expenses.map((e) => (e.id === "rent" ? { ...e, until: { month: "2027-06" } } : e)) }, FLAT, "2026-11");
+  close(moved.housing.before, then(250 * EUR, "2028-01"), "only the Nebenkosten");
+  assert.equal(moved.payIn.during, 0, "more than the pay-in");
+  assert.equal(F.budget(moved.store, F.monthIndex("2028-01")).expenses.monthly, 1190 * EUR + 450 * EUR + loan[0].amount, "the rent isn't taken out twice");
 
   // Subletting lowers the extra cost, and what the portfolio pays later.
   const sublet = F.flatWhatIf(s, { ...FLAT, subletting: 300 * EUR }, "2026-11");
-  assert.deepEqual(sublet.payIn, { before: 1400 * EUR, during: 104667, after: 2400 * EUR });
-  assert.equal(sublet.buying.work, "2044-10");
+  close(sublet.payIn.during, 1400 * EUR - 135333 + then(1000 * EUR, "2028-01"), "pay-in with subletting");
+  assert.equal(sublet.buying.work, "2043-11");
   assert.deepEqual(sublet.store.income.at(-1), { id: "flat-subletting", name: "Subletting", category: "", amount: 300 * EUR, everyMonths: 1, from: { month: "2028-01" }, until: null });
+
+  // The same interest after the fixed years when none is given.
+  assert.deepEqual(F.flatWhatIf(s, { ...FLAT, interestAfter: null }, "2026-11").schedule.payments.map((p) => p.amount), [135333, 102468]);
 
   // Own money from cash alone touches no portfolio.
   const small = F.flatWhatIf(s, { ...FLAT, ownMoney: 20000 * EUR }, "2026-11");
@@ -2530,9 +2562,10 @@ test("buying a flat, as a what-if: the loan, the own money, the pay-ins, and whe
 
   // Never paid off: no plan to compare.
   const never = F.flatWhatIf(s, { ...FLAT, repayment: { amount: 800 * EUR } }, "2026-11");
-  assert.deepEqual([never.schedule.paidOff, never.renting, never.buying, never.fiNumber, never.store], [null, null, null, null, null]);
-  assert.equal(never.payIn.during, 1300 * EUR);
-  // Without a year of birth, the loan but no ages.
+  assert.deepEqual([never.schedule.paidOff, never.renting, never.buying, never.fiNumber, never.store, never.paidIn], [null, null, null, null, null, null]);
+  close(never.payIn.during, 1400 * EUR - 800 * EUR + then(700 * EUR, "2028-01"), "pay-in, never paid off");
+  // Without a year of birth: the loan and the FI number, but no ages.
   const unborn = F.flatWhatIf({ ...s, settings: { ...s.settings, birthYear: null } }, FLAT, "2026-11");
   assert.deepEqual([unborn.loan, unborn.renting, unborn.buying], [280000 * EUR, null, null]);
+  assert.ok(unborn.fiNumber.buying < unborn.fiNumber.renting);
 });

@@ -93,8 +93,8 @@ amount a month to the end. The payment never rises with inflation.
 **Subletting**: rent taken in for the flat, after tax, from the month it is
 bought, for good.
 
-The housing cost changes what is paid in: less while the loan runs, more
-once it is paid off.
+The housing cost changes what is paid in, month by month in the money of
+then: less while the loan runs, more once it is paid off.
 
 ## FI
 

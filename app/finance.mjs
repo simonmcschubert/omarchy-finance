@@ -1487,7 +1487,11 @@ function inTodaysMoney(result, inflation) {
 //   milestones(), path(money), forecast(options), plans(money), payIns():
 //   see below.
 // }
-export function fiOutlook(store, now = currentMonth()) {
+// payIn(index, amount), when given, is what is paid in the month of `index`
+// instead of `amount`, the plan's, both in the money of then: the flat's
+// what-if pays in less while its loan runs. The phases still show the
+// plan's amounts.
+export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } = {}) {
   const { birthYear, retirementAge, expectedReturn, inflation } = store.settings;
   const nowIndex = monthIndex(now);
   const series = portfolioSeries(store);
@@ -1497,7 +1501,8 @@ export function fiOutlook(store, now = currentMonth()) {
   const plan = payInPlan(store, series, start);
   const payIn = plan.now;
   const rises = store.settings.payInsRiseWithInflation;
-  const paidIn = (index) => (rises ? inflated(plan.at(index), inflation, index - first) : plan.at(index));
+  const planned = (index) => (rises ? inflated(plan.at(index), inflation, index - first) : plan.at(index));
+  const paidIn = adjust ? (index) => adjust(index, planned(index)) : planned;
   const value = last ? last.value : 0;
   const known = last !== null;
   const invested = plan.at(first + 1);
@@ -1819,7 +1824,8 @@ export const PAY_IN_STEPS = [0, 500, 1000, 1500, 2000, 2500, 3000].map((units) =
 //   month: when it is bought (the first month it is lived in),
 //   price, costsPercent (purchase costs, % of the price), ownMoney (what is
 //     paid without the loan): in the money of that month, in cents;
-//   interest (% a year) for fixedYears, then interestAfter;
+//   interest (% a year) for fixedYears, then interestAfter (null: the
+//     same);
 //   repayment: { percent } (% of the loan a year at first) or { amount }
 //     (the payment a month, interest included, the same to the end);
 //   running (Hausgeld and Grundsteuer) and subletting (rent taken in,
@@ -1832,6 +1838,9 @@ export const PAY_IN_STEPS = [0, 500, 1000, 1500, 2000, 2500, 3000].map((units) =
 export const FLAT_LIMITS = Object.freeze({ costsPercent: 30, interest: 20, repayment: 20, fixedYears: Object.freeze({ min: 1, max: 40 }) });
 
 const isPercentUpTo = (value, max) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= max;
+
+// A flat's purchase costs, in whole cents.
+export const flatCosts = (flat) => Math.round((flat.price * flat.costsPercent) / 100);
 
 // What is wrong with a flat, or null. expenses: the store's, which `stops`
 // must name.
@@ -1848,7 +1857,8 @@ export function flatError(flat, expenses) {
   if (!isCents(flat.ownMoney, { min: 0 })) return "ownMoney must be zero or more cents";
   if (!isPercentUpTo(flat.interest, FLAT_LIMITS.interest)) return `interest must be from 0 to ${FLAT_LIMITS.interest}`;
   if (!isWholeIn(flat.fixedYears, FLAT_LIMITS.fixedYears)) return `fixedYears must be whole years from ${FLAT_LIMITS.fixedYears.min} to ${FLAT_LIMITS.fixedYears.max}`;
-  if (!isPercentUpTo(flat.interestAfter, FLAT_LIMITS.interest)) return `interestAfter must be from 0 to ${FLAT_LIMITS.interest}`;
+  if (flat.interestAfter !== null && !isPercentUpTo(flat.interestAfter, FLAT_LIMITS.interest)) return `interestAfter must be null or from 0 to ${FLAT_LIMITS.interest}`;
+  if (flat.ownMoney > flat.price + flatCosts(flat)) return "ownMoney must be at most the price and the costs";
   const { repayment } = flat;
   const percent = isObject(repayment) && Object.keys(repayment).length === 1 && "percent" in repayment;
   const amount = isObject(repayment) && Object.keys(repayment).length === 1 && "amount" in repayment;
@@ -1868,11 +1878,12 @@ export function flatError(flat, expenses) {
 // 12, and when the fixed period ends it is worked out again for what is
 // left, at the new interest; with { amount } it is that amount, to the
 // end. The payment never rises with inflation. Payments in whole cents.
-// Returns { payments: [{ from (months after the first; 0 is the first),
-//   amount }], months: how many months are paid (the last one only what is
-//   left), last: that month's payment, interest: paid in all }, or with
-//   months null when a payment doesn't cover the interest (or not within
-//   MAX_PROJECTION_MONTHS): never paid off.
+// A payment below the interest in the fixed years lets the loan grow until
+// then. Returns { payments: [{ from (months after the first; 0 is the
+// first), amount }], months: how many months are paid (the last one only
+// what is left), last: that month's payment, interest: paid in all }, or
+// with months null when the payment doesn't cover the interest after the
+// fixed years (or not within MAX_PROJECTION_MONTHS): never paid off.
 export function loanSchedule({ loan, interest, fixedYears, interestAfter, repayment }) {
   if (!(loan > 0)) return { payments: [], months: 0, last: 0, interest: 0 };
   const fixed = fixedYears * 12;
@@ -1888,9 +1899,9 @@ export function loanSchedule({ loan, interest, fixedYears, interestAfter, repaym
       if (payment !== payments.at(-1).amount) payments.push({ from: k, amount: payment });
     }
     const owed = (rest * (k < fixed ? interest : interestAfter)) / 1200;
-    if (payment <= owed) return never(payments);
+    if (k >= fixed && payment <= owed) return never(payments);
     paid += owed;
-    if (rest + owed <= payment) return { payments, months: k + 1, last: Math.round(rest + owed), interest: paid };
+    if (Math.round(rest + owed) <= payment) return { payments, months: k + 1, last: Math.round(rest + owed), interest: paid };
     rest += owed - payment;
   }
   return never(payments);
@@ -1902,43 +1913,48 @@ export function loanSchedule({ loan, interest, fixedYears, interestAfter, repaym
 // - the own money comes from the cash accounts' latest values first
 //   (never from the emergency fund), and the rest out of the portfolio, as
 //   a one-off in its month;
-// - the expenses in `stops` end the month before, the running costs start
-//   then as an essential expense, and subletting as an income, for good;
+// - the expenses in `stops` stop counting from that month on, within their
+//   own months (an item that takes each one back out); the running costs
+//   start then as an essential expense, and subletting as an income, for
+//   good;
 // - the loan's payments stay the same amount of money: in today's money,
 //   each year of them counts at the value of its middle month;
-// - what is paid in changes by the housing cost: less by payment + running
-//   − the expenses that stop − subletting while the loan runs, more by
-//   those expenses + subletting − running once it is paid off, never
-//   below 0. Amounts as typed, like the pay-in plan's.
+// - what is paid in each month changes by what housing costs more than
+//   renting then, in the money of that month: the payment, plus running
+//   less subletting and the expenses that stop (those three rising with
+//   inflation), never below 0.
 // Returns {
-//   costs, loan (0 when the own money pays it all; never below 0),
+//   costs, loan (0 when the own money pays it all),
 //   schedule: loanSchedule's, with months for offsets: payments [{ month,
 //     amount }], paidOff (the last month paid, null when never), months,
 //     last, interest,
 //   cash: { accounts (whether there are cash accounts), fromCash,
 //     fromPortfolio, portfolio (its latest value, 0 without) },
-//   housing: { before (the expenses that stop, a month), during (the first
-//     payment + running − subletting), after (running − subletting) },
-//   payIn: { before (what the plan pays in the month bought), during,
-//     after (once paid off) }: never below 0,
+//   housing: { before (the expenses that stop), during (the payment +
+//     running − subletting) }, payIn: { before (what the plan pays in),
+//     during (with the flat, never below 0) }: a month, in the money of the
+//     month bought, that month;
 //   renting, buying: { work: when Stop working (Retire early) stops, low:
 //     the first month that lasts even at the low growth (that plan's own,
 //     or Even at …'s), each a month or null when not before retirement }, or
 //     null without a year of birth, or once retired,
 //   fiNumber: { renting, buying } for retiring the month after the last
 //     payment, in today's money,
-//   store: the plan with the flat, as a store to project (never saved),
-// }, with renting, buying, fiNumber and store null when the loan is never
-// paid off.
+//   store: the plan with the flat, as a store to project (never saved), and
+//   paidIn(index): what it pays in that month, in the money of then (as
+//     fiOutlook's payIn option takes it),
+// }, with renting, buying, fiNumber, store and paidIn null when the loan is
+// never paid off.
 export function flatWhatIf(store, flat, now = currentMonth()) {
   const { birthYear, inflation } = store.settings;
   const series = portfolioSeries(store);
   const last = series.at(-1) ?? null;
   const first = monthIndex(last ? last.month : now);
   const buy = monthIndex(flat.month);
-  const costs = Math.round((flat.price * flat.costsPercent) / 100);
+  const costs = flatCosts(flat);
   const loan = Math.max(0, flat.price + costs - flat.ownMoney);
-  const loanPlan = loanSchedule({ loan, interest: flat.interest, fixedYears: flat.fixedYears, interestAfter: flat.interestAfter, repayment: flat.repayment });
+  const interestAfter = flat.interestAfter ?? flat.interest;
+  const loanPlan = loanSchedule({ loan, interest: flat.interest, fixedYears: flat.fixedYears, interestAfter, repayment: flat.repayment });
   const months = loanPlan.months;
   const schedule = {
     ...loanPlan,
@@ -1949,37 +1965,49 @@ export function flatWhatIf(store, flat, now = currentMonth()) {
   const cashNow = netWorthSeries(store).at(-1)?.kinds.cash ?? 0;
   const fromCash = Math.min(flat.ownMoney, cashNow);
   const fromPortfolio = flat.ownMoney - fromCash;
-  const stopping = store.expenses.filter((item) => item.active !== false && flat.stops.includes(item.id));
-  const rent = sum(stopping.map(monthlyAmount));
-  const firstPayment = loanPlan.payments[0]?.amount ?? 0;
-  const housing = { before: rent, during: firstPayment + flat.running - flat.subletting, after: flat.running - flat.subletting };
-  const plan = payInPlan(store, series, monthFromIndex(first));
-  // The payment in the month `index`, 0 outside the loan.
+
+  // The payment in the month `index`: 0 outside the loan, what is left in
+  // its last month.
   const paymentAt = (index) => {
     if (index < buy || (months !== null && index >= buy + months)) return 0;
+    if (months !== null && index === buy + months - 1) return loanPlan.last;
     return loanPlan.payments.findLast((p) => buy + p.from <= index)?.amount ?? 0;
   };
-  const change = (index) => (index < buy ? 0 : months !== null && index >= buy + months ? rent + flat.subletting - flat.running : -(paymentAt(index) + flat.running - rent - flat.subletting));
-  const paid = (index) => Math.max(0, Math.round(plan.at(index) + change(index)));
+  // The expenses that stop, each from the month bought (or its own later
+  // start) until its own end.
+  const stopping = store.expenses.filter((item) => item.active !== false && flat.stops.includes(item.id));
+  const stopsFrom = (item) => (item.from && "month" in item.from && monthIndex(item.from.month) > buy ? item.from : { month: flat.month });
+  const retirement = retirementIndex(store.settings);
+  // What they cost in the month `index` (today's money), as the plan
+  // counts them while working.
+  const stopped = (index) => sum(stopping.filter((item) => countsIn(item, index, birthYear, retirement) && index >= boundIndex(stopsFrom(item), false, birthYear, retirement)).map(monthlyAmount));
+  // What housing costs more than renting in the month `index`, in the
+  // money of then.
+  const extra = (index) => (index < buy ? 0 : paymentAt(index) + inflated(flat.running - flat.subletting - stopped(index), inflation, index - first));
+  const plan = payInPlan(store, series, monthFromIndex(first));
+  const planned = (index) => (store.settings.payInsRiseWithInflation ? inflated(plan.at(index), inflation, index - first) : plan.at(index));
+  const paidIn = (index, amount = planned(index)) => Math.max(0, amount - extra(index));
   const result = {
     costs,
     loan,
     schedule,
     cash: { accounts, fromCash, fromPortfolio, portfolio: last ? last.value : 0 },
-    housing,
-    payIn: { before: plan.at(buy), during: paid(buy), after: months === null ? null : paid(buy + months) },
+    housing: { before: inflated(stopped(buy), inflation, buy - first), during: paymentAt(buy) + inflated(flat.running - flat.subletting, inflation, buy - first) },
+    payIn: { before: planned(buy), during: paidIn(buy) },
     renting: null,
     buying: null,
     fiNumber: null,
     store: null,
+    paidIn: null,
   };
   if (months === null) return result;
 
   // The plan with the flat.
-  const before = monthFromIndex(buy - 1);
-  const ends = (item) => (item.until && "month" in item.until && monthIndex(item.until.month) < buy - 1 ? item : { ...item, until: { month: before } });
   const expense = (id, name, amount, from, until = null) => ({ id, name, category: "", amount, everyMonths: 1, from: { month: from }, until: until && { month: until }, active: true, essential: true });
-  const expenses = store.expenses.map((item) => (flat.stops.includes(item.id) ? ends(item) : item));
+  const expenses = [
+    ...store.expenses,
+    ...stopping.map((item) => ({ ...item, id: `flat-stops-${item.id}`, amount: -item.amount, from: stopsFrom(item) })),
+  ];
   if (flat.running > 0) expenses.push(expense("flat-running", "Hausgeld and Grundsteuer", flat.running, flat.month));
   // The loan's payments in today's money: a year at a time, split where
   // the payment changes and for the last month.
@@ -1987,8 +2015,7 @@ export function flatWhatIf(store, flat, now = currentMonth()) {
   for (let from = buy; from < buy + months;) {
     let until = Math.min(from + 12, buy + months);
     for (const at of splits) if (at > from && at < until) until = at;
-    const amount = until === buy + months && until - from === 1 ? loanPlan.last : paymentAt(from);
-    expenses.push(expense(`flat-loan-${from}`, "Loan", deflated(amount, inflation, (from + until - 1) / 2 - first), monthFromIndex(from), monthFromIndex(until - 1)));
+    expenses.push(expense(`flat-loan-${from}`, "Loan", deflated(paymentAt(from), inflation, (from + until - 1) / 2 - first), monthFromIndex(from), monthFromIndex(until - 1)));
     from = until;
   }
   const income = flat.subletting > 0
@@ -1997,13 +2024,7 @@ export function flatWhatIf(store, flat, now = currentMonth()) {
   const events = fromPortfolio > 0
     ? [...store.events, { id: "flat-own-money", name: "Own money for the flat", month: flat.month, amount: -deflated(fromPortfolio, inflation, buy - first) }]
     : store.events;
-  // What is paid in, as amounts from each month it changes in on.
-  const marks = [...new Set([buy, ...loanPlan.payments.map((p) => buy + p.from), buy + months, ...plan.changes.map((step) => step.index).filter((index) => index > buy)])].sort((a, b) => a - b);
-  const payInChanges = [
-    ...store.payInChanges.filter((c) => payInChangeIndex(c, birthYear) < buy),
-    ...marks.map((index) => ({ id: `flat-pay-in-${index}`, from: { month: monthFromIndex(index) }, amount: paid(index) })),
-  ];
-  const buying = { ...store, expenses, income, events, payInChanges };
+  const buying = { ...store, expenses, income, events };
 
   const stops = (outlook) => {
     const plans = outlook.retired ? null : outlook.plans("nominal");
@@ -2016,9 +2037,10 @@ export function flatWhatIf(store, flat, now = currentMonth()) {
   return {
     ...result,
     renting: stops(fiOutlook(store, now)),
-    buying: stops(fiOutlook(buying, now)),
+    buying: stops(fiOutlook(buying, now, { payIn: paidIn })),
     fiNumber: { renting: fiNumberIn(store, paidOff), buying: fiNumberIn(buying, paidOff) },
     store: buying,
+    paidIn,
   };
 }
 

@@ -1544,14 +1544,15 @@ function flatCard() {
   const store = state.store;
   const saved = store.flat;
   const { birthYear, retirementAge, expectedReturn } = store.settings;
-  // The expenses the flat can end: those that count now, the largest first,
-  // and any ended already that it ends.
-  const now = F.budget(store, thisMonth()).expenses.now;
-  const endable = [...now, ...store.expenses.filter((item) => saved?.stops.includes(item.id) && !now.includes(item))]
+  // The expenses the flat can end: those that count now or later, the
+  // largest first, and any ended already that it ends.
+  const lists = F.budget(store, thisMonth()).expenses;
+  const open = [...lists.now, ...lists.later];
+  const endable = [...open, ...store.expenses.filter((item) => saved?.stops.includes(item.id) && !open.includes(item))]
     .sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name));
   const result = h("div", { class: "helper-result flat-result", "aria-live": "polite" });
 
-  const percentText = (value) => (value === undefined ? "" : plain.format(value));
+  const percentText = (value) => (value == null ? "" : plain.format(value));
   const read = (form) => {
     const data = new FormData(form);
     const text = (name) => String(data.get(name) ?? "").trim();
@@ -1561,7 +1562,7 @@ function flatCard() {
     const own = F.parseMoney(text("ownMoney"));
     const interest = F.parsePercent(text("interest"));
     const years = Number(text("fixedYears"));
-    const after = text("interestAfter") === "" ? interest : F.parsePercent(text("interestAfter"));
+    const after = text("interestAfter") === "" ? { ok: true, value: null } : F.parsePercent(text("interestAfter"));
     const byAmount = data.get("repaymentKind") === "amount";
     const repayment = byAmount ? F.parseMoney(text("repayment")) : F.parsePercent(text("repayment"));
     const optional = (name) => (text(name) === "" ? { ok: true, cents: 0 } : F.parseMoney(text(name)));
@@ -1573,6 +1574,8 @@ function flatCard() {
     if (!price.ok || price.cents <= 0) return { error: "Price: enter an amount." };
     if (!costs.ok || costs.value > L.costsPercent) return { error: `Purchase costs: enter a percentage up to ${L.costsPercent}.` };
     if (!own.ok || own.cents < 0) return { error: "Own money: enter an amount, or 0." };
+    const total = price.cents + F.flatCosts({ price: price.cents, costsPercent: costs.value });
+    if (own.cents > total) return { error: `Own money: at most the price and the costs, ${money(total)}.` };
     if (!interest.ok || interest.value > L.interest) return { error: `Interest: enter a percentage up to ${L.interest}.` };
     if (!/^[0-9]+$/.test(text("fixedYears")) || years < L.fixedYears.min || years > L.fixedYears.max) return { error: `Fixed for: whole years from ${L.fixedYears.min} to ${L.fixedYears.max}.` };
     if (!after.ok || after.value > L.interest) return { error: `Then: enter a percentage up to ${L.interest}, or leave it empty for the same.` };
@@ -1609,7 +1612,7 @@ function flatCard() {
     else if (s.months === null) {
       const payment = s.payments.at(-1).amount;
       const late = s.payments.length > 1 || payment > (r.loan * flat.interest) / 1200;
-      out.push(`Loan ${money(r.loan)} · ${money(payment)} a month doesn't cover the interest${late ? ` of ${percentUnit.format(flat.interestAfter)} after the fixed years` : ""}: it's never paid off.`);
+      out.push(`Loan ${money(r.loan)} · ${money(payment)} a month doesn't cover the interest${late ? ` of ${percentUnit.format(flat.interestAfter ?? flat.interest)} after the fixed years` : ""}: it's never paid off.`);
     } else {
       const [first, ...later] = s.payments;
       const changes = later.map((p) => `, ${money(p.amount)} from ${monthLabel(p.month)}`).join("");
@@ -1623,16 +1626,18 @@ function flatCard() {
       out.push(`Own money: ${parts.join(", ")}${more}${c.accounts ? " · the emergency fund stays" : ""}`);
     }
     const sublet = flat.subletting > 0 ? ", after subletting" : "";
-    const paidOff = r.payIn.after === null ? "" : `, ${money(r.housing.after)} once paid off`;
-    out.push(`Housing ${money(r.housing.before)} → ${money(r.housing.during)} a month${sublet}${paidOff} · pays in ${money(r.payIn.during)} instead of ${money(r.payIn.before)}`);
+    out.push([`${monthLabel(flat.month)}: housing ${money(r.housing.before)} → ${money(r.housing.during)} a month${sublet} · pays in ${money(r.payIn.during)} instead of ${money(r.payIn.before)}`,
+      info("the housing cost",
+        `In the money of ${monthLabel(flat.month)}: the expenses that stop, Hausgeld and subletting rise with inflation until then; the loan's payment doesn't.`,
+        "From then on, what you pay in changes by what housing costs more than the expenses that stop, month by month: less while the loan runs, more once it's paid off. Never below 0.")]);
     if (r.renting && r.buying) {
       const low = F.growthRates(expectedReturn).low;
       out.push(`Stop working ${ageAt(r.buying.work)} instead of ${ageAt(r.renting.work, true)}${shift(r.buying.work, r.renting.work)} · `
         + `even at ${percentUnit.format(low)}: ${ageAt(r.buying.low)} instead of ${ageAt(r.renting.low, true)}${shift(r.buying.low, r.renting.low)}`);
-      out.push(`Once it's paid off, the FI number is ${money(r.fiNumber.buying)} instead of ${money(r.fiNumber.renting)}, in today's money.`);
     } else if (s.months !== null && birthYear === null) {
       out.push(["When you could stop working needs your year of birth, in ", settingsLink("general"), "."]);
     }
+    if (r.fiNumber) out.push(`Once it's paid off, the FI number is ${money(r.fiNumber.buying)} instead of ${money(r.fiNumber.renting)}, in today's money.`);
     return out;
   };
 
@@ -1646,14 +1651,18 @@ function flatCard() {
     }, 120);
   };
 
-  const repaymentKind = h("select", { name: "repaymentKind", "aria-label": "Repayment as", onchange: (event) => show(event.target.form) },
+  const repaymentKind = h("select", { name: "repaymentKind", "aria-label": "Repayment as" },
     h("option", { value: "percent", selected: !("amount" in (saved?.repayment ?? {})) || null }, "% a year at first"),
     h("option", { value: "amount", selected: "amount" in (saved?.repayment ?? {}) || null }, `${whole.formatToParts(0).find((part) => part.type === "currency")?.value ?? store.settings.currency} a month`));
   const repaymentValue = saved ? ("amount" in saved.repayment ? inputMoney(saved.repayment.amount) : plain.format(saved.repayment.percent)) : "";
   const input = (name, value, props = {}) => h("input", { name, inputmode: "decimal", autocomplete: "off", value, ...props });
   const form = h("form", {
     class: "helper-form flat-form",
-    oninput: (event) => show(event.currentTarget),
+    oninput: (event) => {
+      // An amount a month is hidden with the other amounts; a percentage isn't.
+      if (event.target === repaymentKind) event.currentTarget.elements.repayment.classList.toggle("amount", repaymentKind.value === "amount");
+      show(event.currentTarget);
+    },
     onsubmit: (event) => {
       event.preventDefault();
       const r = read(event.currentTarget);
@@ -1678,7 +1687,7 @@ function flatCard() {
       "The Zinsbindung: how long the interest stays the same."),
     field("Then, a year (%)", input("interestAfter", percentText(saved?.interestAfter), { placeholder: "the same" }),
       "The interest after the fixed years, to see what a higher one does. Empty: the same."),
-    field("Repayment", h("div", { class: "flat-repayment" }, input("repayment", repaymentValue, { required: true, placeholder: "2" }), repaymentKind),
+    field("Repayment", h("div", { class: "flat-repayment" }, input("repayment", repaymentValue, { required: true, placeholder: "2", class: saved && "amount" in saved.repayment ? "amount" : null }), repaymentKind),
       "% a year at first: the anfängliche Tilgung. The payment is the loan × (interest + repayment) ÷ 12; when the fixed years end, it's worked out again for what is left, at the new interest.",
       "An amount a month: the whole payment, interest included, the same until the loan is paid off.",
       "Either way the payment stays the same amount of money: it doesn't rise with inflation."),
