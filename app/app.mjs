@@ -148,6 +148,7 @@ const KINDS = {
 const ACCOUNT_KIND_LABELS = {
   invested: "Invested (portfolio)",
   cash: "Cash",
+  emergency: "Emergency fund",
   property: "Property",
   pension: "Pension assets",
   debt: "Debt",
@@ -1207,9 +1208,10 @@ function netWorthCard(m) {
     emergencyFund(m));
 }
 
-// The emergency fund, at the foot of Net worth: how long the cash accounts'
-// latest values pay this month's expenses, with a bar for how much of the
-// months set in Settings that is. Only with a cash account and expenses.
+// The emergency fund, at the foot of Net worth: how long the emergency-fund
+// accounts' latest values pay this month's expenses, with a bar for how much
+// of the months set in Settings that is. Only with an emergency-fund account
+// and expenses.
 function emergencyFund(m) {
   const e = m.emergency;
   if (e === null || e.months === null) return null;
@@ -1224,7 +1226,7 @@ function emergencyFund(m) {
   return h("div", { class: e.target > 0 && e.short === 0 ? "emergency reached" : "emergency" },
     h("div", { class: "bar-text" },
       h("span", null, "Emergency fund", info("the emergency fund",
-        `How long your cash accounts alone would pay your expenses, ${money(m.expenses)} a month with buffer.`,
+        `How long your emergency-fund accounts alone would pay your expenses, ${money(m.expenses)} a month with buffer. Cash accounts don't count.`,
         ["The months you aim for are set in ", settingsLink("data"), "; 0 sets none."])),
       h("span", { class: "num" }, e.months >= 1 ? duration(Math.floor(e.months)) : "Less than a month")),
     target,
@@ -1787,7 +1789,7 @@ function viewPortfolio() {
           h("thead", null, h("tr", null, h("th", null, "Account"),
             h("th", null, "Value at month end",
               info("the value at month end", "What each account is worth on the last day of the month. For a debt, what is still owed.",
-                "Cash, property, pension assets and debts take a value only: pay-ins are for the portfolio.")),
+                "Cash, the emergency fund, property, pension assets and debts take a value only: pay-ins are for the portfolio.")),
             h("th", null, "Paid in this month",
               info("paid in", "Your regular pay-ins, such as a savings plan; negative for a withdrawal.",
                 ["Their average of the last 12 months is what the milestones and the forecast go on with, unless you plan your own under Future pay-ins in ", h("a", { href: "#settings" }, "Settings"), "."])),
@@ -2289,7 +2291,7 @@ function viewSettings() {
         h("div", { class: "columns" }, F.KINDS.map((kind) => h("div", null, h("h3", null, KINDS[kind].title), categoryList(store, kind))))),
       card(["Accounts", info("accounts",
           "Invested accounts (brokers, ETF savings plans) are the portfolio: the milestones and the forecast count them alone.",
-          "Cash (Tagesgeld, the emergency fund), property, pension assets (Riester, Rürup, company pension: locked until retirement) and debts (what is still owed, such as a mortgage) count for the net worth.")],
+          "Cash (money you may spend, such as savings for a flat), the emergency fund (Tagesgeld you keep for emergencies), property, pension assets (Riester, Rürup, company pension: locked until retirement) and debts (what is still owed, such as a mortgage) count for the net worth.")],
         accountList(store)),
     ],
     general: () => [
@@ -2419,8 +2421,8 @@ function assumptionsForm(store) {
       "How much prices rise a year. The milestones, the Path to FI chart and the forecast raise your expenses and the FI number by it.",
       "Pay-ins rise by it only if you choose so under Future pay-ins."),
     field("Emergency fund (months of expenses)", h("input", { name: "emergencyMonths", inputmode: "numeric", value: String(emergencyMonths), required: true }),
-      "How many months of expenses you want to keep in cash accounts, apart from the portfolio: 3 to 6 are common. 0 sets no target.",
-      "The dashboard says how far your cash goes, under Expenses covered."),
+      "How many months of expenses you want to keep in emergency-fund accounts, apart from the portfolio: 3 to 6 are common. 0 sets no target.",
+      "The dashboard says how far your emergency fund goes, at the foot of Net worth."),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, "Save")));
 }
 
@@ -2708,7 +2710,7 @@ function importCard(store) {
       h("summary", null, h("h2", null, "Import past months from CSV")),
       h("p", null, "One row per account and month, with the columns ", h("code", null, "date"), ", ", h("code", null, "account"), ", ",
         h("code", null, "value"), ", ", h("code", null, "pay_in"), ", ", h("code", null, "one_off"), " and ", h("code", null, "kind"),
-        " (the last three optional; kind is what a new account holds: invested, cash, property, pension or debt). Dates as 2025-01-31, 2025.01.31 or 31.01.2025: a row counts for the month of its date. ",
+        " (the last three optional; kind is what a new account holds: invested, cash, emergency, property, pension or debt). Dates as 2025-01-31, 2025.01.31 or 31.01.2025: a row counts for the month of its date. ",
         "Semicolons, commas or tabs work, and so do amounts like 1.234,56 or 1,234.56. ",
         "Rows for a month and account that already exist replace the old values. New account names become new accounts."),
       h("div", { class: "form-actions" },
