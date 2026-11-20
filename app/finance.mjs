@@ -1914,9 +1914,10 @@ export function loanSchedule({ loan, interest, fixedYears, interestAfter, repaym
 //   (never from the emergency fund), and the rest out of the portfolio, as
 //   a one-off in its month;
 // - the expenses in `stops` stop counting from that month on, within their
-//   own months (an item that takes each one back out); the running costs
-//   start then as an essential expense, and subletting as an income, for
-//   good;
+//   own months (an item that takes each one back out); one that starts at
+//   retirement isn't stopped, as each plan retires at its own time. The
+//   running costs start then as an essential expense, and subletting as an
+//   income, for good;
 // - the loan's payments stay the same amount of money: in today's money,
 //   each year of them counts at the value of its middle month;
 // - what is paid in each month changes by what housing costs more than
@@ -1973,10 +1974,11 @@ export function flatWhatIf(store, flat, now = currentMonth()) {
     if (months !== null && index === buy + months - 1) return loanPlan.last;
     return loanPlan.payments.findLast((p) => buy + p.from <= index)?.amount ?? 0;
   };
-  // The expenses that stop, each from the month bought (or its own later
-  // start) until its own end.
-  const stopping = store.expenses.filter((item) => item.active !== false && flat.stops.includes(item.id));
-  const stopsFrom = (item) => (item.from && "month" in item.from && monthIndex(item.from.month) > buy ? item.from : { month: flat.month });
+  // The expenses that stop, each from the month bought or its own later
+  // start (a month or an age, which never comes without a year of birth),
+  // until its own end.
+  const stopping = store.expenses.filter((item) => item.active !== false && flat.stops.includes(item.id) && !(item.from && "at" in item.from));
+  const stopsFrom = (item) => (item.from && boundIndex(item.from, false, birthYear, Infinity) > buy ? item.from : { month: flat.month });
   const retirement = retirementIndex(store.settings);
   // What they cost in the month `index` (today's money), as the plan
   // counts them while working.

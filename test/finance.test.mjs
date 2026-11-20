@@ -2547,6 +2547,15 @@ test("buying a flat, as a what-if: the loan, the own money, the pay-ins, and whe
   assert.equal(moved.payIn.during, 0, "more than the pay-in");
   assert.equal(F.budget(moved.store, F.monthIndex("2028-01")).expenses.monthly, 1190 * EUR + 450 * EUR + loan[0].amount, "the rent isn't taken out twice");
 
+  // One that starts later, at an age, stops only from then; one that
+  // starts at retirement isn't stopped at all.
+  const later = { ...s, expenses: [...s.expenses, { id: "care", name: "Care", category: "", amount: 500 * EUR, everyMonths: 1, from: { age: 60 }, until: null, active: true, essential: true }] };
+  const care = F.flatWhatIf(later, { ...FLAT, stops: ["rent", "nk", "care", "hi"] }, "2026-11");
+  assert.deepEqual(care.store.expenses.filter((e) => e.id.startsWith("flat-stops-")).map((e) => [e.id, e.from]),
+    [["flat-stops-rent", { month: "2028-01" }], ["flat-stops-nk", { month: "2028-01" }], ["flat-stops-care", { age: 60 }]]);
+  assert.equal(F.budget(care.store, F.monthIndex("2040-01")).expenses.monthly, F.budget(r.store, F.monthIndex("2040-01")).expenses.monthly, "nothing taken out before 60");
+  close(care.paidIn(F.monthIndex("2040-01")), r.paidIn(F.monthIndex("2040-01")), "no credit before 60");
+
   // Subletting lowers the extra cost, and what the portfolio pays later.
   const sublet = F.flatWhatIf(s, { ...FLAT, subletting: 300 * EUR }, "2026-11");
   close(sublet.payIn.during, 1400 * EUR - 135333 + then(1000 * EUR, "2028-01"), "pay-in with subletting");

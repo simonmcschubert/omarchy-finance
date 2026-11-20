@@ -1544,10 +1544,11 @@ function flatCard() {
   const store = state.store;
   const saved = store.flat;
   const { birthYear, retirementAge, expectedReturn } = store.settings;
-  // The expenses the flat can end: those that count now or later, the
-  // largest first, and any ended already that it ends.
+  // The expenses the flat can end: those that count now or later (but not
+  // from retirement, which each plan reaches at its own time), the largest
+  // first, and any ended already that it ends.
   const lists = F.budget(store, thisMonth()).expenses;
-  const open = [...lists.now, ...lists.later];
+  const open = [...lists.now, ...lists.later].filter((item) => !(item.from && "at" in item.from));
   const endable = [...open, ...store.expenses.filter((item) => saved?.stops.includes(item.id) && !open.includes(item))]
     .sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name));
   const result = h("div", { class: "helper-result flat-result", "aria-live": "polite" });
@@ -1575,7 +1576,7 @@ function flatCard() {
     if (!costs.ok || costs.value > L.costsPercent) return { error: `Purchase costs: enter a percentage up to ${L.costsPercent}.` };
     if (!own.ok || own.cents < 0) return { error: "Own money: enter an amount, or 0." };
     const total = price.cents + F.flatCosts({ price: price.cents, costsPercent: costs.value });
-    if (own.cents > total) return { error: `Own money: at most the price and the costs, ${money(total)}.` };
+    if (own.cents > total) return { error: `Own money: at most the price and the costs, ${moneyExact(total)}.` };
     if (!interest.ok || interest.value > L.interest) return { error: `Interest: enter a percentage up to ${L.interest}.` };
     if (!/^[0-9]+$/.test(text("fixedYears")) || years < L.fixedYears.min || years > L.fixedYears.max) return { error: `Fixed for: whole years from ${L.fixedYears.min} to ${L.fixedYears.max}.` };
     if (!after.ok || after.value > L.interest) return { error: `Then: enter a percentage up to ${L.interest}, or leave it empty for the same.` };
@@ -1629,7 +1630,7 @@ function flatCard() {
     out.push([`${monthLabel(flat.month)}: housing ${money(r.housing.before)} → ${money(r.housing.during)} a month${sublet} · pays in ${money(r.payIn.during)} instead of ${money(r.payIn.before)}`,
       info("the housing cost",
         `In the money of ${monthLabel(flat.month)}: the expenses that stop, Hausgeld and subletting rise with inflation until then; the loan's payment doesn't.`,
-        "From then on, what you pay in changes by what housing costs more than the expenses that stop, month by month: less while the loan runs, more once it's paid off. Never below 0.")]);
+        "From then on, what you pay in changes each month by what housing costs more than the expenses that stop (or less: then you pay in more). Once the loan is paid off, only the Hausgeld, subletting and those expenses count. Never below 0.")]);
     if (r.renting && r.buying) {
       const low = F.growthRates(expectedReturn).low;
       out.push(`Stop working ${ageAt(r.buying.work)} instead of ${ageAt(r.renting.work, true)}${shift(r.buying.work, r.renting.work)} · `

@@ -274,14 +274,14 @@ clears them.
   inflation; subletting counts for good, also once you've stopped working.
 - **Stops then**: the expenses that stop when you buy, such as the rent:
   from that month on, within their own months (a rent that ends before
-  saves nothing).
+  saves nothing). Those that start at retirement aren't offered.
 
 What you pay in changes each month by what housing costs more than the
 expenses that stop, in the money of that month: the payment, plus Hausgeld
 less subletting and those expenses, which rise with inflation while the
-payment doesn't. So you pay in less while the loan runs, a little less
-each year, and more once it is paid off. A pay-in never goes below 0, and
-planned pay-in changes after the purchase change by the same.
+payment doesn't. Once the loan is paid off, the payment drops out of it:
+you usually pay in more then. A pay-in never goes below 0, and planned
+pay-in changes after the purchase change by the same.
 
 The card then says, as you type: the loan, what it pays a month and from
 when, when it is paid off and the interest in all; where the own money
