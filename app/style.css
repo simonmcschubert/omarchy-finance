@@ -2134,8 +2134,24 @@ table.entry th {
   margin-top: 10px;
 }
 
-/* Buying a flat: the fields in three groups, each under a heading of its
-   own across the grid, and the expenses it ends as a row of checkboxes. */
+/* Buying a flat on What if: the fields beside a panel of what the flat
+   changes, or under it in a narrow window. The fields in two columns, in
+   three groups under a heading each, and the expenses it ends as a group
+   of checkboxes; under a field, what it works out to. */
+.flat-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  margin-top: 4px;
+}
+
+.flat-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  margin-top: 0;
+}
+
 .flat-form h3,
 .flat-form .flat-stops,
 .flat-form .form-actions {
@@ -2146,19 +2162,33 @@ table.entry th {
   margin: 8px 0 0;
 }
 
+.flat-form h3:first-child {
+  margin-top: 0;
+}
+
+.field-hint {
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.field-hint:empty {
+  display: none;
+}
+
 .flat-stops {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 18px;
-  margin: 0;
+  margin: 8px 0 0;
   padding: 0;
   border: 0;
 }
 
 .flat-stops legend {
-  color: var(--fg-muted);
+  color: var(--fg-strong);
+  font-weight: 600;
   padding: 0;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .flat-stops .check {
@@ -2181,8 +2211,201 @@ table.entry th {
   min-width: 0;
 }
 
-.flat-result p {
-  margin: 4px 0;
+/* What the flat changes: when you could stop working, renting and buying
+   side by side, where the money goes each month, and the loan. */
+.flat-panel {
+  container-type: inline-size;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.flat-panel p {
+  margin: 0;
+}
+
+.flat-error {
+  color: var(--red);
+}
+
+.flat-panel .better {
+  color: var(--good-text);
+}
+
+.flat-panel .worse {
+  color: var(--bad-text);
+}
+
+.flat-verdict {
+  display: grid;
+  gap: 2px;
+}
+
+.flat-work {
+  color: var(--fg-strong);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.flat-compare th,
+.flat-compare td {
+  padding: 6px 8px;
+}
+
+.flat-compare th:first-child {
+  padding-left: 0;
+  color: var(--fg-muted);
+}
+
+.flat-compare td {
+  color: var(--fg-strong);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.flat-compare thead th {
+  text-align: right;
+}
+
+.flat-compare .buying {
+  background: var(--selection);
+}
+
+.flat-compare thead th.buying {
+  color: var(--fg-strong);
+}
+
+.flat-compare td .sub {
+  display: block;
+}
+
+.flat-compare td.flat-change {
+  padding-right: 0;
+  color: var(--fg-muted);
+}
+
+.flat-compare td.flat-change.better {
+  color: var(--good-text);
+}
+
+.flat-compare td.flat-change.worse {
+  color: var(--bad-text);
+}
+
+/* In a narrow panel, the table without its last column: the lines above
+   it say how much sooner or later. */
+@container (max-width: 400px) {
+  .flat-compare td.flat-change,
+  .flat-compare thead td:last-child {
+    display: none;
+  }
+
+  .flat-compare td.buying {
+    padding-right: 8px;
+  }
+}
+
+/* Where the money goes each month: a bar for renting and one for buying,
+   on one scale, each part as wide as its amount (flex-grow). */
+.flat-split {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: center;
+}
+
+.flat-split h3 {
+  grid-column: 1 / -1;
+  margin: 0 0 2px;
+}
+
+.flat-split-label {
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.flat-bar {
+  display: flex;
+  gap: 2px;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.flat-bar > span {
+  flex: 0 1 0;
+  min-width: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  line-height: 22px;
+  color: var(--fg-strong);
+}
+
+.flat-bar .housing,
+.flat-bar .loan {
+  background: color-mix(in srgb, var(--fg-muted) 45%, transparent);
+}
+
+.flat-bar .running {
+  background: color-mix(in srgb, var(--fg-muted) 28%, transparent);
+}
+
+.flat-bar .payin {
+  background: var(--series-1);
+  color: var(--bg);
+}
+
+.flat-bar .room {
+  padding: 0;
+}
+
+.flat-split-note {
+  grid-column: 2;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.flat-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 14px;
+  margin: 0;
+}
+
+.flat-facts dt {
+  color: var(--fg-muted);
+}
+
+.flat-facts dd {
+  margin: 0;
+  color: var(--fg-strong);
+}
+
+.flat-facts .sub {
+  color: var(--fg-muted);
+}
+
+@media (max-width: 860px) {
+  .flat-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .flat-panel {
+    order: -1;
+  }
+}
+
+@media (max-width: 420px) {
+  .flat-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* ---- What if */
