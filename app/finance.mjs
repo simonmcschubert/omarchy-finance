@@ -990,8 +990,9 @@ export function yearToDate(returns) {
 // first month on, grows to the latest value. What went in during a month
 // counts from its middle. Found as a monthly rate, from -99,99 % to
 // +1000 % a month, so short histories with large moves have one too; a year
-// from 12 months on, over the whole time before, as timeWeighted. null
-// with less than two months or no rate.
+// from 12 months on, over the whole time before, as timeWeighted. -1 (all
+// of it lost) when the latest value is 0 and nothing was ever taken out.
+// null with less than two months or no rate.
 export function moneyWeighted(series) {
   if (series.length < 2) return null;
   const flows = [{ at: 0, amount: -series[0].value }];
@@ -1381,7 +1382,9 @@ export function forecast(params) {
     let phase = "full"; // "full", "coast" (the smaller amount), or "out" (withdrawing)
     let coastMonth = null;
     let fiMonth = null;
-    let runsOut = first === lastShown && v === 0 ? start : null;
+    // Retired at the start with nothing left: empty from the start, as
+    // the loop below counts any retired month that ends with nothing.
+    let runsOut = first >= retirement && v <= 0 ? start : null;
     let retiredFrom = retirement; // Retire early's is the month after FI
     let atRetirement = first === retirement - 1 ? v : null;
     const values = [v];
@@ -1445,9 +1448,10 @@ export function forecast(params) {
     goal: goals,
     fiAtRetirement: ahead ? fiAtRetirement : null,
     // What the portfolio needs at the end of `start` for Coast FI then:
-    // grown to when retirement starts, with coastContribution and less the
-    // one-offs taken out, it reaches fiAtRetirement. 0 when coastContribution
-    // reaches it on its own; null if retirement has started, or without one.
+    // grown to when retirement starts, with coastContribution, it reaches
+    // fiAtRetirement and pays each one-off taken out in its month. 0 when
+    // coastContribution does that on its own; null if retirement has
+    // started, or without one.
     coastNumber: ahead ? coastNeeds[0] : null,
     plans: Object.fromEntries(PLANS.map((plan) => [plan, run(plan)])),
   };
@@ -1701,7 +1705,9 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
       if (reach.low !== null) shown = after(reach.low);
       else if (reach.mid !== null) shown = after(reach.mid) * 1.5;
       else if (reach.high !== null) shown = after(reach.high) * 1.5;
-      const cap = Math.max(MAX_PROJECTION_MONTHS, after(reach.low ?? reach.mid ?? reach.high) ?? 0);
+      // Up to MAX_PROJECTION_MONTHS, or past it to a little after the
+      // latest FI date.
+      const cap = Math.max(MAX_PROJECTION_MONTHS, Math.ceil((after(reach.low ?? reach.mid ?? reach.high) ?? 0) * 1.1));
       const count = reach.mid === start ? 0
         : Math.min(cap, Math.max(12, Math.ceil(shown * 1.1)), retirement - 1 - first, results.mid.months.length - 1);
       const lines = Object.fromEntries(GROWTHS.map((g) => [g, inMoney(results[g], kind)]));

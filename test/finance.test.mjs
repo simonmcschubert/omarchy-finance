@@ -894,6 +894,8 @@ test("Path to FI includes the month FI is reached when retirement is over 100 ye
   assert.equal(path.reach.mid, F.addMonths(o.start, 1250));
   assert.ok(reach);
   assert.equal(reach.mid, reach.goal);
+  // And a little after it, as with FI dates within 100 years.
+  assert.equal(path.points.length, Math.ceil(1250 * 1.1));
   const never = outlook({ value: 0, payIn: 0, goal: 12500 * EUR, settings: { birthYear: 2090 } }).path();
   assert.deepEqual(never.reach, { low: null, mid: null, high: null });
   assert.equal(never.points.length, F.MAX_PROJECTION_MONTHS);
@@ -2104,6 +2106,9 @@ test("forecast ends in December of age 120 even with less than ten years left", 
   const empty = F.forecast(plan({ start: "2030-12", birthYear: 1910, value: 0 }));
   assert.deepEqual(empty.months, ["2030-12"]);
   assert.equal(empty.plans.keep.runsOut, "2030-12");
+  // Empty from the start however many months are shown.
+  assert.equal(F.forecast(plan({ start: "2030-11", birthYear: 1910, value: 0 })).plans.keep.runsOut, "2030-11");
+  assert.equal(F.forecast(plan({ birthYear: 1950, value: 0 })).plans.keep.runsOut, "2026-10");
 });
 
 test("forecast: needs is what a month-end value has to top for the money to last", () => {
