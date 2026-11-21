@@ -10,6 +10,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
@@ -745,9 +746,15 @@ class AskPolkitTest(unittest.TestCase):
         self.assertFalse(confirmed)
         self.assertIn("can't ask the system", why)
 
-    def test_sleep_offset_stays_while_awake(self):
-        # The two clocks are read one after the other: a few microseconds apart.
-        self.assertLess(abs(server.sleep_offset() - server.sleep_offset()), 0.01)
+    def test_sleep_offset_measures_time_only_the_boot_clock_counted(self):
+        clocks = {time.CLOCK_BOOTTIME: 125, time.CLOCK_MONOTONIC: 120}
+        with patch.object(server.time, "clock_gettime", side_effect=clocks.__getitem__):
+            self.assertEqual(server.sleep_offset(), 5)
+            clocks[time.CLOCK_BOOTTIME] += 30
+            clocks[time.CLOCK_MONOTONIC] += 30
+            self.assertEqual(server.sleep_offset(), 5)
+            clocks[time.CLOCK_BOOTTIME] += 15
+            self.assertEqual(server.sleep_offset(), 20)
 
 
 class WriteAtomicTest(unittest.TestCase):
