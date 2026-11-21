@@ -1907,6 +1907,12 @@ th .sub {
   border-top: 1px solid var(--border);
 }
 
+/* Later, Ended and Inactive: not counted this month. */
+.item-group.apart {
+  border-top-style: dashed;
+}
+
+/* After .apart, so that a first group has no line above it either. */
 .item-group:first-child {
   padding-top: 0;
   border-top: none;
@@ -1914,11 +1920,6 @@ th .sub {
 
 .item-group:last-child {
   padding-bottom: 0;
-}
-
-/* Later, Ended and Inactive: not counted this month. */
-.item-group.apart {
-  border-top-style: dashed;
 }
 
 .item-group-head {
