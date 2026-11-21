@@ -2619,7 +2619,7 @@ function flatCard() {
     const text = (name) => String(data.get(name) ?? "").trim();
     const month = F.parseMonth(text("month"));
     const ahead = month ? F.monthIndex(month) - thisMonth() : 0;
-    hints.month.textContent = ahead > 0 ? `in ${duration(ahead)}` : "";
+    hints.month.textContent = ahead <= 0 ? "" : `in ${ahead < 12 ? monthsText(ahead) : tenthsText(yearTenths(ahead))}`;
     const price = F.parseMoney(text("price"));
     const costs = F.parsePercent(text("costsPercent"));
     const own = F.parseMoney(text("ownMoney"));
@@ -2640,8 +2640,9 @@ function flatCard() {
       const schedule = F.loanSchedule({ loan, interest: interest.value, fixedYears: 1, interestAfter: interest.value, repayment: { percent: repayment.value } });
       hints.payment.textContent = `${money(schedule.payments[0].amount)} a month`;
     } else if (byAmount && repayment.cents > 0) {
-      const atFirst = Math.round(((repayment.cents * 1200) / loan - interest.value) * 100) / 100;
-      hints.payment.textContent = atFirst > 0 ? `${percentUnit.format(atFirst)} repayment at first` : "Below the interest at first";
+      const atFirst = (repayment.cents * 1200) / loan - interest.value;
+      if (atFirst > 0) hints.payment.textContent = `${percentUnit.format(Math.round(atFirst * 100) / 100)} repayment at first`;
+      else hints.payment.textContent = atFirst === 0 ? "Only the interest at first" : "Below the interest at first";
     }
   };
 
@@ -2722,7 +2723,7 @@ function flatCard() {
     else if (more < 0) note = `Housing costs ${money(-more)} less a month: you pay that in as well.`;
     else note = "Housing costs the same: you pay in as before.";
     return h("div", { class: "flat-split" },
-      h("h3", null, `Each month from ${monthLabel(flat.month)}`, info("the housing cost",
+      h("h3", null, `In ${monthLabel(flat.month)}, the month you buy`, info("the housing cost",
         "Housing: renting, the expenses that stop; buying, the loan's payment and the Hausgeld, less subletting.",
         `In the money of ${monthLabel(flat.month)}: the expenses that stop, Hausgeld and subletting rise with inflation until then; the loan's payment doesn't.`,
         "From then on, what you pay in changes each month by what housing costs more than the expenses that stop (or less: then you pay in more). Once the loan is paid off, only the Hausgeld, subletting and those expenses count. Never below 0.")),

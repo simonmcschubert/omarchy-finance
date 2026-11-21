@@ -592,9 +592,9 @@ what the flat changes:
   months, and the FI number once the loan is paid off. In a narrow panel
   the column of how much sooner or later is left out, as the lines above
   say it;
-- each month from the month you buy, a bar for renting and one for
-  buying: housing, then what you pay in, on one scale, so the part that
-  goes from paying in to housing shows;
+- in the month you buy, a bar for renting and one for buying: what
+  housing costs that month, then what you pay in, on one scale, so the
+  part that goes from paying in to housing shows;
 - the loan: what it pays a month and from when, when it is paid off and
   the interest in all; and where the own money comes from.
 
