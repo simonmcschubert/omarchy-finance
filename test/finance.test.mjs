@@ -887,6 +887,18 @@ test("FI outlook: FI only counts before retirement", () => {
   assert.equal(outlook({ value: 200000 * EUR, goal: 300000 * EUR, settings: { birthYear: 1950 } }).milestones().fi.months, null);
 });
 
+test("Path to FI includes the month FI is reached when retirement is over 100 years away", () => {
+  const o = outlook({ value: 0, payIn: 10 * EUR, goal: 12500 * EUR, settings: { birthYear: 2090, expectedReturn: 0, inflation: 0 } });
+  const path = o.path();
+  const reach = path.points.find((point) => point.month === path.reach.mid);
+  assert.equal(path.reach.mid, F.addMonths(o.start, 1250));
+  assert.ok(reach);
+  assert.equal(reach.mid, reach.goal);
+  const never = outlook({ value: 0, payIn: 0, goal: 12500 * EUR, settings: { birthYear: 2090 } }).path();
+  assert.deepEqual(never.reach, { low: null, mid: null, high: null });
+  assert.equal(never.points.length, F.MAX_PROJECTION_MONTHS);
+});
+
 test("FI outlook: the milestones, the chart and the Forecast agree", () => {
   // Retirement in 2057; health insurance from retirement until 67, a Kita
   // until 2031, a pension from 67, an inheritance and a house deposit.
@@ -1479,6 +1491,13 @@ test("returns: time-weighted months chained, and money-weighted", () => {
   assert.ok(perMonth.money < perMonth.time - 0.03, `money-weighted ${perMonth.money} is worse than time-weighted ${perMonth.time}`);
 });
 
+test("money-weighted returns capture a total loss when no money was withdrawn", () => {
+  const opening = { month: "2026-09", value: 1000, invested: 1000 };
+  const empty = { month: "2026-10", value: 0, invested: 1000 };
+  assert.equal(F.moneyWeighted([opening, empty]), -1);
+  close(F.moneyWeighted([opening, { ...empty, invested: 0 }]), 0, "withdrawn rather than lost");
+});
+
 test("accountSeries: one account's values, pay-ins and one-offs", () => {
   let s = F.emptyStore();
   s = F.saveAccount(s, null, "A").store;
@@ -1984,6 +2003,14 @@ test("forecast: the Coast FI number is what the portfolio needs at the start for
   assert.equal(F.forecast(plan({ birthYear: 1950 })).coastNumber, null, "retired already");
 });
 
+test("Coast FI requires enough for a withdrawal before later coast pay-ins arrive", () => {
+  const oneOffs = (index) => index === F.monthIndex("2026-11") ? -600 : 0;
+  const f = F.forecast(plan({ value: 0, growth: 0, fiNumber: 1000, contribution: 600, coastContribution: 100, oneOffs }));
+  assert.equal(f.coastNumber, 500, "the next month needs 600 and adds only 100");
+  assert.equal(f.plans.coast.coastMonth, "2026-11");
+  assert.equal(f.plans.coast.values[2], 100, "coasting starts after the withdrawal");
+});
+
 test("Coast FI on the dashboard: the Forecast page's Coast plan at the expected return", () => {
   const s = store({
     settings: { ...F.DEFAULT_SETTINGS, bufferPercent: 0, expectedReturn: 5, inflation: 0, birthYear: 1990 },
@@ -2067,6 +2094,16 @@ test("forecast: a plan lasts only when money is left at age 120", () => {
   const lasting = F.forecast(plan({ value: 2000 * EUR * 12 * 40, growth: 3 })).plans.fi;
   assert.equal(lasting.runsOut, null);
   assert.ok(lasting.values.at(-1) > 0, "still money at 120");
+});
+
+test("forecast ends in December of age 120 even with less than ten years left", () => {
+  const f = F.forecast(plan({ birthYear: 1910, growth: 0, expenses: 100, value: 6000 }));
+  assert.equal(f.months.at(-1), "2030-12");
+  assert.equal(f.plans.keep.values.at(-1), 1000);
+  assert.equal(f.plans.keep.runsOut, null);
+  const empty = F.forecast(plan({ start: "2030-12", birthYear: 1910, value: 0 }));
+  assert.deepEqual(empty.months, ["2030-12"]);
+  assert.equal(empty.plans.keep.runsOut, "2030-12");
 });
 
 test("forecast: needs is what a month-end value has to top for the money to last", () => {
@@ -2309,8 +2346,10 @@ test("forecast: past the retirement age every plan lives off the portfolio", () 
     assert.deepEqual([coastMonth, fiMonth, atRetirement], [null, null, null]);
     close(values[1], 50000 * EUR * (1 + r) - 2000 * EUR, p);
   }
-  // At least ten years are shown, also past 120.
-  assert.equal(F.forecast(plan({ birthYear: 1900 })).months.at(-1), "2036-10");
+  // Past age 120, just the last known month is kept.
+  const past = F.forecast(plan({ birthYear: 1900 }));
+  assert.deepEqual(past.months, ["2026-10"]);
+  assert.deepEqual(past.plans.keep.values, [50000 * EUR]);
 });
 
 test("forecast: with inflation, expenses and the FI number rise and pay-ins stay", () => {
@@ -2458,6 +2497,8 @@ test("a loan, month by month: what it pays, for how long, and the interest", () 
   assert.equal(F.loanSchedule({ loan: 100000 * EUR, interest: 6, fixedYears: 1, interestAfter: 0, repayment: { amount: 500 * EUR } }).months, 212);
   // A last month with nothing left to pay is no month.
   assert.equal(F.loanSchedule({ loan: 20113740, interest: 4, fixedYears: 40, interestAfter: 4, repayment: { amount: 1500 * EUR } }).months, 178);
+  const small = F.loanSchedule({ loan: 100, interest: 3.8, fixedYears: 1, interestAfter: 3.8, repayment: { amount: 100 } });
+  assert.equal(small.interest, small.last - 100, "interest is the total actually paid minus principal");
 });
 
 // The flat of the what-if below, and a plan to buy it with: born 1990,

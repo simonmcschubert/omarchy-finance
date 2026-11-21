@@ -1036,8 +1036,8 @@ function viewDashboard() {
       : info("the gains", `How much the portfolio grew in the last ${gainsMonths} besides what was paid in: the change in value minus the pay-ins and one-offs, and minus what an account held when it was first entered.`)],
       m.gains === null ? "–" : signedMoney(m.gains.gain),
       m.gains === null ? "needs values for two months"
-        : m.gains.paid > 0 ? `besides ${money(m.gains.paid)} paid in`
-          : m.gains.paid < 0 ? `besides ${money(-m.gains.paid)} taken out` : "with nothing paid in"),
+        : m.gains.paid > 0 ? `${money(m.gains.paid)} net capital added`
+          : m.gains.paid < 0 ? `${money(-m.gains.paid)} net capital removed` : "no net capital added or removed"),
     tile(["Expenses covered", m.coveredMonths === null ? null
       : info("expenses covered", `How long the portfolio alone would pay your expenses, ${money(m.expenses)} a month with buffer.`)],
       m.coveredMonths === null ? "–" : duration(m.coveredMonths),
@@ -1934,7 +1934,7 @@ function returnsCard(store) {
   return card(["Returns", info("the returns",
       "All but Your money are time-weighted: what the investments did, month by month chained, whatever was paid in or out. Compare them with an index or a fund.",
       "Your money is money-weighted: what your money earned, given when you paid it in. Paying in before a rise makes it higher, before a fall lower.",
-      "Since the start, both are a year once there are 12 months or more, and the whole time before that. Pay-ins and one-offs count from the middle of their month; – means the history is shorter, or has a month that ended with less than half of what went in, which has no time-weighted return.")],
+      "Since the start, both are a year once there are 12 months or more, and the whole time before that. Pay-ins and one-offs count from the middle of their month. A dash means there is no return for that period.")],
     h("div", { class: "table-wrap" }, h("table", null,
       h("thead", null, h("tr", null, h("th", null, ""), columns.map(([, label]) => h("th", { class: "num" }, label)))),
       h("tbody", null, rows.map(([name, r]) => h("tr", null,
@@ -2092,8 +2092,12 @@ function viewForecast() {
       h("p", null, "How your portfolio could grow until you retire, and whether it lasts after. The forecast needs:"),
       h("ul", null, missing)));
   }
-  const { o } = forecastPlans(store);
-  const { inflation, coastPayIn, retirementAge } = store.settings;
+  const o = outlook(store);
+  const { birthYear, inflation, coastPayIn, retirementAge } = store.settings;
+  if (F.ageIn(o.start, birthYear) > F.SHOWN_AGE) {
+    return card("Forecast", h("p", null, `The forecast ends at age ${F.SHOWN_AGE}.`,
+      o.known ? ` Your latest portfolio month is ${monthLabel(o.start)}.` : null));
+  }
   const rate = (g) => percentUnit.format(o.rates[g]);
   const about = info("when you can stop",
     h("ul", null,

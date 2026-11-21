@@ -566,7 +566,8 @@ export function renderForecast(root, options) {
   }
   for (const i of plot.outs) chart.append(svg("circle", { class: "mark out", cx: x(i), cy: y(0), r: 5 }));
 
-  // Hover: a crosshair, a dot on each line, a year at a time.
+  // Hover: a crosshair, a dot on each line, a year at a time and at the
+  // final month when the last year is shorter.
   const cross = svg("line", { class: "cross", y1: plotTop, y2: plotTop + plotH, visibility: "hidden" });
   const lines = [["high", high, plot.rates.high], ["mid", mid, plot.rates.mid], ["low", low, plot.rates.low]];
   const dots = lines.map(([kind]) => svg("circle", { class: `dot ${kind}`, r: 4, visibility: "hidden" }));
@@ -614,19 +615,21 @@ export function renderForecast(root, options) {
     tip.hidden = true;
     current = -1;
   }
-  const snap = (i) => Math.min(last, Math.round(i / 12) * 12);
+  const stops = Array.from({ length: Math.floor(last / 12) + 1 }, (_, i) => i * 12);
+  if (stops.at(-1) !== last) stops.push(last);
   hit.addEventListener("pointermove", (event) => {
     const rect = chart.getBoundingClientRect();
     const px = ((event.clientX - rect.left) / rect.width) * width;
-    show(last === 0 ? 0 : snap(((px - left) / plotW) * last));
+    const index = ((px - left) / plotW) * last;
+    show(stops.reduce((nearest, stop) => Math.abs(stop - index) < Math.abs(nearest - index) ? stop : nearest));
   });
   hit.addEventListener("pointerleave", hide);
   chart.addEventListener("focus", () => show(0));
   chart.addEventListener("blur", hide);
   chart.addEventListener("keydown", (event) => {
-    const step = { ArrowLeft: -12, ArrowRight: 12, Home: -Infinity, End: Infinity }[event.key];
+    const step = { ArrowLeft: -1, ArrowRight: 1, Home: -Infinity, End: Infinity }[event.key];
     if (step === undefined) return;
     event.preventDefault();
-    show(current === -1 ? 0 : snap(current + step));
+    show(stops[Math.max(0, Math.min(stops.length - 1, stops.indexOf(current) + step))]);
   });
 }

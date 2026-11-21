@@ -996,7 +996,9 @@ export function moneyWeighted(series) {
   if (series.length < 2) return null;
   const flows = [{ at: 0, amount: -series[0].value }];
   for (let i = 1; i < series.length; i++) flows.push({ at: i - 0.5, amount: -(series[i].invested - series[i - 1].invested) });
-  flows.push({ at: series.length - 1, amount: series.at(-1).value });
+  const last = series.at(-1).value;
+  if (last === 0 && flows.every((f) => f.amount <= 0) && flows.some((f) => f.amount < 0)) return -1;
+  flows.push({ at: series.length - 1, amount: last });
   // The sign of the flows' present value at a monthly growth of e^g - 1.
   // Each flow is discounted by e^(-g × at); all are scaled by the largest
   // of those, which leaves the sign alone and keeps every term finite over
@@ -1340,11 +1342,12 @@ export function forecast(params) {
   const paidIn = typeof contribution === "function" ? contribution : () => contribution;
   const oneOffs = params.oneOffs ?? (() => 0);
   const takenOut = params.takenOut ?? ((index) => Math.min(0, oneOffs(index)));
-  const rate = monthlyRate(growth);
+  const factor = 1 + monthlyRate(growth);
   const first = monthIndex(start);
   const retires = birthYear != null;
   const retirement = retirementIndex({ birthYear, retirementAge });
-  const lastShown = retires ? Math.max((birthYear + SHOWN_AGE) * 12 + 11, first + 120) : first + MAX_PROJECTION_MONTHS;
+  const ageLimit = (birthYear + SHOWN_AGE) * 12 + 11;
+  const lastShown = retires ? Math.max(first, ageLimit) : first + MAX_PROJECTION_MONTHS;
   const fixed = params.fixed ? { coast: params.fixed.coast && monthIndex(params.fixed.coast), fi: params.fixed.fi && monthIndex(params.fixed.fi) } : null;
   // What the portfolio pays in the month of `index`, retired from the month
   // of `from`, the FI number of that month, and its one-offs, in the money
@@ -1356,21 +1359,15 @@ export function forecast(params) {
   // reach the FI number of retiring then.
   const fiAtRetirement = retires ? inflated(goal(retirement), inflation, retirement - 1 - first) : null;
 
-  // The one-offs taken out after `index` until retirement, each grown to
-  // when retirement starts (0 or less). Those paid in are left out: like
-  // pay-ins, they don't lower what Coast FI needs.
-  const outAhead = [];
-  for (let index = retires ? retirement - 1 : -Infinity, total = 0; index >= first; index--) {
-    outAhead[index - first] = total;
-    total += inflated(takenOut(index), inflation, index - first) * (1 + rate) ** (retirement - 1 - index);
+  // Work back from retirement. Each month must be able to cover its
+  // withdrawals and leave enough for the following month. Positive one-offs
+  // only help once they arrive.
+  const coastNeeds = [];
+  for (let index = retirement - 1, required = fiAtRetirement; retires && index >= first; index--) {
+    coastNeeds[index - first] = required;
+    const withdrawal = -inflated(takenOut(index), inflation, index - first);
+    required = Math.max(0, (required + withdrawal - coastContribution) / factor);
   }
-  // What a month-end value grows to when retirement starts, with `monthly`
-  // paid in every month until then, less the one-offs taken out.
-  const grown = (v, index, monthly) => {
-    const n = retirement - 1 - index;
-    const factor = (1 + rate) ** n;
-    return v * factor + monthly * (rate === 0 ? n : (factor - 1) / rate) + (outAhead[index - first] ?? 0);
-  };
 
   const months = [];
   const goals = [];
@@ -1384,7 +1381,7 @@ export function forecast(params) {
     let phase = "full"; // "full", "coast" (the smaller amount), or "out" (withdrawing)
     let coastMonth = null;
     let fiMonth = null;
-    let runsOut = null;
+    let runsOut = first === lastShown && v === 0 ? start : null;
     let retiredFrom = retirement; // Retire early's is the month after FI
     let atRetirement = first === retirement - 1 ? v : null;
     const values = [v];
@@ -1407,7 +1404,7 @@ export function forecast(params) {
         }
         return;
       }
-      if (retires && coastMonth === null && grown(v, index, coastContribution) >= fiAtRetirement) {
+      if (retires && coastMonth === null && v >= coastNeeds[index - first]) {
         coastMonth = monthFromIndex(index);
         if (plan === "coast" && phase === "full") phase = "coast";
       }
@@ -1424,7 +1421,7 @@ export function forecast(params) {
       const out = phase === "out" || index >= retirement;
       const flow = out ? -expensesAt(index, retiredFrom) : phase === "coast" ? coastContribution : paidIn(index);
       const once = onceAt(index);
-      v = v * (1 + rate) + flow + once;
+      v = v * factor + flow + once;
       flows.push(flow + once);
       if (v <= 0) {
         v = 0;
@@ -1437,7 +1434,7 @@ export function forecast(params) {
     // From the end back: what a month-end value has to be more than so
     // that the next month's starts with what that one needs.
     const needs = values.map(() => 0);
-    for (let k = values.length - 1; k > 0; k--) needs[k - 1] = Math.max(0, (needs[k] - flows[k]) / (1 + rate));
+    for (let k = values.length - 1; k > 0; k--) needs[k - 1] = Math.max(0, (needs[k] - flows[k]) / factor);
     return { values, coastMonth, fiMonth, atRetirement, runsOut, needs };
   };
 
@@ -1451,7 +1448,7 @@ export function forecast(params) {
     // grown to when retirement starts, with coastContribution and less the
     // one-offs taken out, it reaches fiAtRetirement. 0 when coastContribution
     // reaches it on its own; null if retirement has started, or without one.
-    coastNumber: ahead ? Math.max(0, (fiAtRetirement - grown(0, first, coastContribution)) / (1 + rate) ** (retirement - 1 - first)) : null,
+    coastNumber: ahead ? coastNeeds[0] : null,
     plans: Object.fromEntries(PLANS.map((plan) => [plan, run(plan)])),
   };
 }
@@ -1704,8 +1701,9 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
       if (reach.low !== null) shown = after(reach.low);
       else if (reach.mid !== null) shown = after(reach.mid) * 1.5;
       else if (reach.high !== null) shown = after(reach.high) * 1.5;
+      const cap = Math.max(MAX_PROJECTION_MONTHS, after(reach.low ?? reach.mid ?? reach.high) ?? 0);
       const count = reach.mid === start ? 0
-        : Math.min(MAX_PROJECTION_MONTHS, Math.max(12, Math.ceil(shown * 1.1)), retirement - 1 - first, results.mid.months.length - 1);
+        : Math.min(cap, Math.max(12, Math.ceil(shown * 1.1)), retirement - 1 - first, results.mid.months.length - 1);
       const lines = Object.fromEntries(GROWTHS.map((g) => [g, inMoney(results[g], kind)]));
       const target = (k) => (kind === "today" ? goal(false)(first + k + 1) : inflated(goal(false)(first + k + 1), inflation, k));
       const points = [];
@@ -2051,8 +2049,9 @@ export function loanSchedule({ loan, interest, fixedYears, interestAfter, repaym
     }
     const owed = (rest * (k < fixed ? interest : interestAfter)) / 1200;
     if (k >= fixed && payment <= owed) return never(payments);
-    paid += owed;
-    if (Math.round(rest + owed) <= payment) return { payments, months: k + 1, last: Math.round(rest + owed), interest: paid };
+    const last = Math.round(rest + owed);
+    if (last <= payment) return { payments, months: k + 1, last, interest: paid + last - loan };
+    paid += payment;
     rest += owed - payment;
   }
   return never(payments);
