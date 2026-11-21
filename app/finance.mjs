@@ -1884,17 +1884,20 @@ export const PAY_IN_STEPS = [0, 500, 1000, 1500, 2000, 2500, 3000].map((units) =
 // it, and compares that with the plan as it is. None of them changes the
 // plan. Buying a flat (below) is one too.
 
-// What if draws the plan of Stop working at an age only up to the end of
-// the year of this age, while whether its money lasts is still worked out
-// to SHOWN_AGE.
-export const WHAT_IF_SHOWN_AGE = 85;
+// The Forecast and What if draw their plans only up to the end of the
+// year of this age, while whether the money lasts is still worked out to
+// SHOWN_AGE.
+export const CHART_AGE = 85;
 
 // The months and a plan of plans() or stopAfter() ({ months, plan }),
 // shown only up to the end of the year of `age`: the values and phases end
 // there, while runsOut and lastsWith stay as worked out to SHOWN_AGE. All
-// of them when they end sooner.
+// of them when they end sooner, or when the months start in that year or
+// later.
 export function shownUntil({ months, plan }, birthYear, age) {
-  const n = Math.min(months.length, Math.max(1, (birthYear + age) * 12 + 12 - monthIndex(months[0])));
+  const from = (birthYear + age) * 12; // January of `age`
+  if (monthIndex(months[0]) >= from) return { months, plan };
+  const n = Math.min(months.length, from + 12 - monthIndex(months[0]));
   const cut = (parts) => parts.filter((part) => part.from < n).map((part) => ({ ...part, to: Math.min(part.to, n) }));
   return {
     months: months.slice(0, n),

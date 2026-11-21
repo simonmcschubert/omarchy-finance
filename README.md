@@ -96,7 +96,7 @@ Finance window's browser profile. The data file stays.
   [Dashboard numbers](#dashboard-numbers).
 - **Forecast**: when you can stop investing and stop working, from the
   earliest age to the one that lasts even at low growth, each as a plan
-  with its phases on an age line to 120 and its portfolio at 6, 8 and 10 %
+  with its phases on an age line to 85 and its portfolio at 6, 8 and 10 %
   a year before inflation (by default). It only shows: what it goes on is
   set in Settings. See [Forecast](#forecast).
 - **What if**: what one change would do to your plan, without changing it:
@@ -405,8 +405,10 @@ before 67”. Once retired, one card says so.
 Click a card, or move with the arrow keys, to see its plan in the card
 below (the picked card has a bright border and corner): its name, with a
 check, warning or cross for whether the money lasts, its bar on an age line
-from now to 120, and its chart. The plan picked stays picked in this
-browser.
+from now to 85, and its chart. Whether the money lasts is still worked out
+to 120: a plan that runs out at 90 says so on its card, with no mark on
+the bar or the chart. Once you are 85, they go to 120. The plan picked
+stays picked in this browser.
 
 Each phase is a stretch of the bar: **Investing** (blue) with what is paid
 in a month as planned in Settings, a part for each amount (`+1.400 €`, then
@@ -494,7 +496,7 @@ whether the money lasts, the bar of the phases on the age line, and the
 chart with the band from 2 points less to 2 points more growth. The bar
 and the chart end at 85, while whether the money lasts is still worked out
 to 120, as on the Forecast: a plan that runs out at 90 says so by its
-name, with no mark on the chart. When
+name. When
 the money runs out, the line under the name says what the portfolio would
 need when you stop to last even at the low growth, as on the Forecast. It
 starts at the first age whose January is no sooner than Stop working stops
