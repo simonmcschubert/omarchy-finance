@@ -2558,14 +2558,25 @@ function flatCard() {
   const { birthYear, retirementAge, expectedReturn } = store.settings;
   const L = F.FLAT_LIMITS;
   const low = percentUnit.format(F.growthRates(expectedReturn).low);
-  // The expenses the flat can end: those that count now or later (but not
-  // from retirement, which each plan reaches at its own time), the largest
-  // first, and any ended already that it ends.
-  const lists = F.budget(store, thisMonth()).expenses;
-  const open = [...lists.now, ...lists.later];
-  const endable = [...open, ...store.expenses.filter((item) => saved?.stops.includes(item.id) && !open.includes(item))]
-    .filter((item) => !(item.from && "at" in item.from))
-    .sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name));
+  // The expenses or income (`kind`) the flat can end: those that count now
+  // or later (but not from retirement, which each plan reaches at its own
+  // time), the largest first, and any ended already that it ends.
+  const lists = F.budget(store, thisMonth());
+  const endable = (kind, ended) => {
+    const open = [...lists[kind].now, ...lists[kind].later];
+    return [...open, ...store[kind].filter((item) => ended?.includes(item.id) && !open.includes(item))]
+      .filter((item) => !(item.from && "at" in item.from))
+      .sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name));
+  };
+  // A box for each expense or income the flat can end, ticked when it does.
+  const ends = (kind, name, legend, ended) => {
+    const items = endable(kind, ended);
+    return items.length ? h("fieldset", { class: "flat-stops" },
+      h("legend", null, legend),
+      items.map((item) => h("label", { class: "check" },
+        h("input", { type: "checkbox", name, value: item.id, checked: ended?.includes(item.id) || null }),
+        `${item.name} (${money(F.monthlyAmount(item))})`))) : null;
+  };
   const panel = h("div", { class: "flat-panel", "aria-live": "polite" });
   const percentText = (value) => (value == null ? "" : plain.format(value));
   const read = (form) => {
@@ -2603,7 +2614,7 @@ function flatCard() {
         month, price: price.cents, costsPercent: costs.value, ownMoney: own.cents,
         interest: interest.value, fixedYears: years, interestAfter: after.value,
         repayment: byAmount ? { amount: repayment.cents } : { percent: repayment.value },
-        running: running.cents, subletting: subletting.cents, stops: data.getAll("stops").map(String),
+        running: running.cents, subletting: subletting.cents, stops: data.getAll("stops").map(String), incomeStops: data.getAll("incomeStops").map(String),
       },
     };
   };
@@ -2703,7 +2714,7 @@ function flatCard() {
       ? [["loan", payment, "loan"], [flat.subletting > 0 ? "Hausgeld, less subletting" : "Hausgeld", rest, "running"]]
       : [[payment > 0 ? "loan, less subletting" : "housing", r.housing.during, "loan"]];
     const rows = [
-      ["Renting", [["housing", r.housing.before, "housing"], ["pay in", r.payIn.before, "payin"]]],
+      ["Renting", [[flat.incomeStops.length ? "housing, less income" : "housing", r.housing.before, "housing"], ["pay in", r.payIn.before, "payin"]]],
       ["Buying", [...owning, ["pay in", r.payIn.during, "payin"]]],
     ].map(([label, parts]) => [label, parts.filter(([, cents]) => cents > 0)]);
     const total = (parts) => parts.reduce((sum, [, cents]) => sum + cents, 0);
@@ -2726,9 +2737,9 @@ function flatCard() {
     else note = "Housing costs the same: you pay in as before.";
     return h("div", { class: "flat-split" },
       h("h3", null, `In ${monthLabel(flat.month)}, the month you buy`, info("the housing cost",
-        "Housing: renting, the expenses that stop; buying, the loan's payment and the Hausgeld, less subletting.",
-        `In the money of ${monthLabel(flat.month)}: the expenses that stop, Hausgeld and subletting rise with inflation until then; the loan's payment doesn't.`,
-        "From then on, what you pay in changes each month by what housing costs more than the expenses that stop (or less: then you pay in more). Once the loan is paid off, only the Hausgeld, subletting and those expenses count. Never below 0.")),
+        "Housing: renting, the expenses that stop, less the income that stops, such as a flatshare's rent; buying, the loan's payment and the Hausgeld, less subletting.",
+        `In the money of ${monthLabel(flat.month)}: the expenses and income that stop, Hausgeld and subletting rise with inflation until then; the loan's payment doesn't.`,
+        "From then on, what you pay in changes each month by what housing costs more than renting (or less: then you pay in more). Once the loan is paid off, only the Hausgeld, subletting and the expenses and income that stop count. Never below 0.")),
       rows.map(([label, parts]) => [h("span", { class: "flat-split-label" }, label), bar(parts)]),
       h("p", { class: "flat-split-note" }, note));
   };
@@ -2836,11 +2847,8 @@ function flatCard() {
       "What you pay as the owner, in today's money: it rises with inflation like your expenses."),
     field("Subletting, after tax", input("subletting", saved?.subletting ? inputMoney(saved.subletting) : "", { class: "amount", placeholder: inputMoney(0) }),
       "Rent you take in, such as for a room, after tax. It counts from the month you buy, for good, and rises with inflation like income."),
-    endable.length ? h("fieldset", { class: "flat-stops" },
-      h("legend", null, "Expenses that stop when you move in"),
-      endable.map((item) => h("label", { class: "check" },
-        h("input", { type: "checkbox", name: "stops", value: item.id, checked: saved?.stops.includes(item.id) || null }),
-        `${item.name} (${money(F.monthlyAmount(item))})`))) : null,
+    ends("expenses", "stops", "Expenses that stop when you move in", saved?.stops),
+    ends("income", "incomeStops", "Income that stops when you move in", saved?.incomeStops),
     h("div", { class: "form-actions" },
       h("button", { type: "submit", class: "primary" }, saved ? "Save" : "Save the flat"),
       saved ? h("button", { type: "button", class: "link danger", onclick: () => {

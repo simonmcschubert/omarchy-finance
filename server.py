@@ -34,7 +34,7 @@ UPDATE_SCRIPT = Path(__file__).resolve().parent / "update"
 SETUP_SCRIPT = Path(__file__).resolve().parent / "setup"
 MAX_BODY = 10 * 1024 * 1024
 NO_FILE = "none"
-VERSION = 17  # data file version; matches VERSION in app/finance.mjs
+VERSION = 18  # data file version; matches VERSION in app/finance.mjs
 NO_BODY = object()  # read_json found none it accepts, and said so
 
 # Dated copies of the data file kept in backups/ next to it: one a day.
