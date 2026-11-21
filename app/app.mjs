@@ -1954,9 +1954,11 @@ const coastsFrom = (plan, months) => (plan.stopInvesting === null ? months[1] : 
 
 // A plan as the Forecast and What if draw it: { name, level, title (whether
 // its money lasts, longer), label (shorter), out (where it runs out, for
-// the bar), segments (its bar's parts), need (when it runs out, what would
-// make it last even at the low growth: { text, more }, else null), plan }.
-// months: the shown months of plans() or stopAfter().
+// the bar: null when that is after the months shown), segments (its bar's
+// parts), need (when it runs out, what would make it last even at the low
+// growth: { text, more }, else null), plan }.
+// months: the shown months of plans() or stopAfter(), or fewer of them
+// (F.shownUntil).
 function planRow(store, o, months, plan, name) {
   const { birthYear } = store.settings;
   const index = (month) => F.monthIndex(month) - F.monthIndex(months[0]);
@@ -2020,7 +2022,8 @@ function planRow(store, o, months, plan, name) {
     return { text: `Lasts even at ${low} with ${money(value)} ${at === "now" ? "now" : `at ${at}`}`, more: more > 0 ? `(${signedMoney(more)})` : null };
   };
   const s = status();
-  return { name, level: s.level, title: s.title, label: s.out ? s.out.text : `Lasts to ${F.SHOWN_AGE}`, out: s.out, segments: segments(), need: s.out ? need() : null, plan };
+  const out = s.out && s.out.from < months.length ? s.out : null;
+  return { name, level: s.level, title: s.title, label: s.out ? s.out.text : `Lasts to ${F.SHOWN_AGE}`, out, segments: segments(), need: s.out ? need() : null, plan };
 }
 
 // The plans, as the page shows them: the answers to "When can you stop?",
@@ -2154,7 +2157,7 @@ function drawPlan({ title, need, keys, box }, months, row, { status = false } = 
   // changes stay inside their phase, as on the bar.
   const steps = plan.phases.filter((phase) => phase.kind === "retired").flatMap((phase) => phase.steps.slice(1).map((step) => step.from));
   const marks = [...plan.phases.map((phase) => Math.min(phase.to, last + 1) - 1), ...steps.map((i) => i - 1)];
-  const outs = [plan.runsOut.low, plan.runsOut.mid].filter((month) => month !== null).map(index);
+  const outs = [plan.runsOut.low, plan.runsOut.mid].filter((month) => month !== null).map(index).filter((i) => i <= last);
   const rate = (g) => percentUnit.format(o.rates[g]);
   const short = (cents) => axisMoney(Math.abs(cents) >= 100000000 ? cents : Math.round(cents / 100000) * 100000);
   drawResizing([box, () =>
@@ -2251,7 +2254,8 @@ function stopAges(store) {
 
 // Stop working at an age you pick: from January of that age, whatever the
 // portfolio has then (stopAfter), drawn as the Forecast draws its plans by
-// drawWhatIf. null once retirement has come, as stopAfter() has it.
+// drawWhatIf, up to WHAT_IF_SHOWN_AGE. null once retirement has come, as
+// stopAfter() has it.
 function stopAtCard(store) {
   const o = outlook(store);
   if (o.retired || o.retirement === null || F.monthIndex(o.retirement) <= thisMonth()) return null;
@@ -2261,6 +2265,7 @@ function stopAtCard(store) {
     ["What if you stopped working in January of the year you turn that age, whatever the portfolio has then, and lived off it from then on? Until then, you pay in as planned in ", settingsLink("data"), "."],
     `From ${min}, now, to ${max}, the retirement age.`,
     `As the Forecast draws its plans: the bar of the phases, and the portfolio at the expected return of ${rate("mid")}, with a band from ${rate("low")} to ${rate("high")} growth.`,
+    `The bar and the chart go to ${F.WHAT_IF_SHOWN_AGE}. Whether the money lasts is still worked out to ${F.SHOWN_AGE}, as on the Forecast.`,
     `When the money runs out, the line under the name says what the portfolio would need when you stop, to last to ${F.SHOWN_AGE} even at ${rate("low")}.`);
   const age = h("input", { id: "stop-age", name: "age", type: "number", min, max, step: 1, inputmode: "numeric", autocomplete: "off", required: true, value: String(picked) });
   return h("section", { class: "card forecast" },
@@ -2276,8 +2281,8 @@ function stopAtCard(store) {
     h("div", { id: "stop-chart", class: "forecast-box" }));
 }
 
-// Draws the plan of the age picked on What if. An age that isn't one to
-// pick says so, and the plan drawn before stays.
+// Draws the plan of the age picked on What if, up to WHAT_IF_SHOWN_AGE. An
+// age that isn't one to pick says so, and the plan drawn before stays.
 function drawWhatIf() {
   const box = document.getElementById("stop-chart");
   if (!box) return;
@@ -2295,7 +2300,8 @@ function drawWhatIf() {
   }
   error.textContent = "";
   state.whatIf.age = age;
-  const { months, plan } = o.stopAfter(F.monthFromIndex((birthYear + age) * 12 - 1), inTodaysMoney() ? "today" : "nominal");
+  const picked = o.stopAfter(F.monthFromIndex((birthYear + age) * 12 - 1), inTodaysMoney() ? "today" : "nominal");
+  const { months, plan } = F.shownUntil(picked, birthYear, F.WHAT_IF_SHOWN_AGE);
   const name = F.monthIndex(plan.retires) <= thisMonth() ? "Stop working now" : `Stop working at ${F.ageIn(plan.retires, birthYear)}`;
   const els = { title: document.getElementById("stop-title"), need: document.getElementById("stop-need"), keys: document.getElementById("stop-keys"), box };
   drawPlan(els, months, planRow(store, o, months, plan, name), { status: true });
@@ -2352,7 +2358,7 @@ function stopBars(store, o, rows, ariaLabel) {
     bar.style.setProperty("--at", row.retires === null ? "1" : at(F.monthIndex(row.retires)));
     const time = row.retires === null ? null : h("span", { class: "payin-time", title: tip }, ending(row));
     time?.style.setProperty("--at", bar.style.getPropertyValue("--at"));
-    return h("div", { class: `payin-row${row.main ? " average" : ""}`, role: "listitem" },
+    return h("div", { class: `payin-row${row.main ? " main" : ""}`, role: "listitem" },
       h("span", { class: "payin-label" }, row.label),
       h("span", { class: "payin-track" }, bar, time),
       h("span", { class: "payin-change" }, change(row)));
@@ -2381,8 +2387,9 @@ function stopBars(store, o, rows, ariaLabel) {
 }
 
 // Pay in more or less: a bar for each amount a month (stopBars), against
-// the average pay-in. Your plan from Settings is a row of its own when it
-// isn't the average every month. null when there is nothing to compare.
+// your plan from Settings: the row of the amount it pays in every month
+// (the average, or an amount of your own), or a row of its own when it
+// changes. The average is a row too. null when there is nothing to compare.
 function payInCard(store) {
   const o = outlook(store);
   const scenarios = o.payIns();
@@ -2396,15 +2403,19 @@ function payInCard(store) {
       h("li", null, `Now: ${money(payIn.invested)} a month`),
       payIn.changes.map((c) => h("li", null, `From ${monthLabel(c.month)}, at ${F.ageIn(c.month, birthYear)}: ${c.average ? "the average, " : ""}${money(c.amount)}`))),
     payIn.rises ? "Rising with inflation." : null);
-  // An average that would show as one of the steps shows its cents.
+  // An average or a plan that would show as one of the steps shows its
+  // cents.
   const looksLikeStep = (cents) => !F.PAY_IN_STEPS.includes(cents) && F.PAY_IN_STEPS.includes(Math.round(cents / 100) * 100);
+  const amount = (row) => (looksLikeStep(row.amount) ? moneyExact(row.amount) : money(row.amount));
+  // The plan's row says what it pays in every month, when it does.
   const label = (row) => {
-    if (row.plan) return ["Plan", planInfo()];
-    if (!row.average) return money(row.amount);
-    return [looksLikeStep(row.amount) ? moneyExact(row.amount) : money(row.amount), h("span", { class: "sub" }, " average")];
+    if (row.plan) return ["Plan", ...(row.amount === undefined ? [] : [h("span", { class: "payin-sub" }, ` ${amount(row)}${row.average ? " average" : ""}`)]), planInfo()];
+    if (!row.average) return amount(row);
+    return [amount(row), h("span", { class: "sub" }, " average")];
   };
 
-  // Sooner first; a tie keeps this order, the plan before the average.
+  // Sooner first; a tie keeps this order, a plan that changes before the
+  // average.
   const rows = scenarios.rows.flatMap((row) => (row.average && scenarios.plan ? [{ ...scenarios.plan, plan: true }, row] : [row]));
   const when = (row) => (row.retires === null ? Infinity : F.monthIndex(row.retires));
   rows.sort((a, b) => when(a) - when(b));
@@ -2414,12 +2425,12 @@ function payInCard(store) {
     `From ${money(F.PAY_IN_STEPS[0])} to ${money(F.PAY_IN_STEPS.at(-1))} a month, in steps of ${money(F.PAY_IN_STEPS[1])}.`,
     `Average: what you paid in a month over ${scenarios.months ? payInMonths(scenarios.months) : "the months so far"}.`,
     payIn.rises ? "Like your pay-ins, they rise with inflation." : null,
-    scenarios.plan ? ["Plan: what you pay in as set in ", settingsLink("data"), ", with its changes."] : null,
+    ["Plan, in bold: what you pay in as set in ", settingsLink("data"), scenarios.plan ? ", with its changes" : "", ". At the end of each other row, how much sooner or later than with your plan you could stop."],
     "After each bar, how long from now and your age then; under the line, your age along the way. Times are in months under a year, else in years to a tenth.",
     "Planned one-offs count in every row.");
   return h("section", { class: "card payins" },
     h("div", { class: "card-head" }, h("h2", null, "Pay in more or less", about)),
-    stopBars(store, o, rows.map((row) => ({ label: label(row), retires: row.retires, main: Boolean(row.average) })), "Pay in more or less"));
+    stopBars(store, o, rows.map((row) => ({ label: label(row), retires: row.retires, main: row.plan })), "Pay in more or less"));
 }
 
 // Spend more or less: a bar for each share spent more or less from now on

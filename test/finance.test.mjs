@@ -2407,18 +2407,20 @@ test("forecast: with nothing paid in, inflation moves no milestone", () => {
   assert.ok(nominal.plans.fi.fiMonth !== null && nominal.plans.coast.coastMonth !== null);
 });
 
-test("fiOutlook payIns: when you could stop with more or less paid in, against the average", () => {
+test("fiOutlook payIns: when you could stop with more or less paid in, against the plan", () => {
   const parts = { value: 50000 * EUR, payIn: 1000 * EUR, goal: 600000 * EUR, rate: 5, settings: { birthYear: 1990 } };
   const o = outlook(parts);
   const result = o.payIns();
   assert.equal(result.average, 1000 * EUR);
   assert.equal(result.months, 12);
   // 0 to 3,000 in steps of 500; an average that is one of them is that row.
-  assert.deepEqual(result.rows.map((r) => [r.amount, r.average]), [
-    [3000 * EUR, false], [2500 * EUR, false], [2000 * EUR, false], [1500 * EUR, false], [1000 * EUR, true], [500 * EUR, false], [0, false],
+  // The plan pays in the average every month: that row is the plan's too,
+  // and it stops when the Stop working plan does.
+  const flags = (r) => [r.amount, r.average, r.plan];
+  assert.deepEqual(result.rows.map(flags), [
+    [3000 * EUR, false, false], [2500 * EUR, false, false], [2000 * EUR, false, false], [1500 * EUR, false, false],
+    [1000 * EUR, true, true], [500 * EUR, false, false], [0, false, false],
   ]);
-  // The plan pays in the average every month: no row of its own, and the
-  // average stops when the Stop working plan does.
   assert.equal(result.plan, null);
   const fi = o.plans("nominal").plans.find((p) => p.key === "fi");
   assert.equal(result.rows[4].retires, fi.retires);
@@ -2439,35 +2441,57 @@ test("fiOutlook payIns: when you could stop with more or less paid in, against t
   assert.deepEqual(odd.rows.map((r) => [r.amount, r.average]), [
     [3000 * EUR, false], [2500 * EUR, false], [2000 * EUR, false], [1500 * EUR, false], [1234 * EUR, true], [1000 * EUR, false], [500 * EUR, false], [0, false],
   ]);
+  assert.deepEqual(odd.rows.filter((r) => r.plan).map((r) => r.amount), [1234 * EUR], "the plan pays in the average");
   assert.ok(odd.rows[3].retires < odd.rows[4].retires && odd.rows[4].retires < odd.rows[5].retires, "between 1,500 and 1,000");
 
   // A planned change is a row of its own, as the Stop working plan counts
-  // it; the rows stay the same amount every month.
+  // it, and no other row is the plan's; the rows stay the same amount
+  // every month.
   const changes = [{ id: "c", from: { month: "2030-01" }, amount: 3000 * EUR }];
   const planned = outlook({ ...parts, changes });
   const withPlan = planned.payIns();
   assert.deepEqual(withPlan.rows.map((r) => r.retires), result.rows.map((r) => r.retires));
+  assert.ok(withPlan.rows.every((r) => !r.plan));
   assert.equal(withPlan.plan.retires, planned.plans("nominal").plans.find((p) => p.key === "fi").retires);
   assert.ok(withPlan.plan.retires < c, "sooner than the average");
-  // An amount of your own is a plan too, unless it is the average.
-  assert.notEqual(outlook({ ...parts, settings: { ...parts.settings, futurePayIn: 1200 * EUR } }).payIns().plan, null);
-  assert.equal(outlook({ ...parts, settings: { ...parts.settings, futurePayIn: 1000 * EUR } }).payIns().plan, null);
-  // So is a change to the average, or one from retirement on: nothing
+  // An amount of your own, the same every month, is a row of its own among
+  // them, unless it is one of them: the average's, or a step's.
+  const own = (cents) => outlook({ ...parts, settings: { ...parts.settings, futurePayIn: cents } });
+  const custom = own(1200 * EUR);
+  const twelve = custom.payIns();
+  assert.equal(twelve.plan, null);
+  assert.deepEqual(twelve.rows.map(flags), [
+    [3000 * EUR, false, false], [2500 * EUR, false, false], [2000 * EUR, false, false], [1500 * EUR, false, false],
+    [1200 * EUR, false, true], [1000 * EUR, true, false], [500 * EUR, false, false], [0, false, false],
+  ]);
+  assert.equal(twelve.rows[4].retires, custom.plans("nominal").plans.find((p) => p.key === "fi").retires, "the plan's row stops when Stop working does");
+  assert.deepEqual(own(1000 * EUR).payIns().rows.filter((r) => r.plan).map(flags), [[1000 * EUR, true, true]]);
+  const step = own(2000 * EUR).payIns();
+  assert.equal(step.plan, null);
+  assert.deepEqual(step.rows.filter((r) => r.plan).map(flags), [[2000 * EUR, false, true]]);
+  assert.equal(step.rows.length, 7);
+  // So is a change to the same amount, or one from retirement on: nothing
   // changes before it.
   const same = [{ id: "a", from: { month: "2030-01" }, amount: null }, { id: "r", from: { age: 67 }, amount: 3000 * EUR }];
-  assert.equal(outlook({ ...parts, changes: same }).payIns().plan, null);
-  // From December before retirement, no month is left to pay in.
+  const unchanged = outlook({ ...parts, changes: same }).payIns();
+  assert.equal(unchanged.plan, null);
+  assert.deepEqual(unchanged.rows.filter((r) => r.plan).map(flags), [[1000 * EUR, true, true]]);
+  // From December before retirement, no month is left to pay in: the
+  // average's row is the plan's.
   const month = (s, m) => F.saveMonth(s, m, [{ account: "a", value: 50000 * EUR, payIn: 1000 * EUR }]);
   const december = month(month(outlookStore({ ...parts, settings: { ...parts.settings, birthYear: 1960 }, changes: [same[1]] }), "2026-11"), "2026-12");
-  assert.equal(F.fiOutlook(december, "2027-01").payIns().plan, null);
+  const last = F.fiOutlook(december, "2027-01").payIns();
+  assert.equal(last.plan, null);
+  assert.deepEqual(last.rows.filter((r) => r.plan).map(flags), [[1000 * EUR, true, true]]);
 });
 
 test("fiOutlook payIns: nothing paid in, and nothing to compare", () => {
-  // A withdrawal is an average of 0: the 0 row.
+  // A withdrawal is an average of 0: the 0 row, which the plan pays in too.
   const none = outlook({ value: 50000 * EUR, payIn: -200 * EUR, goal: 600000 * EUR, rate: 5, settings: { birthYear: 1990 } }).payIns();
   assert.equal(none.average, 0);
-  assert.deepEqual(none.rows.map((r) => [r.amount, r.average]), [
-    [3000 * EUR, false], [2500 * EUR, false], [2000 * EUR, false], [1500 * EUR, false], [1000 * EUR, false], [500 * EUR, false], [0, true],
+  assert.deepEqual(none.rows.map((r) => [r.amount, r.average, r.plan]), [
+    [3000 * EUR, false, false], [2500 * EUR, false, false], [2000 * EUR, false, false], [1500 * EUR, false, false],
+    [1000 * EUR, false, false], [500 * EUR, false, false], [0, true, true],
   ]);
   assert.equal(none.plan, null);
   // Without a year of birth, once retired, and at FI already.
@@ -2732,6 +2756,40 @@ test("stopAfter: stop working at an age you pick, as the Forecast describes its 
   assert.equal(F.fiOutlook(sixties, "2026-12").stopAfter(null).plan.retires, "2026-12");
   assert.equal(F.fiOutlook(sixties, "2027-01").stopAfter(null), null);
   assert.equal(F.fiOutlook(sixties, "2027-03").stopAfter(null), null);
+});
+
+test("shownUntil: a plan shown to an age, worked out to SHOWN_AGE", () => {
+  const s = renting();
+  // Care from 90 on: a step while retired, after the months shown.
+  s.expenses.push({ id: "care", name: "Care", category: "", amount: 500 * EUR, everyMonths: 1, from: { age: 90 }, until: null, active: true, essential: true });
+  const o = F.fiOutlook(s, "2026-11");
+  // Stopping at 50 runs out at 87 at the expected return, after 85.
+  const result = o.stopAfter("2039-12");
+  const { months, plan } = result;
+  const n = months.indexOf("2075-12") + 1; // born 1990: 85 in 2075
+  assert.ok(n > 0 && n < months.length);
+  assert.ok(plan.runsOut.mid > "2075-12" && plan.runsOut.mid < "2080-01", `runs out at ${plan.runsOut.mid}`);
+  assert.ok(plan.phases.at(-1).steps.some((step) => step.from >= n), "a step after 85");
+  const shown = F.shownUntil(result, 1990, 85);
+  assert.deepEqual(shown.months, months.slice(0, n));
+  assert.equal(shown.months.at(-1), "2075-12");
+  for (const g of F.GROWTHS) assert.deepEqual(shown.plan.values[g], plan.values[g].slice(0, n), g);
+  // Whether the money lasts, and what would make it, stay as worked out to
+  // SHOWN_AGE.
+  assert.deepEqual([shown.plan.runsOut, shown.plan.lastsWith, shown.plan.stopInvesting, shown.plan.retires, shown.plan.key],
+    [plan.runsOut, plan.lastsWith, plan.stopInvesting, plan.retires, plan.key]);
+  // The phases and their steps end at 85 at the latest; none starts after.
+  assert.equal(shown.plan.phases.at(-1).to, n);
+  for (const phase of shown.plan.phases) {
+    assert.ok(phase.from < n && phase.to <= n);
+    for (const step of phase.steps) assert.ok(step.from < n && step.to <= n && step.from >= phase.from && step.to <= phase.to);
+  }
+  const kept = plan.phases.filter((p) => p.from < n);
+  assert.deepEqual(shown.plan.phases.map((p) => [p.kind, p.from]), kept.map((p) => [p.kind, p.from]));
+  assert.deepEqual(shown.plan.phases.slice(0, -1), kept.slice(0, -1), "the phases before the last stay as they are");
+  // A later age than the forecast shows all of it.
+  assert.deepEqual(F.shownUntil(result, 1990, F.SHOWN_AGE), { months, plan });
+  assert.deepEqual(F.shownUntil(result, 1990, 200), { months, plan });
 });
 
 test("stopsWorking: when Stop working stops, and whether its money lasts at the expected return", () => {

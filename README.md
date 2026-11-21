@@ -490,8 +490,11 @@ the year you turn it, whatever the portfolio has then, and lives off it
 from then on; never before this month, as the months until now are worked
 already. Until then you pay in as planned in Settings. It is drawn as
 the Forecast draws its plans: the name with a check, warning or cross and
-whether the money lasts, the bar of the phases on the age line to 120, and
-the chart with the band from 2 points less to 2 points more growth. When
+whether the money lasts, the bar of the phases on the age line, and the
+chart with the band from 2 points less to 2 points more growth. The bar
+and the chart end at 85, while whether the money lasts is still worked out
+to 120, as on the Forecast: a plan that runs out at 90 says so by its
+name, with no mark on the chart. When
 the money runs out, the line under the name says what the portfolio would
 need when you stop to last even at the low growth, as on the Forecast. It
 starts at the first age whose January is no sooner than Stop working stops
@@ -503,18 +506,20 @@ its top shows today's money or the money of each year, as on the Forecast.
 each amount a month, from now to when you could stop working (as Stop
 working counts it, at the expected return), with how long that is from
 this month and your age then after it ("12,4 years 49"), and how much
-sooner or later that is than with the average pay-in of the last 12 months
-(bold). Both are in months under a year, else in years to a tenth; sooner
+sooner or later that is than with your plan (bold). Both are in months
+under a year, else in years to a tenth; sooner
 or later is the difference of the tenths shown, so the rows add up. The
 line under the bars counts years from now, with your age then under it,
 and ends at the retirement age; hovering a bar shows its month and your
-age. The amounts are 0 to 3.000 in steps of 500, and the average among
-them (it takes the place of the one it equals), each paid in every month
-from now on (rising with inflation when pay-ins do). **Plan** is what you
-pay in as set in Settings, with its changes (its ⓘ lists them): it is a
-row when that isn't the average every month, and stops when the Stop
-working card does. A hatched bar doesn't reach FI before the retirement
-age. The card isn't there once FI is reached, or once retired.
+age. The amounts are 0 to 3.000 in steps of 500, and the average pay-in
+of the last 12 months among them (it takes the place of the one it
+equals), each paid in every month from now on (rising with inflation when
+pay-ins do). **Plan** is what you pay in as set in Settings, with its
+changes (its ⓘ lists them), and stops when the Stop working card does.
+When it pays in the same every month, the average or an amount of your
+own, it is the row of that amount ("Plan 1.400 average"); when it
+changes, a row of its own. A hatched bar doesn't reach FI before the
+retirement age. The card isn't there once FI is reached, or once retired.
 
 **Spend more or less** is the same for spending: every expense, and the
 buffer with it, 30 % less to 30 % more in steps of 10, from now on and for

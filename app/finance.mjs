@@ -1836,19 +1836,20 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
       return { retires, runsOut: retires === null ? null : result.plans.fi.runsOut };
     },
 
-    // The Forecast's pay-in scenarios: when you could stop working when
-    // paying in the same amount every month from `start` on, instead of the
-    // pay-in plan, at the expected return. The amounts are 0 to 3,000 whole
-    // units of the currency in steps of 500 (PAY_IN_STEPS), and the average
-    // pay-in (whole cents; a withdrawal counts as 0), which is a row of its
-    // own unless it is one of them. null without a year of birth, once
-    // retired, or when FI is reached at `start`. Otherwise {
+    // The pay-in scenarios: when you could stop working when paying in the
+    // same amount every month from `start` on, instead of the pay-in plan,
+    // at the expected return, to compare with the plan. The amounts are 0
+    // to 3,000 whole units of the currency in steps of 500 (PAY_IN_STEPS),
+    // the average pay-in (whole cents; a withdrawal counts as 0), and what
+    // the plan pays in when that is the same every month, each a row of its
+    // own unless it is one of the others. null without a year of birth,
+    // once retired, or when FI is reached at `start`. Otherwise {
     //   average: the average pay-in, months: how many months it is of (0
     //     without values),
-    //   rows: [{ amount, average (the average's row), retires }], most
-    //     first,
-    //   plan: { retires } with the pay-in plan, or null when the plan pays
-    //     in the average every month,
+    //   rows: [{ amount, average (the average's row), plan (the plan's row),
+    //     retires }], most first,
+    //   plan: { retires } with the pay-in plan when it changes before
+    //     retirement, a row of its own then; else null, and a row has plan,
     // } where retires is when the Stop working plan would stop: the month
     // after FI, or null when FI doesn't come before the month before
     // retirement.
@@ -1857,18 +1858,18 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
       const mean = averagePayIn(series);
       const average = Math.max(0, Math.round(mean?.average ?? 0));
       if (run({ payIn: average }).plans.fi.fiMonth === start) return null;
-      const amounts = [...new Set([...PAY_IN_STEPS, average])]
+      // What the plan pays in every month before retirement, or null when
+      // that changes. With no month left, as the average's row.
+      const same = first + 1 >= retirement ? average
+        : plan.changes.every((step) => step.index >= retirement || plan.at(step.index) === invested) ? invested : null;
+      const amounts = [...new Set([...PAY_IN_STEPS, average, ...(same === null ? [] : [same])])]
         .sort((a, b) => b - a)
-        .map((amount) => ({ amount, average: amount === average }));
-      // The plan pays in the average in every month before retirement (or
-      // none is left).
-      const flat = first + 1 >= retirement
-        || (invested === average && plan.changes.every((step) => step.index >= retirement || plan.at(step.index) === average));
+        .map((amount) => ({ amount, average: amount === average, plan: amount === same }));
       return {
         average,
         months: mean?.months ?? 0,
         rows: amounts.map((row) => ({ ...row, retires: stops(run({ payIn: row.amount })) })),
-        plan: flat ? null : { retires: stops(run({ coastContribution: store.settings.coastPayIn })) },
+        plan: same === null ? { retires: stops(run({ coastContribution: store.settings.coastPayIn })) } : null,
       };
     },
   };
@@ -1882,6 +1883,28 @@ export const PAY_IN_STEPS = [0, 500, 1000, 1500, 2000, 2500, 3000].map((units) =
 // The What if page: each what-if changes one thing, works out the plan with
 // it, and compares that with the plan as it is. None of them changes the
 // plan. Buying a flat (below) is one too.
+
+// What if draws the plan of Stop working at an age only up to the end of
+// the year of this age, while whether its money lasts is still worked out
+// to SHOWN_AGE.
+export const WHAT_IF_SHOWN_AGE = 85;
+
+// The months and a plan of plans() or stopAfter() ({ months, plan }),
+// shown only up to the end of the year of `age`: the values and phases end
+// there, while runsOut and lastsWith stay as worked out to SHOWN_AGE. All
+// of them when they end sooner.
+export function shownUntil({ months, plan }, birthYear, age) {
+  const n = Math.min(months.length, Math.max(1, (birthYear + age) * 12 + 12 - monthIndex(months[0])));
+  const cut = (parts) => parts.filter((part) => part.from < n).map((part) => ({ ...part, to: Math.min(part.to, n) }));
+  return {
+    months: months.slice(0, n),
+    plan: {
+      ...plan,
+      values: Object.fromEntries(Object.entries(plan.values).map(([growth, values]) => [growth, values.slice(0, n)])),
+      phases: cut(plan.phases).map((phase) => ({ ...phase, steps: cut(phase.steps) })),
+    },
+  };
+}
 
 // When you could stop working with an outlook, as the Forecast's plans
 // count it: { work: when Stop working stops, low: from when the money

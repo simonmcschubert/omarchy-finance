@@ -1299,8 +1299,8 @@ main > div {
   white-space: nowrap;
 }
 
-.payin-row.average .payin-label,
-.payin-row.average .payin-time {
+.payin-row.main .payin-label,
+.payin-row.main .payin-time {
   font-weight: 600;
 }
 
@@ -1326,7 +1326,7 @@ main > div {
   background: color-mix(in srgb, var(--series-1) 55%, transparent);
 }
 
-.payin-row.average .payin-bar:not(.never) {
+.payin-row.main .payin-bar:not(.never) {
   background: var(--series-1);
 }
 
