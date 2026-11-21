@@ -516,7 +516,6 @@ const state = {
   editing: { expenses: null, income: null }, // item id being edited
   editingEvent: null, // planned one-off being edited
   editingPayIn: null, // "now" or the id of a planned pay-in change being edited
-  flatOpen: false, // whether the Buying a flat card on What if is open
   renaming: null, // { list: "accounts" | "expenses" | "income", key: account id or category name }
   month: null,
   importText: "",
@@ -2439,6 +2438,17 @@ function spendCard(store) {
     stopBars(store, o, r.rows.map((row) => ({ label: label(row), retires: row.retires, main: row.percent === 0 })), "Spend more or less"));
 }
 
+// How much sooner or later `month` is than `than`: months under a year,
+// else years to a tenth ("10 months sooner", "1,5 years later"), or "the
+// same". null when either is null, never before retirement.
+function soonerText(month, than) {
+  if (month === null || than === null) return null;
+  const months = F.monthIndex(month) - F.monthIndex(than);
+  if (months === 0) return "the same";
+  const by = Math.abs(months) < 12 ? monthsText(Math.abs(months)) : tenthsText(yearTenths(Math.abs(months)));
+  return `${by} ${months < 0 ? "sooner" : "later"}`;
+}
+
 // When you could stop working with a what-if (F.stopsIn's { work, low }),
 // against the plan as it is, in words: "Stop working at 53 instead of 54
 // (10 months sooner) · even at 6 %: at 55 instead of 56 (1 year sooner)".
@@ -2448,11 +2458,8 @@ function stopsText(store, withIt, plan) {
   const ageAt = (month, bare = false) => (month === null ? `not before ${retirementAge}` : `${bare ? "" : "at "}${F.ageIn(month, birthYear)}`);
   // How much sooner or later `month` is than `than`, in brackets.
   const shift = (month, than) => {
-    if (month === null || than === null) return "";
-    const months = F.monthIndex(month) - F.monthIndex(than);
-    if (months === 0) return " (the same)";
-    const by = Math.abs(months) < 12 ? monthsText(Math.abs(months)) : tenthsText(yearTenths(Math.abs(months)));
-    return ` (${by} ${months < 0 ? "sooner" : "later"})`;
+    const by = soonerText(month, than);
+    return by === null ? "" : ` (${by})`;
   };
   const low = percentUnit.format(F.growthRates(expectedReturn).low);
   return `Stop working ${ageAt(withIt.work)} instead of ${ageAt(plan.work, true)}${shift(withIt.work, plan.work)} · `
@@ -2543,11 +2550,14 @@ function growthCard(store) {
 // ---- Buying a flat: a what-if. It compares the plan as it is (renting)
 // with the plan and the flat, as F.flatWhatIf counts it, and never changes
 // the plan: Save keeps the fields in the data file (store.flat), for next
-// time.
+// time. The fields, each with what it works out to under it, beside a
+// panel of what the flat changes (above them in a narrow window).
 function flatCard() {
   const store = state.store;
   const saved = store.flat;
-  const { birthYear } = store.settings;
+  const { birthYear, retirementAge, expectedReturn } = store.settings;
+  const L = F.FLAT_LIMITS;
+  const low = percentUnit.format(F.growthRates(expectedReturn).low);
   // The expenses the flat can end: those that count now or later (but not
   // from retirement, which each plan reaches at its own time), the largest
   // first, and any ended already that it ends.
@@ -2556,8 +2566,7 @@ function flatCard() {
   const endable = [...open, ...store.expenses.filter((item) => saved?.stops.includes(item.id) && !open.includes(item))]
     .filter((item) => !(item.from && "at" in item.from))
     .sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name));
-  const result = h("div", { class: "helper-result flat-result", "aria-live": "polite" });
-
+  const panel = h("div", { class: "flat-panel", "aria-live": "polite" });
   const percentText = (value) => (value == null ? "" : plain.format(value));
   const read = (form) => {
     const data = new FormData(form);
@@ -2574,7 +2583,6 @@ function flatCard() {
     const optional = (name) => (text(name) === "" ? { ok: true, cents: 0 } : F.parseMoney(text(name)));
     const running = optional("running");
     const subletting = optional("subletting");
-    const L = F.FLAT_LIMITS;
     if (!month) return { error: `Buy in: enter ${MONTH_HINT}.` };
     if (month <= F.currentMonth()) return { error: "Buy in: a month to come." };
     if (!price.ok || price.cents <= 0) return { error: "Price: enter an amount." };
@@ -2584,7 +2592,7 @@ function flatCard() {
     if (own.cents > total) return { error: `Own money: at most the price and the costs, ${moneyExact(total)}.` };
     if (!interest.ok || interest.value > L.interest) return { error: `Interest: enter a percentage up to ${L.interest}.` };
     if (!/^[0-9]+$/.test(text("fixedYears")) || years < L.fixedYears.min || years > L.fixedYears.max) return { error: `Fixed for: whole years from ${L.fixedYears.min} to ${L.fixedYears.max}.` };
-    if (!after.ok || after.value > L.interest) return { error: `Then: enter a percentage up to ${L.interest}, or leave it empty for the same.` };
+    if (!after.ok || after.value > L.interest) return { error: `After that: enter a percentage up to ${L.interest}, or leave it empty for the same.` };
     if (byAmount ? !repayment.ok || repayment.cents <= 0 : !repayment.ok || repayment.value <= 0 || repayment.value > L.repayment) {
       return { error: byAmount ? "Repayment: enter the amount you pay a month." : `Repayment: enter a percentage above 0, up to ${L.repayment}.` };
     }
@@ -2600,39 +2608,169 @@ function flatCard() {
     };
   };
 
-  const lines = (flat) => {
-    const r = F.flatWhatIf(store, flat);
+  // Under a field, what it works out to, as far as the fields typed so far
+  // tell: how long until the month bought, the purchase costs, the loan,
+  // when the fixed years end, and the first payment (or, for an amount a
+  // month, the repayment at first that it makes).
+  const hint = () => h("span", { class: "field-hint" });
+  const hints = { month: hint(), costs: hint(), loan: hint(), fixed: hint(), payment: hint() };
+  const showHints = (form) => {
+    const data = new FormData(form);
+    const text = (name) => String(data.get(name) ?? "").trim();
+    const month = F.parseMonth(text("month"));
+    const ahead = month ? F.monthIndex(month) - thisMonth() : 0;
+    hints.month.textContent = ahead <= 0 ? "" : `in ${ahead < 12 ? monthsText(ahead) : tenthsText(yearTenths(ahead))}`;
+    const price = F.parseMoney(text("price"));
+    const costs = F.parsePercent(text("costsPercent"));
+    const own = F.parseMoney(text("ownMoney"));
+    const priced = price.ok && price.cents > 0 && costs.ok && costs.value <= L.costsPercent;
+    const total = priced ? price.cents + F.flatCosts({ price: price.cents, costsPercent: costs.value }) : 0;
+    hints.costs.textContent = priced ? money(total - price.cents) : "";
+    const loan = priced && own.ok && own.cents >= 0 && own.cents <= total ? total - own.cents : null;
+    hints.loan.textContent = loan === null ? "" : loan === 0 ? "No loan" : `Loan ${money(loan)}`;
+    const years = Number(text("fixedYears"));
+    const fixed = month && /^[0-9]+$/.test(text("fixedYears")) && years >= L.fixedYears.min && years <= L.fixedYears.max;
+    hints.fixed.textContent = fixed ? `until ${monthLabel(F.addMonths(month, years * 12 - 1))}` : "";
+    const interest = F.parsePercent(text("interest"));
+    const byAmount = data.get("repaymentKind") === "amount";
+    const repayment = byAmount ? F.parseMoney(text("repayment")) : F.parsePercent(text("repayment"));
+    hints.payment.textContent = "";
+    if (!(loan > 0 && interest.ok && interest.value <= L.interest && repayment.ok)) return;
+    if (!byAmount && repayment.value > 0 && repayment.value <= L.repayment) {
+      const schedule = F.loanSchedule({ loan, interest: interest.value, fixedYears: 1, interestAfter: interest.value, repayment: { percent: repayment.value } });
+      hints.payment.textContent = `${money(schedule.payments[0].amount)} a month`;
+    } else if (byAmount && repayment.cents > 0) {
+      const atFirst = (repayment.cents * 1200) / loan - interest.value;
+      const shown = Math.round(atFirst * 100) / 100;
+      if (shown > 0) hints.payment.textContent = `${percentUnit.format(shown)} repayment at first`;
+      else if (atFirst > 0) hints.payment.textContent = "Just above the interest at first";
+      else hints.payment.textContent = atFirst === 0 ? "Only the interest at first" : "Below the interest at first";
+    }
+  };
+
+  // When buying stops against renting: "at 53, 2 months later than
+  // renting", and whether that is sooner or later.
+  const against = (buying, renting) => {
+    const by = soonerText(buying, renting);
+    const at = (month) => (month === null ? `not before ${retirementAge}` : `at ${F.ageIn(month, birthYear)}`);
+    if (by === null) return buying === renting ? `${at(buying)}, as when renting` : `${at(buying)}, renting ${at(renting)}`;
+    return `${at(buying)}, ${by === "the same" ? "the same as renting" : `${by} than renting`}`;
+  };
+  const later = (buying, renting) => (buying ?? "9999-12") > (renting ?? "9999-12");
+  const sooner = (buying, renting) => (buying ?? "9999-12") < (renting ?? "9999-12");
+  const tone = (better, worse) => (better ? "better" : worse ? "worse" : null);
+
+  // The panel's head: when you could stop working with the flat, and from
+  // when the money lasts even at the low growth, each against renting.
+  const verdict = (r) => h("div", { class: "flat-verdict" },
+    h("p", { class: "flat-work" }, `Stop working ${against(r.buying.work, r.renting.work)}`),
+    h("p", { class: tone(sooner(r.buying.low, r.renting.low), later(r.buying.low, r.renting.low)) }, `Even at ${low} growth: ${against(r.buying.low, r.renting.low)}`));
+
+  // Renting and buying side by side: the age and month you could stop
+  // working, as above, and the FI number once the loan is paid off.
+  const compare = (r) => {
+    const rows = [];
+    const when = (month, buying) => h("td", { class: buying ? "buying" : null },
+      month === null ? "–" : String(F.ageIn(month, birthYear)),
+      h("span", { class: "sub" }, month === null ? `not before ${retirementAge}` : monthLabel(month)));
+    if (r.renting && r.buying) {
+      for (const [label, key] of [["Stop working", "work"], [`Even at ${low}`, "low"]]) {
+        const [buying, renting] = [r.buying[key], r.renting[key]];
+        rows.push(h("tr", null, h("th", { scope: "row" }, label), when(renting, false), when(buying, true),
+          h("td", { class: `flat-change ${tone(sooner(buying, renting), later(buying, renting)) ?? ""}` }, soonerText(buying, renting) ?? "–")));
+      }
+    }
+    if (r.fiNumber) {
+      const { renting, buying } = r.fiNumber;
+      rows.push(h("tr", null, h("th", { scope: "row" }, "FI number once paid off"), h("td", null, money(renting)), h("td", { class: "buying" }, money(buying)),
+        h("td", { class: `flat-change ${tone(buying < renting, buying > renting) ?? ""}` }, signedMoney(buying - renting))));
+    }
+    if (!rows.length) return null;
+    return h("div", { class: "table-wrap" }, h("table", { class: "flat-compare" },
+      h("thead", null, h("tr", null, h("td"), h("th", { scope: "col" }, "Renting"), h("th", { scope: "col", class: "buying" }, "Buying"), h("td"))),
+      h("tbody", null, rows)));
+  };
+
+  // Where the money goes in the month bought, renting and buying: housing,
+  // then what is paid in. Both bars on one scale, so the part that moves
+  // from paying in to housing shows. Each part says its amount first, so a
+  // narrow one cuts off its name, not the amount.
+  const split = (r, flat) => {
     const s = r.schedule;
-    const out = [];
-    if (r.loan === 0) out.push("No loan: the own money pays the price and the costs.");
-    else if (s.months === null) {
-      const payment = s.payments.at(-1).amount;
-      const late = s.payments.length > 1 || payment > (r.loan * flat.interest) / 1200;
-      out.push(`Loan ${money(r.loan)} · ${money(payment)} a month doesn't cover the interest${late ? ` of ${percentUnit.format(flat.interestAfter ?? flat.interest)} after the fixed years` : ""}: it's never paid off.`);
-    } else {
-      const [first, ...later] = s.payments;
-      const changes = later.map((p) => `, ${money(p.amount)} from ${monthLabel(p.month)}`).join("");
-      const at = birthYear === null ? "" : `, at ${F.ageIn(s.paidOff, birthYear)}`;
-      out.push(`Loan ${money(r.loan)} · ${money(first.amount)} a month${changes} · paid off ${monthLabel(s.paidOff)}${at} · ${money(s.interest)} interest`);
+    const payment = r.loan === 0 ? 0 : s.months === 1 ? s.last : s.payments[0].amount;
+    const rest = r.housing.during - payment; // Hausgeld less subletting
+    const owning = rest >= 0
+      ? [["loan", payment, "loan"], [flat.subletting > 0 ? "Hausgeld, less subletting" : "Hausgeld", rest, "running"]]
+      : [[payment > 0 ? "loan, less subletting" : "housing", r.housing.during, "loan"]];
+    const rows = [
+      ["Renting", [["housing", r.housing.before, "housing"], ["pay in", r.payIn.before, "payin"]]],
+      ["Buying", [...owning, ["pay in", r.payIn.during, "payin"]]],
+    ].map(([label, parts]) => [label, parts.filter(([, cents]) => cents > 0)]);
+    const total = (parts) => parts.reduce((sum, [, cents]) => sum + cents, 0);
+    const scale = Math.max(...rows.map(([, parts]) => total(parts)));
+    if (!(scale > 0)) return null;
+    const grow = (el, cents) => {
+      // Through the CSSOM: the page's CSP blocks style attributes.
+      el.style.setProperty("flex-grow", String(cents));
+      return el;
+    };
+    const bar = (parts) => h("span", { class: "flat-bar" },
+      parts.map(([name, cents, kind]) => grow(h("span", { class: kind, title: `${money(cents)} ${name}` }, `${money(cents)} ${name}`), cents)),
+      total(parts) < scale ? grow(h("span", { class: "room" }), scale - total(parts)) : null);
+
+    const more = r.housing.during - r.housing.before;
+    let note;
+    if (r.payIn.before - more < 0) note = `Housing costs ${money(more)} more a month, more than you pay in: you'd pay in nothing.`;
+    else if (more > 0) note = `${money(r.housing.before + r.payIn.before)} either way: ${money(more)} a month goes from paying in to housing.`;
+    else if (more < 0) note = `Housing costs ${money(-more)} less a month: you pay that in as well.`;
+    else note = "Housing costs the same: you pay in as before.";
+    return h("div", { class: "flat-split" },
+      h("h3", null, `In ${monthLabel(flat.month)}, the month you buy`, info("the housing cost",
+        "Housing: renting, the expenses that stop; buying, the loan's payment and the Hausgeld, less subletting.",
+        `In the money of ${monthLabel(flat.month)}: the expenses that stop, Hausgeld and subletting rise with inflation until then; the loan's payment doesn't.`,
+        "From then on, what you pay in changes each month by what housing costs more than the expenses that stop (or less: then you pay in more). Once the loan is paid off, only the Hausgeld, subletting and those expenses count. Never below 0.")),
+      rows.map(([label, parts]) => [h("span", { class: "flat-split-label" }, label), bar(parts)]),
+      h("p", { class: "flat-split-note" }, note));
+  };
+
+  // The loan, and where the own money comes from.
+  const facts = (r) => {
+    const s = r.schedule;
+    const rows = [];
+    if (r.loan === 0) rows.push(["Loan", "None: the own money pays the price and the costs"]);
+    else {
+      const [first, ...changes] = s.payments;
+      rows.push(["Loan", money(r.loan)],
+        ["Payment", [`${money(first.amount)} a month`, changes.map((p) => h("span", { class: "sub" }, ` · ${money(p.amount)} from ${monthLabel(p.month)}`))]]);
+      if (s.months !== null) {
+        rows.push(["Paid off", `${monthLabel(s.paidOff)}${birthYear === null ? "" : `, at ${F.ageIn(s.paidOff, birthYear)}`}`],
+          ["Interest", `${money(s.interest)} in all`]);
+      }
     }
     const c = r.cash;
     const parts = [c.fromCash > 0 ? `${money(c.fromCash)} from cash` : null, c.fromPortfolio > 0 ? `${money(c.fromPortfolio)} from the portfolio` : null].filter(Boolean);
     if (parts.length) {
       const more = c.fromPortfolio > c.portfolio ? ", more than it has now" : "";
-      out.push(`Own money: ${parts.join(", ")}${more}${c.accounts ? " · the emergency fund stays" : ""}`);
+      rows.push(["Own money", [`${parts.join(", ")}${more}`, c.accounts ? h("span", { class: "sub" }, " · the emergency fund stays") : null]]);
     }
-    const sublet = flat.subletting > 0 ? ", after subletting" : "";
-    out.push([`${monthLabel(flat.month)}: housing ${money(r.housing.before)} → ${money(r.housing.during)} a month${sublet} · pays in ${money(r.payIn.during)} instead of ${money(r.payIn.before)}`,
-      info("the housing cost",
-        `In the money of ${monthLabel(flat.month)}: the expenses that stop, Hausgeld and subletting rise with inflation until then; the loan's payment doesn't.`,
-        "From then on, what you pay in changes each month by what housing costs more than the expenses that stop (or less: then you pay in more). Once the loan is paid off, only the Hausgeld, subletting and those expenses count. Never below 0.")]);
-    if (r.renting && r.buying) {
-      out.push(stopsText(store, r.buying, r.renting));
-    } else if (s.months !== null && birthYear === null) {
-      out.push(["When you could stop working needs your year of birth, in ", settingsLink("general"), "."]);
+    return h("dl", { class: "flat-facts" }, rows.map(([term, value]) => [h("dt", null, term), h("dd", null, value)]));
+  };
+
+  // The panel for a flat whose fields are all right.
+  const fill = (flat) => {
+    const r = F.flatWhatIf(store, flat);
+    const s = r.schedule;
+    let head = null;
+    if (s.months === null) {
+      const payment = s.payments.at(-1).amount;
+      const late = s.payments.length > 1 || payment > (r.loan * flat.interest) / 1200;
+      head = h("p", { class: "flat-error" }, `${money(payment)} a month doesn't cover the interest${late ? ` of ${percentUnit.format(flat.interestAfter ?? flat.interest)} after the fixed years` : ""}: the loan is never paid off.`);
+    } else if (r.renting && r.buying) {
+      head = verdict(r);
+    } else if (birthYear === null) {
+      head = h("p", { class: "muted" }, "When you could stop working needs your year of birth, in ", settingsLink("general"), ".");
     }
-    if (r.fiNumber) out.push(`Once it's paid off, the FI number is ${money(r.fiNumber.buying)} instead of ${money(r.fiNumber.renting)}, in today's money.`);
-    return out;
+    panel.replaceChildren(...[head, compare(r), split(r, flat), facts(r)].filter(Boolean));
   };
 
   let timer = null;
@@ -2640,11 +2778,15 @@ function flatCard() {
     // An amount a month is hidden with the other amounts; a percentage isn't.
     // Also after a redraw that kept what was typed (keepingDrafts).
     form.elements.repayment.classList.toggle("amount", form.elements.repaymentKind.value === "amount");
+    showHints(form);
     clearTimeout(timer);
     timer = setTimeout(() => {
       const r = read(form);
+      if (!r.error) return fill(r.flat);
       const started = ["month", "price"].some((name) => String(new FormData(form).get(name)).trim() !== "");
-      result.replaceChildren(...(r.error ? (started ? [h("p", null, r.error)] : []) : lines(r.flat).map((line) => h("p", null, line))));
+      panel.replaceChildren(started
+        ? h("p", { class: "flat-error" }, r.error)
+        : h("p", { class: "muted" }, "Enter the month you'd buy in and the price to see what changes."));
     }, 120);
   };
 
@@ -2653,6 +2795,11 @@ function flatCard() {
     h("option", { value: "amount", selected: "amount" in (saved?.repayment ?? {}) || null }, `${whole.formatToParts(0).find((part) => part.type === "currency")?.value ?? store.settings.currency} a month`));
   const repaymentValue = saved ? ("amount" in saved.repayment ? inputMoney(saved.repayment.amount) : plain.format(saved.repayment.percent)) : "";
   const input = (name, value, props = {}) => h("input", { name, inputmode: "decimal", autocomplete: "off", value, ...props });
+  // A field with what it works out to under it.
+  const hinted = (el, under) => {
+    el.append(under);
+    return el;
+  };
   const form = h("form", {
     class: "helper-form flat-form",
     oninput: (event) => show(event.currentTarget),
@@ -2666,31 +2813,31 @@ function flatCard() {
     },
   },
     h("h3", null, "The flat"),
-    field("Buy in", monthField({ name: "month", required: true, value: saved?.month ?? "", onpick: () => show(form) }),
-      "The month you pay for it and move in: the expenses below stop the month before."),
+    hinted(field("Buy in", monthField({ name: "month", required: true, value: saved?.month ?? "", onpick: () => show(form) }),
+      "The month you pay for it and move in: the expenses that stop end the month before."), hints.month),
     field("Price", input("price", saved ? inputMoney(saved.price) : "", { class: "amount", required: true, placeholder: inputMoney(35000000) })),
-    field("Purchase costs (%)", input("costsPercent", percentText(saved?.costsPercent ?? 10), { required: true }),
-      "Grunderwerbsteuer 3,5 to 6,5 % by state, notary and land registry about 2 %, an agent up to 3,57 %."),
-    field("Own money", input("ownMoney", saved ? inputMoney(saved.ownMoney) : "", { class: "amount", required: true, placeholder: inputMoney(10500000) }),
+    hinted(field("Purchase costs (%)", input("costsPercent", percentText(saved?.costsPercent ?? 10), { required: true }),
+      "Grunderwerbsteuer 3,5 to 6,5 % by state, notary and land registry about 2 %, an agent up to 3,57 %."), hints.costs),
+    hinted(field("Own money", input("ownMoney", saved ? inputMoney(saved.ownMoney) : "", { class: "amount", required: true, placeholder: inputMoney(10500000) }),
       "What you pay without the loan, costs included. It comes from your cash accounts first, then out of the portfolio, never from the emergency fund.",
-      "The loan is the price and the costs, less the own money."),
+      "The loan is the price and the costs, less the own money."), hints.loan),
     h("h3", null, "The loan"),
     field("Interest a year (%)", input("interest", percentText(saved?.interest), { required: true, placeholder: plain.format(3.8) })),
-    field("Fixed for, years", input("fixedYears", saved ? String(saved.fixedYears) : "10", { inputmode: "numeric", required: true }),
-      "The Zinsbindung: how long the interest stays the same."),
-    field("Then, a year (%)", input("interestAfter", percentText(saved?.interestAfter), { placeholder: "the same" }),
+    hinted(field("Fixed for (years)", input("fixedYears", saved ? String(saved.fixedYears) : "10", { inputmode: "numeric", required: true }),
+      "The Zinsbindung: how long the interest stays the same."), hints.fixed),
+    field("After that (%)", input("interestAfter", percentText(saved?.interestAfter), { placeholder: "the same" }),
       "The interest after the fixed years, to see what a higher one does. Empty: the same."),
-    field("Repayment", h("div", { class: "flat-repayment" }, input("repayment", repaymentValue, { required: true, placeholder: "2", class: saved && "amount" in saved.repayment ? "amount" : null }), repaymentKind),
+    hinted(field("Repayment", h("div", { class: "flat-repayment" }, input("repayment", repaymentValue, { required: true, placeholder: "2", class: saved && "amount" in saved.repayment ? "amount" : null }), repaymentKind),
       "% at first: the anfängliche Tilgung, a year. The payment is the loan × (interest + repayment) ÷ 12; when the fixed years end, it's worked out again for what is left, at the new interest.",
       "An amount a month: the whole payment, interest included, the same until the loan is paid off.",
-      "Either way the payment stays the same amount of money: it doesn't rise with inflation."),
+      "Either way the payment stays the same amount of money: it doesn't rise with inflation."), hints.payment),
     h("h3", null, "Each month"),
     field("Hausgeld and Grundsteuer", input("running", saved?.running ? inputMoney(saved.running) : "", { class: "amount", placeholder: inputMoney(45000) }),
       "What you pay as the owner, in today's money: it rises with inflation like your expenses."),
     field("Subletting, after tax", input("subletting", saved?.subletting ? inputMoney(saved.subletting) : "", { class: "amount", placeholder: inputMoney(0) }),
       "Rent you take in, such as for a room, after tax. It counts from the month you buy, for good, and rises with inflation like income."),
     endable.length ? h("fieldset", { class: "flat-stops" },
-      h("legend", null, "Stops then"),
+      h("legend", null, "Expenses that stop when you move in"),
       endable.map((item) => h("label", { class: "check" },
         h("input", { type: "checkbox", name: "stops", value: item.id, checked: saved?.stops.includes(item.id) || null }),
         `${item.name} (${money(F.monthlyAmount(item))})`))) : null,
@@ -2701,12 +2848,14 @@ function flatCard() {
         commit(F.deleteFlat(store), "Deleted the flat.");
       } }, "Delete") : null));
   queueMicrotask(() => show(form));
-  const details = h("details", { open: state.flatOpen || null, ontoggle: (event) => { state.flatOpen = event.currentTarget.open; } },
-    h("summary", null, h("h2", null, "Buying a flat (Germany)")),
-    h("p", null, "What if you bought a flat? This compares your plan as it is with the same plan and the flat: the loan, the rent that stops, and what you pay in. ",
-      "Your plan doesn't count it: the Dashboard and the Forecast stay as they are."),
-    form, result);
-  return h("section", { class: "card" }, details);
+  const about = info("buying a flat",
+    "This compares your plan as it is, renting, with the same plan and the flat: the loan, the expenses that stop, and what you pay in.",
+    `When you could stop working, as Stop working on the Forecast counts it, and from when the money lasts even at ${low} growth. The FI number once the loan is paid off is in today's money.`,
+    "Save keeps the fields for next time. Your plan doesn't count the flat: the Dashboard and the Forecast stay as they are.");
+  return h("section", { class: "card" },
+    h("div", { class: "card-head" }, h("h2", null, "Buying a flat (Germany)", about)),
+    h("p", null, "What if you bought a flat? This compares your plan with it and without it."),
+    h("div", { class: "flat-layout" }, form, panel));
 }
 
 // ---------------------------------------------------------------- settings
