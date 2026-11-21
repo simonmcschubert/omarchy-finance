@@ -2641,7 +2641,9 @@ function flatCard() {
       hints.payment.textContent = `${money(schedule.payments[0].amount)} a month`;
     } else if (byAmount && repayment.cents > 0) {
       const atFirst = (repayment.cents * 1200) / loan - interest.value;
-      if (atFirst > 0) hints.payment.textContent = `${percentUnit.format(Math.round(atFirst * 100) / 100)} repayment at first`;
+      const shown = Math.round(atFirst * 100) / 100;
+      if (shown > 0) hints.payment.textContent = `${percentUnit.format(shown)} repayment at first`;
+      else if (atFirst > 0) hints.payment.textContent = "Just above the interest at first";
       else hints.payment.textContent = atFirst === 0 ? "Only the interest at first" : "Below the interest at first";
     }
   };
