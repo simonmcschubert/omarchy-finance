@@ -2732,7 +2732,9 @@ function flatCard() {
     const more = r.housing.during - r.housing.before;
     let note;
     if (r.payIn.before - more < 0) note = `Housing costs ${money(more)} more a month, more than you pay in: you'd pay in nothing.`;
-    else if (more > 0) note = `${money(r.housing.before + r.payIn.before)} either way: ${money(more)} a month goes from paying in to housing.`;
+    else if (more > 0) note = r.housing.before < 0 // the income that stops is more than the expenses: the bar can't show it
+      ? `${money(more)} a month goes from paying in to housing.`
+      : `${money(r.housing.before + r.payIn.before)} either way: ${money(more)} a month goes from paying in to housing.`;
     else if (more < 0) note = `Housing costs ${money(-more)} less a month: you pay that in as well.`;
     else note = "Housing costs the same: you pay in as before.";
     return h("div", { class: "flat-split" },

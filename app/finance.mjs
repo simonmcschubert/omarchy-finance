@@ -284,7 +284,7 @@ function upgradeFromVersion16(value) {
 
 // Version 17 had no income that a flat ends: a flat to buy ends none.
 function upgradeFromVersion17(value) {
-  if (!isObject(value) || !isObject(value.flat)) return { ...value, version: 18 };
+  if (!isObject(value.flat)) return { ...value, version: 18 };
   if ("incomeStops" in value.flat) throw new Error('The file has unknown field "flat.incomeStops"');
   return { ...value, version: 18, flat: { ...value.flat, incomeStops: [] } };
 }
