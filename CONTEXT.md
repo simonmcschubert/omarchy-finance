@@ -159,6 +159,8 @@ Today's money is the default; the choice is kept in the browser.
 The low and high growth run each plan with the dates of the expected
 return, so they show what happens to the same plan. A plan **lasts** when
 money is left at the end of age 120 (`SHOWN_AGE`), where the forecast ends.
+Its bar and chart are drawn only to the end of age 85 (`CHART_AGE`,
+`shownUntil()`), or to 120 when the forecast starts at 85 or later.
 
 **Lasts even at** (`lastsWith`): what the portfolio would need at a plan's
 _turn_, the end of its last month paid in in full (now when there is none),
@@ -183,9 +185,8 @@ comparisons use: when Stop working stops, and from when the money lasts
 even at the low growth.
 - _Stop working at an age_ (`fiOutlook().stopAfter()`): stops working in
   January of the age picked, whatever the portfolio has then, drawn as
-  the Forecast draws its plans, but only to the end of age 85
-  (`WHAT_IF_SHOWN_AGE`, `shownUntil()`). Whether its money lasts is still
-  worked out to `SHOWN_AGE`.
+  the Forecast draws its plans, to the end of age 85 (`CHART_AGE`).
+  Whether its money lasts is still worked out to `SHOWN_AGE`.
 - _Spend more or less_ (`spendingWhatIf()`): every expense a share more
   or less (`SPENDING_STEPS`), for good, with the income the same: what is
   spent less is paid in while working, what is spent more comes out of

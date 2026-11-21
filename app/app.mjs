@@ -2028,17 +2028,20 @@ function planRow(store, o, months, plan, name) {
 
 // The plans, as the page shows them: the answers to "When can you stop?",
 // each a plan, and the picked plan's bar. null without a year of birth.
-// Otherwise { result, o, cards, rows }: cards in the order shown, each {
-// key, question, answer ("now", an age, or null when the plan doesn't
-// happen before retirement), level, label (whether the money lasts, or
-// that it doesn't happen), title (longer) }; rows: planRow() of each plan
-// that happens, by key.
+// Otherwise { result, o, cards, rows, months }: cards in the order shown,
+// each { key, question, answer ("now", an age, or null when the plan
+// doesn't happen before retirement), level, label (whether the money
+// lasts, or that it doesn't happen), title (longer) }; rows: planRow() of
+// each plan that happens, by key, drawn up to CHART_AGE; months: the
+// months they are drawn for.
 function forecastPlans(store) {
   const { birthYear, retirementAge } = store.settings;
   const o = outlook(store);
   const result = o.plans(inTodaysMoney() ? "today" : "nominal");
   if (!result) return null;
   const { months } = result;
+  // Each plan as drawn, up to CHART_AGE.
+  const drawn = (plan) => F.shownUntil({ months, plan }, birthYear, F.CHART_AGE);
   const age = (month) => F.ageIn(month, birthYear);
   const low = percentUnit.format(o.rates.low);
   const plans = Object.fromEntries(result.plans.map((plan) => [plan.key, plan]));
@@ -2053,7 +2056,8 @@ function forecastPlans(store) {
   const rows = {};
   for (const plan of result.plans) {
     if (plan.retires === null) continue;
-    rows[plan.key] = planRow(store, o, months, plan, name(plan));
+    const shown = drawn(plan);
+    rows[plan.key] = planRow(store, o, shown.months, shown.plan, name(plan));
   }
 
   // A plan that doesn't happen before retirement says so instead.
@@ -2075,7 +2079,7 @@ function forecastPlans(store) {
       card("keep", "At the latest", String(retirementAge)),
     ].filter(Boolean);
   }
-  return { result, o, cards, rows };
+  return { result, o, cards, rows, months: drawn(result.plans[0]).months };
 }
 
 // What the Forecast and What if need and don't have yet, as list items:
@@ -2114,7 +2118,8 @@ function viewForecast() {
       h("li", null, `Amounts a month are as you entered them: pay-ins as in `, settingsLink("data"), ", and what the portfolio pays in today's money, the expenses with buffer less the income that counts then."),
       h("li", null, `Expenses rise by ${percentUnit.format(inflation)} inflation a year. Today's money takes it out of the portfolio's values again: what they would buy now.`),
       h("li", null, store.records.length ? `It starts from the portfolio in ${monthLabel(o.start)}, ${money(o.value)}.` : "It starts from 0, as there are no broker values yet."),
-      h("li", null, `Planned one-offs count in their month. A plan lasts when money is left at ${F.SHOWN_AGE}. Taxes are left out.`)));
+      h("li", null, `Planned one-offs count in their month. A plan lasts when money is left at ${F.SHOWN_AGE}. Taxes are left out.`),
+      h("li", null, `The bar and the chart go to ${F.CHART_AGE}. Whether the money lasts is still worked out to ${F.SHOWN_AGE}.`)));
   return h("div", null,
     h("div", { class: "answers-head" }, h("h2", null, "When can you stop?", about), moneySwitch(drawForecast)),
     h("div", { id: "forecast-answers", class: "answers", role: "radiogroup", "aria-label": "When can you stop?" }),
@@ -2182,7 +2187,7 @@ function drawForecast(focus = false) {
   const store = state.store;
   const plans = forecastPlans(store);
   if (!plans) return;
-  const { result, cards, rows } = plans;
+  const { cards, rows, months } = plans;
   const open = cards.filter((c) => c.answer !== null);
   const picked = open.find((c) => c.key === state.forecast.plan) ?? open.find((c) => c.key === "fi") ?? open[0];
   const pick = (key) => { setPlan(key); drawForecast(true); };
@@ -2212,7 +2217,7 @@ function drawForecast(focus = false) {
 
   // The picked plan: its name, the key to its phases, its bar and chart.
   const els = { title: document.getElementById("forecast-title"), need: document.getElementById("forecast-need"), keys: document.getElementById("forecast-keys"), box };
-  drawPlan(els, result.months, rows[picked.key]);
+  drawPlan(els, months, rows[picked.key]);
 }
 
 // ---------------------------------------------------------------- what if
@@ -2254,7 +2259,7 @@ function stopAges(store) {
 
 // Stop working at an age you pick: from January of that age, whatever the
 // portfolio has then (stopAfter), drawn as the Forecast draws its plans by
-// drawWhatIf, up to WHAT_IF_SHOWN_AGE. null once retirement has come, as
+// drawWhatIf, up to CHART_AGE. null once retirement has come, as
 // stopAfter() has it.
 function stopAtCard(store) {
   const o = outlook(store);
@@ -2265,7 +2270,7 @@ function stopAtCard(store) {
     ["What if you stopped working in January of the year you turn that age, whatever the portfolio has then, and lived off it from then on? Until then, you pay in as planned in ", settingsLink("data"), "."],
     `From ${min}, now, to ${max}, the retirement age.`,
     `As the Forecast draws its plans: the bar of the phases, and the portfolio at the expected return of ${rate("mid")}, with a band from ${rate("low")} to ${rate("high")} growth.`,
-    `The bar and the chart go to ${F.WHAT_IF_SHOWN_AGE}. Whether the money lasts is still worked out to ${F.SHOWN_AGE}, as on the Forecast.`,
+    `The bar and the chart go to ${F.CHART_AGE}. Whether the money lasts is still worked out to ${F.SHOWN_AGE}, as on the Forecast.`,
     `When the money runs out, the line under the name says what the portfolio would need when you stop, to last to ${F.SHOWN_AGE} even at ${rate("low")}.`);
   const age = h("input", { id: "stop-age", name: "age", type: "number", min, max, step: 1, inputmode: "numeric", autocomplete: "off", required: true, value: String(picked) });
   return h("section", { class: "card forecast" },
@@ -2281,7 +2286,7 @@ function stopAtCard(store) {
     h("div", { id: "stop-chart", class: "forecast-box" }));
 }
 
-// Draws the plan of the age picked on What if, up to WHAT_IF_SHOWN_AGE. An
+// Draws the plan of the age picked on What if, up to CHART_AGE. An
 // age that isn't one to pick says so, and the plan drawn before stays.
 function drawWhatIf() {
   const box = document.getElementById("stop-chart");
@@ -2301,7 +2306,7 @@ function drawWhatIf() {
   error.textContent = "";
   state.whatIf.age = age;
   const picked = o.stopAfter(F.monthFromIndex((birthYear + age) * 12 - 1), inTodaysMoney() ? "today" : "nominal");
-  const { months, plan } = F.shownUntil(picked, birthYear, F.WHAT_IF_SHOWN_AGE);
+  const { months, plan } = F.shownUntil(picked, birthYear, F.CHART_AGE);
   const name = F.monthIndex(plan.retires) <= thisMonth() ? "Stop working now" : `Stop working at ${F.ageIn(plan.retires, birthYear)}`;
   const els = { title: document.getElementById("stop-title"), need: document.getElementById("stop-need"), keys: document.getElementById("stop-keys"), box };
   drawPlan(els, months, planRow(store, o, months, plan, name), { status: true });

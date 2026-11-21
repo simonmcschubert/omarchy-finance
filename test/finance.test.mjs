@@ -2790,6 +2790,13 @@ test("shownUntil: a plan shown to an age, worked out to SHOWN_AGE", () => {
   // A later age than the forecast shows all of it.
   assert.deepEqual(F.shownUntil(result, 1990, F.SHOWN_AGE), { months, plan });
   assert.deepEqual(F.shownUntil(result, 1990, 200), { months, plan });
+  // So does an age that has come by the first month: 85 in 2026 or 86.
+  const retired = F.fiOutlook({ ...s, settings: { ...s.settings, birthYear: 1941 } }, "2026-11").plans("nominal");
+  const keep = { months: retired.months, plan: retired.plans[0] };
+  assert.equal(retired.months[0], "2026-10");
+  assert.deepEqual(F.shownUntil(keep, 1941, 85), keep, "85 this year");
+  assert.deepEqual(F.shownUntil(keep, 1940, 85), keep, "86");
+  assert.equal(F.shownUntil(keep, 1942, 85).months.at(-1), "2027-12", "84: to the end of next year");
 });
 
 test("stopsWorking: when Stop working stops, and whether its money lasts at the expected return", () => {
