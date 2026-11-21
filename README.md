@@ -571,11 +571,13 @@ next time; **Delete** clears them.
 - **Expenses that stop when you move in**, such as the rent: from that
   month on, within their own months (a rent that ends before saves
   nothing). Those that start at retirement aren't offered.
+- **Income that stops when you move in**, such as the rent a flatshare's
+  room brings in: the same, from that month on, while renting keeps it.
 
-What you pay in changes each month by what housing costs more than the
-expenses that stop, in the money of that month: the payment, plus Hausgeld
-less subletting and those expenses, which rise with inflation while the
-payment doesn't. Once the loan is paid off, the payment drops out of it:
+What you pay in changes each month by what housing costs more than
+renting, in the money of that month: the payment, plus Hausgeld, less
+subletting and the expenses that stop, plus the income that stops; all but
+the payment rise with inflation. Once the loan is paid off, the payment drops out of it:
 you usually pay in more then. A pay-in never goes below 0, and planned
 pay-in changes after the purchase change by the same.
 

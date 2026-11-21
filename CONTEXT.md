@@ -93,6 +93,10 @@ amount a month to the end. The payment never rises with inflation.
 **Subletting**: rent taken in for the flat, after tax, from the month it is
 bought, for good.
 
+**Stops** (`stops`, `incomeStops`): the expenses and the income that end
+when the flat is bought, such as the rent and what a flatshare's room
+brings in. Renting keeps them; buying takes them out from that month on.
+
 The housing cost changes what is paid in, month by month in the money of
 then: less while the loan runs, more once it is paid off.
 

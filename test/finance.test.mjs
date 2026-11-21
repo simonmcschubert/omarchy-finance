@@ -2432,7 +2432,7 @@ test("a loan, month by month: what it pays, for how long, and the interest", () 
 // 1.400 a month paid in, 30.000 in cash and 18.000 in the emergency fund,
 // 900 cold rent and 250 Nebenkosten.
 const FLAT = { month: "2028-01", price: 350000 * EUR, costsPercent: 11, ownMoney: 108500 * EUR, interest: 3.8, fixedYears: 10, interestAfter: 5.5,
-  repayment: { percent: 2 }, running: 450 * EUR, subletting: 0, stops: ["rent", "nk"] };
+  repayment: { percent: 2 }, running: 450 * EUR, subletting: 0, stops: ["rent", "nk"], incomeStops: [] };
 function renting() {
   const s = F.emptyStore();
   s.settings.birthYear = 1990;
@@ -2471,12 +2471,18 @@ test("a flat is checked when read, kept apart from the plan, and deleted", () =>
     [{ ...FLAT, extra: 1 }, /flat has unknown field "extra"/],
     [{ ...FLAT, ownMoney: 388501 * EUR }, /ownMoney must be at most the price and the costs/],
     [{ ...FLAT, interestAfter: 21 }, /interestAfter must be null or from 0 to 20/],
+    [{ ...FLAT, incomeStops: ["gone"] }, /incomeStops names an unknown income/],
+    [{ ...FLAT, incomeStops: ["sal", "sal"] }, /incomeStops must be a list/],
+    [(({ incomeStops, ...rest }) => rest)(FLAT), /flat is missing "incomeStops"/],
   ]) {
     assert.match(F.parseStore({ ...saved.store, flat }).error, error);
     assert.equal(F.saveFlat(s, flat).ok, false);
   }
-  // An expense the flat ends that is deleted is no longer ended.
+  // An expense or income the flat ends that is deleted is no longer ended.
   assert.deepEqual(F.deleteItem(saved.store, "expenses", "rent").flat.stops, ["nk"]);
+  const room = F.saveFlat(s, { ...FLAT, incomeStops: ["sal"] }).store;
+  assert.deepEqual(F.deleteItem(room, "income", "sal").flat.incomeStops, []);
+  assert.deepEqual(F.deleteItem(room, "income", "pen").flat.incomeStops, ["sal"]);
   assert.equal(F.deleteFlat(saved.store).flat, null);
 });
 
@@ -2486,6 +2492,16 @@ test("a version 16 file is upgraded: no flat to buy", () => {
   assert.equal(result.ok, true, result.error);
   assert.deepEqual(result.store, { ...v16, version: F.VERSION, flat: null });
   assert.match(F.parseStore({ ...v16, flat: null }).error, /unknown field "flat"/);
+});
+
+test("a version 17 file is upgraded: its flat ends no income", () => {
+  const s = renting();
+  const v17 = { ...s, version: 17, flat: (({ incomeStops, ...rest }) => rest)(FLAT) };
+  const result = F.parseStore(v17);
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.store, { ...s, version: F.VERSION, flat: FLAT });
+  assert.deepEqual(F.parseStore({ ...s, version: 17, flat: null }).store, { ...s, version: F.VERSION, flat: null });
+  assert.match(F.parseStore({ ...v17, flat: FLAT }).error, /unknown field "flat.incomeStops"/);
 });
 
 test("buying a flat, as a what-if: the loan, the own money, the pay-ins, and when you could stop", () => {
@@ -2555,6 +2571,21 @@ test("buying a flat, as a what-if: the loan, the own money, the pay-ins, and whe
     [["flat-stops-rent", { month: "2028-01" }], ["flat-stops-nk", { month: "2028-01" }], ["flat-stops-care", { age: 60 }]]);
   assert.equal(F.budget(care.store, F.monthIndex("2040-01")).expenses.monthly, F.budget(r.store, F.monthIndex("2040-01")).expenses.monthly, "nothing taken out before 60");
   close(care.paidIn(F.monthIndex("2040-01")), r.paidIn(F.monthIndex("2040-01")), "no credit before 60");
+
+  // Income that stops, such as a flatshare's rent: renting stays as it
+  // is; buying loses it from the month bought, in the pay-in while working
+  // and in what the portfolio pays later.
+  const shared = { ...s, income: [...s.income, { id: "room", name: "Flatshare room", category: "", amount: 400 * EUR, everyMonths: 1, from: null, until: null }] };
+  const flatshare = F.flatWhatIf(shared, { ...FLAT, incomeStops: ["room"] }, "2026-11");
+  const kept = F.flatWhatIf(shared, FLAT, "2026-11");
+  assert.deepEqual(flatshare.renting, kept.renting, "renting is the plan as it is");
+  close(flatshare.housing.before, then(750 * EUR, "2028-01"), "the rent, less the room's");
+  close(flatshare.payIn.during, 1400 * EUR - 135333 + then(300 * EUR, "2028-01"), "pay-in without the room");
+  close(kept.payIn.during - flatshare.payIn.during, then(400 * EUR, "2028-01"), "the room's rent less paid in");
+  assert.deepEqual(flatshare.store.income.filter((i) => i.id.startsWith("flat-stops-")).map((i) => [i.id, i.amount, i.from, i.until]), [["flat-stops-room", -400 * EUR, { month: "2028-01" }, null]]);
+  assert.equal(F.budget(flatshare.store, F.monthIndex("2060-01")).income.monthly, F.budget(kept.store, F.monthIndex("2060-01")).income.monthly - 400 * EUR, "retired, without the room's rent");
+  assert.ok(flatshare.buying.work > kept.buying.work, "stops working later without it");
+  assert.ok(flatshare.fiNumber.buying > kept.fiNumber.buying, "and needs more then");
 
   // Subletting lowers the extra cost, and what the portfolio pays later.
   const sublet = F.flatWhatIf(s, { ...FLAT, subletting: 300 * EUR }, "2026-11");
