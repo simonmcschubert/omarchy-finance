@@ -171,8 +171,10 @@ then at the low growth. `forecast()`'s _needs_ give it for every month.
 What if): when you could stop working, as _Retire at FI_ counts it,
 paying in the same amount every month from now on: 0 to 3,000 in steps of
 500 (`PAY_IN_STEPS`) and the average pay-in, a row of its own unless it is
-one of them. The _plan_ row is the pay-in plan, there when it isn't the
-average every month.
+one of them. The _plan_ row is the pay-in plan, and every other row says
+how much sooner or later it is than that. When the plan pays in the same
+every month (the average, or an amount of your own), it is the row of
+that amount; when it changes, a row of its own.
 
 **What if** (the page): each **what-if** changes one thing, works out the
 plan with it, and compares when you could stop working with the plan as
@@ -181,7 +183,9 @@ comparisons use: when Stop working stops, and from when the money lasts
 even at the low growth.
 - _Stop working at an age_ (`fiOutlook().stopAfter()`): stops working in
   January of the age picked, whatever the portfolio has then, drawn as
-  the Forecast draws its plans.
+  the Forecast draws its plans, but only to the end of age 85
+  (`WHAT_IF_SHOWN_AGE`, `shownUntil()`). Whether its money lasts is still
+  worked out to `SHOWN_AGE`.
 - _Spend more or less_ (`spendingWhatIf()`): every expense a share more
   or less (`SPENDING_STEPS`), for good, with the income the same: what is
   spent less is paid in while working, what is spent more comes out of
