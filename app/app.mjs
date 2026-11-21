@@ -110,7 +110,6 @@ const INTERVALS = [
   [12, "Yearly"],
   [24, "Every 2 years"],
 ];
-const intervalLabel = (n) => INTERVALS.find(([v]) => v === n)?.[1] ?? `Every ${n} months`;
 
 // The month index of this month, for what counts now.
 const thisMonth = () => F.monthIndex(F.currentMonth());
@@ -1651,15 +1650,15 @@ function viewItems(kind) {
       editing ? h("button", { type: "button", onclick: () => { state.editing[kind] = null; render(); } }, "Cancel") : null),
   );
 
-  const row = (item) => h("tr", { class: [item.id === state.editing[kind] && "editing", item.active === false && "inactive"].filter(Boolean).join(" ") || null },
-    h("td", null, item.name, item.essential ? h("span", { class: "badge", title: "Counts for Lean FI" }, "Essential") : null,
+  // The amount and how often it is paid are in the form: the list shows
+  // what each counts a month.
+  const row = (item) => h("li", { class: [item.id === state.editing[kind] && "editing", item.active === false && "inactive"].filter(Boolean).join(" ") || null },
+    h("div", null, item.name, item.essential ? h("span", { class: "badge", title: "Counts for Lean FI" }, "Essential") : null,
       windowText(item) ? h("div", { class: "sub" }, windowText(item)) : null,
       // Listed apart from their category, so they show it here.
       !active.includes(item) && item.category ? h("div", { class: "sub" }, item.category) : null),
-    h("td", { class: "num" }, moneyExact(item.amount)),
-    h("td", null, intervalLabel(item.everyMonths)),
-    h("td", { class: "num" }, money(F.monthlyAmount(item))),
-    h("td", { class: "actions" },
+    h("div", { class: "num" }, money(F.monthlyAmount(item))),
+    h("div", { class: "actions" },
       h("button", { type: "button", class: "link", onclick: () => { state.editing[kind] = item.id; state.focus = "#item-name"; render(); } }, "Edit"),
       kind === "expenses"
         ? h("button", { type: "button", class: "link",
@@ -1680,15 +1679,19 @@ function viewItems(kind) {
         commit(F.deleteItem(store, kind, item.id), `Deleted ${item.name}.`);
       } }, "Delete")));
 
-  const rows = [];
-  for (const group of F.byCategory(active)) {
-    rows.push(h("tr", { class: "group" }, h("th", { colspan: 3, scope: "rowgroup" }, group.category || "No category"), h("td", { class: "num" }, money(group.monthly)), h("td")));
-    rows.push(group.items.map(row));
-  }
+  // Each group's name and total in a column of their own, left of its
+  // items, so that a group never looks like an item.
+  const groups = [];
+  const group = (title, total, list, apart) => {
+    const id = `${kind}-group-${groups.length + 1}`;
+    groups.push(h("section", { class: apart ? "item-group apart" : "item-group" },
+      h("div", { class: "item-group-head" }, h("h3", { id }, title), h("div", { class: apart ? "muted" : null }, total)),
+      h("ul", { class: "item-rows", "aria-labelledby": id }, list.map(row))));
+  };
+  for (const g of F.byCategory(active)) group(g.category || "No category", money(g.monthly), g.items, false);
   const apart = (title, list, note) => {
     if (list.length === 0) return;
-    rows.push(h("tr", { class: "group" }, h("th", { colspan: 3, scope: "rowgroup" }, title), h("td", { class: "num" }, h("span", { class: "muted" }, note)), h("td")));
-    rows.push([...list].sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name)).map(row));
+    group(title, note, [...list].sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name)), true);
   };
   apart("Later", later, "not counted yet");
   apart("Ended", ended, "no longer counted");
@@ -1703,9 +1706,7 @@ function viewItems(kind) {
       h("h3", null, editing ? `Edit ${editing.name}` : `Add ${names.one === "income" ? "income" : "an expense"}`),
       form),
     items.length
-      ? card(null, h("div", { class: "table-wrap" }, h("table", null,
-          h("thead", null, h("tr", null, h("th", null, "Name"), h("th", { class: "num" }, "Amount"), h("th", null, "Paid"), h("th", { class: "num" }, "Per month"), h("th"))),
-          h("tbody", null, rows))))
+      ? card(null, h("div", { class: "item-list" }, groups))
       : null,
     kind === "income" ? pensionCard() : healthCard());
 }
