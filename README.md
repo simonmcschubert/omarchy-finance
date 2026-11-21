@@ -290,8 +290,11 @@ portfolio and each invested account:
 
 Since the start, both are a year from 12 months of history on, and over the
 whole time before. Pay-ins, one-offs and an account's first value count
-from the middle of their month. A column no row has yet, such as 5 years
-with a shorter history, is left out.
+from the middle of their month. A month that ends with less than half of
+what went in has no time-weighted return (it would be a loss of more than
+everything), and neither has a time-weighted period with it: it shows “–”.
+A column no row has a number for, such as 5 years with a shorter history,
+is left out.
 
 **Emergency fund**, at the foot of Net worth on the dashboard: the latest
 values of the emergency-fund accounts ÷ this month's expenses with buffer,
@@ -307,7 +310,7 @@ counts this month.
 | Monthly expenses | Sum of the active expenses that count this month the same way, plus the buffer |
 | Investment rate | What you pay in now ÷ monthly income: the average monthly pay-in over the last 12 months (one-offs left out), your own amount from Settings, or a planned change that has started |
 | Portfolio | Sum of the invested accounts in the latest month, and its change since the month before |
-| Gains, last 12 months | Change in portfolio value over the last 12 months minus the pay-ins and one-offs, and how much those were. The returns are in their own card |
+| Gains, last 12 months | Change in portfolio value over the last 12 months minus what went in, and how much that was: the pay-ins and one-offs, and what an account held in its first month. The returns are in their own card |
 | Expenses covered | Portfolio ÷ monthly expenses: how long it would pay for them |
 
 With less than 12 months of history, the average uses the months there

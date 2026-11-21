@@ -238,7 +238,8 @@ export function renderChart(root, options) {
           ["projection", format(p.mid), `at ${formatRate(rates.mid)}`],
           ["band", `${format(p.low)} – ${format(p.high)}`, `at ${formatRate(rates.low)} to ${formatRate(rates.high)}`],
           ["goal", format(p.goal), "FI number"],
-          [null, formatPercent(p.mid / p.goal), "of the FI number"],
+          // An FI number of 0 (income pays every expense by then) has no share.
+          ...(p.goal > 0 ? [[null, formatPercent(p.mid / p.goal), "of the FI number"]] : []),
         ],
       };
     }
