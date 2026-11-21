@@ -348,18 +348,39 @@ test("incomeSplit: expenses with the buffer, the average pay-in, and the rest", 
   assert.equal(F.incomeSplit(F.metrics({ ...s, income: [] })), null);
 });
 
-test("gains: the change in value minus pay-ins, with a Modified Dietz return", () => {
+test("gains: the change in value minus what went in, with a Modified Dietz return", () => {
   const series = [
-    { month: "2026-08", value: 1000, payIn: 1000 },
-    { month: "2026-09", value: 1100, payIn: 0 },
-    { month: "2026-10", value: 1300, payIn: 100 },
+    { month: "2026-08", value: 1000, payIn: 1000, invested: 1000 },
+    { month: "2026-09", value: 1100, payIn: 0, invested: 1000 },
+    { month: "2026-10", value: 1300, payIn: 100, invested: 1100 },
   ];
   // From August's 1,000: 300 more, 100 of it paid in, in the middle of the
   // second of two months, so invested for a quarter of the time.
   assert.deepEqual(F.gains(series), { gain: 200, months: 2, paid: 100, rate: 200 / 1025 });
   assert.deepEqual(F.gains(series, 1), { gain: 100, months: 1, paid: 100, rate: 100 / 1150 });
   assert.equal(F.gains(series.slice(0, 1)), null);
-  assert.deepEqual(F.gains([{ value: 0, payIn: 0 }, { value: 0, payIn: 0 }]), { gain: 0, months: 1, paid: 0, rate: null });
+  assert.deepEqual(F.gains([{ value: 0, payIn: 0, invested: 0 }, { value: 0, payIn: 0, invested: 0 }]), { gain: 0, months: 1, paid: 0, rate: null });
+});
+
+test("gains: what an account held when it was first entered is no gain", () => {
+  // A second broker account with 50,000 is entered from March on: the
+  // portfolio is 50,000 more, and none of it is a gain.
+  const s = store({
+    accounts: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+    records: [
+      { month: "2026-01", account: "a", value: 10000 * EUR, payIn: 0 },
+      { month: "2026-02", account: "a", value: 10100 * EUR, payIn: 0 },
+      { month: "2026-03", account: "a", value: 10700 * EUR, payIn: 500 * EUR },
+      { month: "2026-03", account: "b", value: 50000 * EUR, payIn: 300 * EUR },
+    ],
+  });
+  const g = F.gains(F.portfolioSeries(s));
+  // A: 700 more, 500 of it paid in. B: all of its 50,000 went in.
+  assert.equal(g.gain, 200 * EUR);
+  assert.equal(g.paid, 50500 * EUR);
+  // 10,000 from the start, and 50,500 for a quarter of the two months.
+  close(g.rate, 200 / (10000 + 50500 / 4), "rate");
+  assert.equal(F.metrics({ ...s, settings: { ...F.DEFAULT_SETTINGS } }, "2026-04").gains.gain, 200 * EUR);
 });
 
 test("metrics: gains over the last 12 months, expenses covered", () => {
@@ -1433,6 +1454,17 @@ test("returns: time-weighted months chained, and money-weighted", () => {
     { month: "2026-03", value: 1100, payIn: 1000, oneOff: 0, invested: 1000 },
   ]);
   assert.deepEqual(emptied.map((r) => r.rate), [0, 0.2]);
+  // A month that ends with less than half of what went in would have lost
+  // more than everything: it has no rate, and neither has a time with it.
+  const lost = [
+    { month: "2026-01", value: 100, payIn: 0, oneOff: 0, invested: 100 },
+    { month: "2026-02", value: 300, payIn: 1000, oneOff: 0, invested: 1100 },
+    ...Array.from({ length: 12 }, (_, i) => ({ month: F.addMonths("2026-03", i), value: 300, payIn: 0, oneOff: 0, invested: 1100 })),
+  ];
+  assert.equal(F.monthlyReturns(lost)[0].rate, null, "not -133 %");
+  assert.equal(F.returnsOf(lost).all, null, "since the start, a year: no number");
+  assert.equal(F.returnsOf(lost).year, 0, "the last 12 months are after it");
+  close(F.monthlyReturns([lost[0], { ...lost[1], value: 500 }])[0].rate, -1, "exactly half is all lost");
 
   // Paying in before a fall weighs it more with money than with time.
   const timing = [

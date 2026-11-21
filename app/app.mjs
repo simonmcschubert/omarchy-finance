@@ -1033,7 +1033,7 @@ function viewDashboard() {
         : m.latestMonth ? `as of ${monthLabel(m.latestMonth)}` : h("a", { href: "#portfolio" }, "Add broker values"),
       nudge),
     tile([`Gains, last ${gainsMonths}`, m.gains === null ? null
-      : info("the gains", `How much the portfolio grew in the last ${gainsMonths} besides what was paid in: the change in value minus the pay-ins and one-offs.`)],
+      : info("the gains", `How much the portfolio grew in the last ${gainsMonths} besides what was paid in: the change in value minus the pay-ins and one-offs, and minus what an account held when it was first entered.`)],
       m.gains === null ? "–" : signedMoney(m.gains.gain),
       m.gains === null ? "needs values for two months"
         : m.gains.paid > 0 ? `besides ${money(m.gains.paid)} paid in`
@@ -1934,7 +1934,7 @@ function returnsCard(store) {
   return card(["Returns", info("the returns",
       "All but Your money are time-weighted: what the investments did, month by month chained, whatever was paid in or out. Compare them with an index or a fund.",
       "Your money is money-weighted: what your money earned, given when you paid it in. Paying in before a rise makes it higher, before a fall lower.",
-      "Since the start, both are a year once there are 12 months or more, and the whole time before that. Pay-ins and one-offs count from the middle of their month; – means the history is shorter.")],
+      "Since the start, both are a year once there are 12 months or more, and the whole time before that. Pay-ins and one-offs count from the middle of their month; – means the history is shorter, or has a month that ended with less than half of what went in, which has no time-weighted return.")],
     h("div", { class: "table-wrap" }, h("table", null,
       h("thead", null, h("tr", null, h("th", null, ""), columns.map(([, label]) => h("th", { class: "num" }, label)))),
       h("tbody", null, rows.map(([name, r]) => h("tr", null,

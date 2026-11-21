@@ -949,8 +949,10 @@ export function accountSeries(store, accountId, until = null) {
 // of the month plus half of what went in (paid in during the month). What
 // went in is the change in `invested`: pay-ins, one-offs, and what an
 // account held in its first month. A month with nothing in the account and
-// nothing going in is 0; rate is null only when the value changed without
-// anything invested. Returns [{ month, rate }].
+// nothing going in is 0. rate is null where the month has no return: the
+// value changed without anything invested, or the month ends with less than
+// half of what went in, which would be a loss of more than everything.
+// Returns [{ month, rate }].
 export function monthlyReturns(series) {
   const returns = [];
   for (let i = 1; i < series.length; i++) {
@@ -958,7 +960,8 @@ export function monthlyReturns(series) {
     const flow = series[i].invested - series[i - 1].invested;
     const base = start + flow / 2;
     const gain = series[i].value - start - flow;
-    returns.push({ month: series[i].month, rate: base > 0 ? gain / base : gain === 0 ? 0 : null });
+    const rate = base > 0 ? gain / base : gain === 0 ? 0 : null;
+    returns.push({ month: series[i].month, rate: rate !== null && rate < -1 ? null : rate });
   }
   return returns;
 }
@@ -1032,23 +1035,25 @@ export function returnsOf(series) {
   };
 }
 
-// What the portfolio gained over the last `window` months besides pay-ins:
-// the change in value minus what was paid in, from the month before the
-// window (the first month when there are fewer). rate is a Modified Dietz
-// return: the gain ÷ (that first value + each pay-in weighted by the part of
-// the time it was invested, from the middle of its month). Returns
-// { gain, months, paid, rate } (paid: the pay-ins and one-offs of those
+// What the portfolio gained over the last `window` months besides what went
+// in: the change in value minus that, from the month before the window (the
+// first month when there are fewer). What went in is the change in
+// `invested`, as in monthlyReturns: pay-ins, one-offs, and what an account
+// held in its first month, which is no gain. rate is a Modified Dietz
+// return: the gain ÷ (that first value + what went in each month, weighted
+// by the part of the time it was invested, from the middle of its month).
+// Returns { gain, months, paid, rate } (paid: what went in over those
 // months; rate null when nothing was invested), or null with less than two
 // months.
 export function gains(series, window = 12) {
   if (series.length < 2) return null;
   const months = Math.min(window, series.length - 1);
-  const start = series.at(-1 - months);
-  const recent = series.slice(-months);
-  const paidIn = (m) => m.payIn + (m.oneOff ?? 0);
-  const paid = sum(recent.map(paidIn));
+  const from = series.length - 1 - months;
+  const start = series[from];
+  const flows = series.slice(from + 1).map((m, i) => m.invested - series[from + i].invested);
+  const paid = sum(flows);
   const gain = series.at(-1).value - start.value - paid;
-  const invested = start.value + sum(recent.map((m, i) => (paidIn(m) * (months - i - 0.5)) / months));
+  const invested = start.value + sum(flows.map((flow, i) => (flow * (months - i - 0.5)) / months));
   return { gain, months, paid, rate: invested > 0 ? gain / invested : null };
 }
 
