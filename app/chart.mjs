@@ -354,6 +354,7 @@ export function renderChart(root, options) {
 
 const PLAN_ROW = 70; // the bar's row: values above it, causes below
 const PLAN_BAR = 28;
+const PLAN_LINE = 14; // the lines of texts under the bar
 const PLAN_CHART = 280;
 const PLAN_MARGIN = { right: 20, top: 16, bottom: 40 };
 // Bar texts use 12px: about this wide per character.
@@ -387,6 +388,34 @@ export function ageTicks(months, ageOf, width, room = 34) {
 // The first text that fits in `width` pixels, or "".
 export function fitText(texts, width, charWidth = BAR_CHAR) {
   return texts.find((t) => t && t.length * charWidth + 14 <= width) ?? "";
+}
+
+// The texts under the bar, placed in order: each on the first line from
+// `top` down where it keeps 8 pixels from those placed before. There it
+// starts at its x, or ends at the right edge when it would run past it;
+// with `edge`, it may also end at the right edge when its x is taken.
+// texts: [{ x, text, edge }]; returns them with y, and anchor "end" for
+// those that end at the edge.
+export function placeLabels(texts, width, top, charWidth = CHAR_WIDTH) {
+  const placed = [];
+  const span = (l) => {
+    const w = l.text.length * charWidth;
+    return l.anchor === "end" ? [l.x - w, l.x] : [l.x, l.x + w];
+  };
+  const clear = (l) => placed.every((o) => o.y !== l.y || span(o)[1] + 8 <= span(l)[0] || span(l)[1] + 8 <= span(o)[0]);
+  for (const t of texts) {
+    const end = { ...t, x: width - 4, anchor: "end" };
+    const places = [span(t)[1] <= width - 4 ? t : end, ...(t.edge ? [end] : [])];
+    // A line below all of them is always clear.
+    for (let y = top; ; y += PLAN_LINE) {
+      const place = places.map((p) => ({ ...p, y })).find(clear);
+      if (place) {
+        placed.push(place);
+        break;
+      }
+    }
+  }
+  return placed;
 }
 
 // A status icon: lasts (a check), runs out at the low growth (a warning
@@ -444,7 +473,7 @@ export function renderForecast(root, options) {
   defs.append(hatch, red);
   bars.append(defs);
 
-  const labels = []; // texts under the bar
+  const under = []; // texts under the bar, for placeLabels()
   const by = 20;
   const g = svg("g");
   let valueLeft = Infinity; // values above the bar, from the right, clear of each other
@@ -472,7 +501,7 @@ export function renderForecast(root, options) {
     if (t) part.append(text({ class: `plan-bar-text ${seg.kind}`, x: x0 + 8, y: by + PLAN_BAR / 2 + 4.5 }, t));
     g.append(part);
     if (seg.end !== null) ends.push([x1, seg.end]);
-    if (seg.cause) labels.push({ x: x0 + 4, y: by + PLAN_BAR + 14, text: seg.cause.text, class: seg.cause.income ? "plan-cause income" : "plan-cause" });
+    if (seg.cause) under.push({ x: x0 + 4, text: seg.cause.text, class: seg.cause.income ? "plan-cause income" : "plan-cause" });
   }
   for (const [x1, value] of ends.reverse()) {
     const label = formatShort(value);
@@ -489,21 +518,12 @@ export function renderForecast(root, options) {
       const own = PLAN_BAR * seg.share;
       g.append(svg("rect", { class: "plan-bar out", x: x0, y: by + PLAN_BAR - own, width: Math.max(2, x(seg.to) - x0 - 1), height: own, fill: `url(#out-${id})` }));
     }
-    // Where it runs out, under the bar: clear of the causes there, else
-    // at the right end, else a line lower.
-    const ox = x(row.out.from);
-    const line = by + PLAN_BAR + 14;
-    const span = (l) => {
-      const w = l.text.length * CHAR_WIDTH;
-      return l.anchor === "end" ? [l.x - w, l.x] : [l.x, l.x + w];
-    };
-    const clear = (l) => labels.every((o) => o.y !== l.y || span(o)[1] + 8 <= span(l)[0] || span(l)[1] + 8 <= span(o)[0]);
-    const fits = ox + row.out.text.length * CHAR_WIDTH <= width - 4;
-    const at = (y) => (fits ? { x: ox, y } : { x: width - 4, y, anchor: "end" });
-    const places = [at(line), { x: width - 4, y: line, anchor: "end" }, at(line + 14)].map((l) => ({ ...l, text: row.out.text, class: "plan-out-label" }));
-    labels.push(places.find(clear) ?? places.at(-1));
+    // Where it runs out, under the bar; else at the right end, which is
+    // red too.
+    under.push({ x: x(row.out.from), text: row.out.text, class: "plan-out-label", edge: true });
   }
   bars.append(g);
+  const labels = placeLabels(under, width, by + PLAN_BAR + PLAN_LINE);
   for (const l of labels) bars.append(text({ class: l.class, x: l.x, y: l.y, ...(l.anchor ? { "text-anchor": l.anchor } : {}) }, l.text));
   const barsH = Math.max(PLAN_ROW, ...labels.map((l) => l.y + 6));
   bars.setAttribute("viewBox", `0 0 ${width} ${barsH}`);

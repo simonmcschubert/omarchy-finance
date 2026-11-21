@@ -419,10 +419,11 @@ that doesn't happen before retirement says “Not before 67”.
 
 While retired, a step splits the bar wherever that amount changes, with its
 cause under it: an income that starts (“+ State pension”, a private
-pension, rent) or an expense that ends. The bar's height splits into what
-the portfolio pays (orange) and what other income pays (aqua), so a large
-pension shows as mostly aqua, a small one as a thin line, and none as
-orange to the end. Nothing in the forecast needs a pension.
+pension, rent) or an expense that ends. A cause that would run into the one
+before goes a line lower. The bar's height splits into what the portfolio
+pays (orange) and what other income pays (aqua), so a large pension shows
+as mostly aqua, a small one as a thin line, and none as orange to the end.
+Nothing in the forecast needs a pension.
 
 Where the money runs out, the portfolio's part of the bar turns red
 (“6 %: empty at 83”); other income goes on.

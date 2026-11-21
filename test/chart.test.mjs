@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ageTicks, fitText, forecastTop, goalVisible, niceTicks } from "../app/chart.mjs";
+import { ageTicks, fitText, forecastTop, goalVisible, niceTicks, placeLabels } from "../app/chart.mjs";
 
 test("niceTicks: even steps around the data, the top tick close above it", () => {
   assert.deepEqual(niceTicks(0, 5003500), [0, 2000000, 4000000, 6000000]);
@@ -46,4 +46,31 @@ test("fitText: the first text that fits, or none", () => {
   assert.equal(fitText(texts, 150), texts[1]);
   assert.equal(fitText(texts, 80), texts[2]);
   assert.equal(fitText(texts, 40), "");
+});
+
+test("placeLabels: texts under the bar stay clear of each other and inside it", () => {
+  // 10 pixels a character, a bar 400 wide, the first line at 62.
+  const place = (texts) => placeLabels(texts, 400, 62, 10).map((l) => [l.text, l.x, l.y, l.anchor ?? "start"]);
+  // Health insurance ends at 66, the pension starts at 67: the pension goes
+  // a line lower. A change late in life ends at the right edge, here on the
+  // second line, clear of the pension.
+  assert.deepEqual(place([
+    { x: 100, text: "Health insurance ends" },
+    { x: 112, text: "+ Pension" },
+    { x: 350, text: "Care starts" },
+  ]), [
+    ["Health insurance ends", 100, 62, "start"],
+    ["+ Pension", 112, 76, "start"],
+    ["Care starts", 396, 76, "end"],
+  ]);
+  // Where the money runs out may end at the right edge instead of going
+  // lower; a cause goes lower.
+  assert.deepEqual(place([{ x: 10, text: "Rent ends" }, { x: 20, text: "Empty at 70", edge: true }]), [
+    ["Rent ends", 10, 62, "start"],
+    ["Empty at 70", 396, 62, "end"],
+  ]);
+  assert.deepEqual(place([{ x: 10, text: "Rent ends" }, { x: 20, text: "+ Pension" }]), [
+    ["Rent ends", 10, 62, "start"],
+    ["+ Pension", 20, 76, "start"],
+  ]);
 });
