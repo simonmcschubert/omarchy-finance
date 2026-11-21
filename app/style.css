@@ -1868,19 +1868,8 @@ tbody th {
   color: var(--fg-strong);
 }
 
-tr.group th,
-tr.group td {
-  color: var(--fg-strong);
-  font-weight: 600;
-  background: var(--sunken);
-}
-
 tr.editing > * {
   background: var(--selection);
-}
-
-tr.inactive td {
-  color: var(--fg-muted);
 }
 
 td.actions {
@@ -1897,6 +1886,116 @@ th .sub {
 .notes {
   margin: 0;
   padding-left: 20px;
+}
+
+/* ---- the expense and income list: each group's name and total in a
+   column of their own, left of its items, so that a group never looks like
+   an item. One grid for the whole list, so that amounts and actions line up
+   from group to group. */
+
+.item-list {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr) auto auto;
+  column-gap: 12px;
+}
+
+.item-group {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  padding-block: 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* Later, Ended and Inactive: not counted this month. */
+.item-group.apart {
+  border-top-style: dashed;
+}
+
+/* After .apart, so that a first group has no line above it either. */
+.item-group:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.item-group:last-child {
+  padding-bottom: 0;
+}
+
+.item-group-head {
+  padding: 6px 0 6px 10px;
+  overflow-wrap: anywhere;
+}
+
+.item-group-head h3 {
+  margin: 0;
+}
+
+.item-rows {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-content: start;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item-rows > li {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  padding: 6px 10px;
+  overflow-wrap: anywhere;
+}
+
+.item-rows > li + li {
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.item-rows > li.editing {
+  background: var(--selection);
+}
+
+.item-rows > li.inactive {
+  color: var(--fg-muted);
+}
+
+.item-rows .sub {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.item-rows .actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Too narrow for the column: each group's name and total head its items,
+   and the actions go under each item. */
+@media (max-width: 720px) {
+  .item-list {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .item-group-head {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding-right: 10px;
+    border-bottom: 1px solid var(--fg-muted);
+  }
+
+  .item-rows {
+    grid-column: 1 / -1;
+  }
+
+  .item-rows .actions {
+    grid-column: 1 / -1;
+    margin-left: -4px;
+    text-align: left;
+  }
 }
 
 table.entry input {
