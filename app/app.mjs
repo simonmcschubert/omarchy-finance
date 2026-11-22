@@ -1708,13 +1708,13 @@ function viewItems(kind) {
         let error = name === "" ? "Enter a name." : r.error ?? null;
         if (!error && birthYear === null) error = "It pays out from an age, which needs your year of birth, in Settings.";
         if (error) return showError(event.currentTarget, error);
-        const typed = depotItem(r, name, editing?.id ?? F.newId());
-        const item = { ...typed, amount: F.depotIncome(store, typed, retirement).net };
+        // Its amount is worked out for each plan, never kept.
+        const item = depotItem(r, name, editing?.id ?? F.newId());
         const saved = F.saveItem(store, kind, item);
         if (!saved.ok) return showError(event.currentTarget, `${saved.error}.`);
         reset();
         state.focus = "#item-name";
-        return commit(saved.store, `${editing ? "Saved" : "Added"} ${name}: ${money(item.amount)} a month from age ${r.startAge}, working to ${store.settings.retirementAge}.`);
+        return commit(saved.store, `${editing ? "Saved" : "Added"} ${name}: ${money(F.depotIncome(store, item, retirement).net)} a month from age ${r.startAge}, working to ${store.settings.retirementAge}.`);
       }
       if (pension) {
         const r = readPension(data);

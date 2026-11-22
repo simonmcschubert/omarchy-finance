@@ -3083,11 +3083,6 @@ test("depotAllowance: 50 % of the first 360 €, 25 % up to 1.800 €, 100 % up 
   ];
   for (const [paid, children, total] of cases) assert.equal(F.depotAllowance(Math.round(paid * EUR), children).total, total * EUR, `${paid} € with ${children} children`);
   assert.deepEqual(F.depotAllowance(1800 * EUR, 2), { basic: 540 * EUR, children: 600 * EUR, total: 1140 * EUR });
-  // The tax deduction: at 42 %, 1.800 € and its 540 € bring 442,80 € more;
-  // at 20 % the Zulage is worth more.
-  close(F.depotRefund(1800 * EUR, 540 * EUR, 42), 442.8 * EUR, "at 42 %");
-  assert.equal(F.depotRefund(1800 * EUR, 540 * EUR, 20), 0);
-  close(F.depotRefund(6840 * EUR, 540 * EUR, 42), 442.8 * EUR, "only 1.800 € count");
 });
 
 test("depotIncome: what is paid in and the Zulagen until you stop working, paid out evenly until the life expectancy", () => {
@@ -3125,6 +3120,14 @@ test("depotIncome: what is paid in and the Zulagen until you stop working, paid 
   // Without a year of birth, nothing.
   assert.equal(income(depotStore({ settings: { birthYear: null } }), at(2057)), null);
   assert.equal(item, s.income[0], "the store is left alone");
+
+  // A value entered in June 2027 holds what was paid in since January:
+  // those months still count for 2027's Zulagen, so the depot comes to the
+  // same, and stopping in June 2027 gets Zulagen on six months.
+  const june = depotStore();
+  june.records = june.records.map((record) => (record.account === "d" ? { ...record, month: "2027-06", value: 10600 * EUR } : record));
+  close(income(june, at(2057)).value, keep.value, "with a value in June");
+  close(income(june, at(2027, 7)).value, (10600 + 240) * EUR, "stopping after June 2027");
 });
 
 test("depotIncome: with growth and inflation, the payout rises with prices and spends the depot by the end", () => {
@@ -3140,6 +3143,13 @@ test("depotIncome: with growth and inflation, the payout rises with prices and s
   assert.equal(r.net, Math.round(r.gross * 0.8));
   // More growth pays more.
   assert.ok(F.depotIncome(s, s.income[0], at(2050), 7).gross > r.gross);
+  // Its value from June 2026, with the portfolio's from December: in
+  // December's money, as the forecast counts, six months of inflation on.
+  const older = depotStore({ depot: { contribution: 0 }, settings: { expectedReturn: 3, inflation: 3 } });
+  older.records = older.records.map((record) => (record.account === "d" ? { ...record, month: "2026-06" } : record));
+  const kept = F.depotIncome(older, older.income[0], at(2057));
+  assert.equal(kept.from, at(2026, 12));
+  close(kept.value, F.inflated(10000 * EUR, 3, 6), "in December's money");
   // Paying out already at 71: what it holds now, spread over the rest.
   const old = depotStore({ settings: { birthYear: 1955 } });
   const now = F.depotIncome(old, old.income[0], at(2022), 0);
@@ -3236,8 +3246,14 @@ test("an Altersvorsorgedepot is built-in income worked out from its inputs, one 
   const deleted = F.deleteAccount(s, "d");
   assert.equal(deleted.income[0].depot.account, null);
   assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(deleted))), { ok: true, store: deleted });
-  // A flat can't end it.
+  // A flat can't end it, nor income the flat ends that becomes one.
   assert.match(F.saveFlat(s, { ...FLAT, stops: [], incomeStops: ["avd"] }).error, /can't name the Altersvorsorgedepot/);
+  const room = { id: "room", name: "Room", category: "", amount: 300 * EUR, everyMonths: 1, from: null, until: null };
+  const flat = F.saveFlat(F.saveItem({ ...s, income: [] }, "income", room).store, { ...FLAT, stops: [], incomeStops: ["room"] }).store;
+  const moved = F.saveItem(flat, "income", { ...item, id: "room" });
+  assert.equal(moved.ok, true, moved.error);
+  assert.deepEqual(moved.store.flat.incomeStops, []);
+  assert.equal(F.parseStore(JSON.parse(JSON.stringify(moved.store))).ok, true);
 });
 
 test("a version 19 file is upgraded: the money lasts to 120 as before, and the Altersvorsorgedepot category", () => {

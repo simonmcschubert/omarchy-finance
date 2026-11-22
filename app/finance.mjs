@@ -1294,8 +1294,7 @@ export const DEPOT_RULES = Object.freeze({
   // Below this own contribution in a year, no Zulage at all (§ 86 EStG).
   minimum: 12000,
   // The Grundzulage: 50 % of the own contributions of a year up to
-  // `firstTier`, and 25 % of those above it up to `subsidised` (§ 84 EStG),
-  // which is also the most the tax deduction counts (§ 10a EStG).
+  // `firstTier`, and 25 % of those above it up to `subsidised` (§ 84 EStG).
   firstTier: 36000,
   subsidised: 180000,
   firstRate: 0.5,
@@ -1324,26 +1323,21 @@ export function depotAllowance(paid, children = 0) {
   return { basic, children: forChildren, total: basic + forChildren };
 }
 
-// What the tax deduction brings back on top of the Zulagen `allowance`,
-// at a marginal income tax rate of `rate` percent (the Günstigerprüfung,
-// § 10a EStG): the tax on the own contributions, up to the subsidised
-// part, plus the Zulagen, less the Zulagen; 0 when they are worth more.
-// It comes with the tax assessment, not into the depot.
-export function depotRefund(paid, allowance, rate) {
-  return Math.max(0, (rate / 100) * (Math.min(paid, DEPOT_RULES.subsidised) + allowance) - allowance);
-}
-
 const isDepot = (item) => item.category === DEPOT && isObject(item.depot);
 
 // The month an Altersvorsorgedepot is worked out from and what it holds
 // then: its account's latest value, or 0 without an account or a value,
 // in the latest month any account has a value (this month without one).
+// today: the month whose money the projections are in, that of the
+// portfolio's latest value (the forecast's start), else that month too.
 function depotBase(store, depot) {
   const latest = (records) => records.reduce((a, r) => (a === null || r.month > a.month ? r : a), null);
+  const invested = new Set(store.accounts.filter((a) => a.kind === "invested").map((a) => a.id));
+  const portfolio = latest(store.records.filter((r) => invested.has(r.account)));
   const own = latest(depot.account === null ? [] : store.records.filter((r) => r.account === depot.account));
-  if (own) return { index: monthIndex(own.month), value: own.value };
   const any = latest(store.records);
-  return { index: monthIndex(any ? any.month : currentMonth()), value: 0 };
+  const index = monthIndex(own ? own.month : any ? any.month : currentMonth());
+  return { index, value: own ? own.value : 0, today: portfolio ? monthIndex(portfolio.month) : index };
 }
 
 // Worked out once per store, item, last month paid in and growth: an item
@@ -1355,12 +1349,14 @@ const depotCaches = new WeakMap();
 // before its costs. From the month it is worked out from (depotBase) it
 // gets what you pay in every month from DEPOT_RULES.start while you work,
 // until it pays out, and each year's Zulagen in the January after (when it
-// starts paying out at the latest). From January of its payout age it pays
+// starts paying out at the latest): of its year's months paid in, those
+// before that month too, which its value already holds. From January of its payout age it pays
 // the same amount in today's money every month until the end of the life
 // expectancy (85 at the least, as the law has it): what it holds then,
 // spent to nothing by then while the rest keeps growing, less the income
-// tax on it. Today's money is that of the month it is worked out from.
-// Returns { from: that month, start: the first month it pays (indexes),
+// tax on it. Today's money is that of the portfolio's latest value, as in
+// the forecast (depotBase).
+// Returns { from: today's month, start: the first month it pays (indexes),
 // months: how many it pays, value: what it holds when it starts paying,
 // allowance: the Zulagen of a year you pay in (with the children of the
 // first such year), gross and net: what it pays a month before and after
@@ -1376,9 +1372,12 @@ export function depotIncome(store, item, retirement, growth = store.settings.exp
   const d = item.depot;
   const r = DEPOT_RULES;
   const start = Math.max((birthYear + item.from.age) * 12, base.index + 1);
-  const firstPaid = Math.max(base.index + 1, monthIndex(r.start));
+  const opens = monthIndex(r.start);
+  const firstPaid = Math.max(base.index + 1, opens);
   const lastPaid = Math.min(retirement, start) - 1;
-  const key = `${Math.max(lastPaid, firstPaid - 1)} ${growth}`;
+  // The first month whose Zulagen are still to come: its year's January.
+  const firstCounted = Math.max(Math.floor(base.index / 12) * 12, opens);
+  const key = `${Math.max(lastPaid, firstCounted - 1)} ${growth}`;
   if (results.has(key)) return results.get(key);
   const end = Math.max((birthYear + lifeExpectancy + 1) * 12, (birthYear + r.payoutUntil) * 12);
   const factor = 1 + monthlyRate(growth - d.costs);
@@ -1391,19 +1390,19 @@ export function depotIncome(store, item, retirement, growth = store.settings.exp
     // What is paid in at the end of each month, from firstPaid to lastPaid.
     const n = lastPaid - firstPaid + 1;
     value += grown(d.contribution, lastPaid) * (factor === 1 ? n : (factor ** n - 1) / (factor - 1));
-    // Each year's Zulagen, at the start of the January after.
-    for (let year = Math.floor(firstPaid / 12); year <= Math.floor(lastPaid / 12); year++) {
-      const months = Math.min(lastPaid, year * 12 + 11) - Math.max(firstPaid, year * 12) + 1;
-      value += grown(allowanceOf(year, months), (year + 1) * 12 - 1);
-    }
+  }
+  // Each year's Zulagen, at the start of the January after.
+  for (let year = Math.floor(firstCounted / 12); year <= Math.floor(lastPaid / 12); year++) {
+    const months = Math.min(lastPaid, year * 12 + 11) - Math.max(firstCounted, year * 12) + 1;
+    if (months > 0) value += grown(allowanceOf(year, months), (year + 1) * 12 - 1);
   }
   const months = Math.max(0, end - start);
-  const today = deflated(value, inflation, start - 1 - base.index);
+  const today = deflated(value, inflation, start - 1 - base.today);
   // The growth after inflation, a month.
   const real = factor / (1 + monthlyRate(inflation)) - 1;
   const gross = months === 0 ? 0 : Math.abs(real) < 1e-12 ? today / months : (today * real) / (1 - (1 + real) ** -months);
   const result = {
-    from: base.index,
+    from: base.today,
     start,
     months,
     value: today,
@@ -2508,6 +2507,9 @@ export function saveItem(store, kind, item) {
   const at = next[kind].findIndex((existing) => existing.id === item.id);
   if (at === -1) next[kind].push({ ...item });
   else next[kind][at] = { ...item };
+  // A flat can't end an Altersvorsorgedepot: income that becomes one isn't
+  // ended any more.
+  if (kind === "income" && item.category === DEPOT && next.flat) next.flat.incomeStops = next.flat.incomeStops.filter((stop) => stop !== item.id);
   return { ok: true, store: next };
 }
 
