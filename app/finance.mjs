@@ -4,7 +4,7 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 18;
+export const VERSION = 19;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
@@ -49,10 +49,16 @@ export const EMERGENCY_MONTHS = Object.freeze({ min: 0, max: 60 });
 // What the age an expense or income starts or ends at may be.
 export const AGES = Object.freeze({ min: 0, max: 120 });
 
-// What a new data file starts with; categories can be changed in Settings.
+// The income category of the state pension: built in, in every file, and
+// it can't be renamed or deleted. Its income is worked out from Rentenpunkte
+// (the item's pension inputs, statePension()).
+export const STATE_PENSION = "State pension";
+
+// What a new data file starts with; categories can be changed in Settings,
+// all but State pension.
 export const STARTER_CATEGORIES = Object.freeze({
   expenses: Object.freeze(["Food", "Health", "Housing", "Insurance", "Leisure", "Subscriptions", "Transport"]),
-  income: Object.freeze(["Side income", "Work"]),
+  income: Object.freeze(["Side income", STATE_PENSION, "Work"]),
 });
 
 export function emptyStore() {
@@ -76,6 +82,13 @@ const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "
 const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge", "emergencyMonths", "futurePayIn", "payInsRiseWithInflation", "coastPayIn"];
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths", "from", "until"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active", "essential"];
+const INCOME_KEYS = [...ITEM_KEYS, "pension"];
+// What a state pension is worked out from, saved so that it can be changed
+// later (statePension()): the Rentenpunkte so far and those still to come
+// while working, the value of a point in cents, the regular age, and what is
+// paid for health and care insurance, in percent. It starts at the item's
+// from.age.
+const PENSION_KEYS = ["points", "morePoints", "pointValue", "regularAge", "deductions"];
 const ACCOUNT_KEYS = ["id", "name", "kind"];
 const RECORD_KEYS = ["month", "account", "value", "payIn", "oneOff"];
 const EVENT_KEYS = ["id", "name", "month", "amount"];
@@ -289,6 +302,27 @@ function upgradeFromVersion17(value) {
   return { ...value, version: 18, flat: { ...value.flat, incomeStops: [] } };
 }
 
+// Version 18 had no built-in State pension category, and the state pension
+// helper kept none of its inputs: no income has any. The category joins the
+// list, a category of the same name in other case becoming it, and the
+// helper's income, named "State pension", moves into it.
+function upgradeFromVersion18(value) {
+  const next = { ...value, version: 19 };
+  const same = (name) => isText(name) && name.toLowerCase() === STATE_PENSION.toLowerCase();
+  if (isObject(value.categories) && Array.isArray(value.categories.income)) {
+    next.categories = { ...value.categories, income: [...value.categories.income.filter((name) => !same(name)), STATE_PENSION].sort(compareNames) };
+  }
+  if (Array.isArray(value.income)) {
+    next.income = value.income.map((item) => {
+      if (!isObject(item)) return item;
+      if ("pension" in item) throw new Error('income has unknown field "pension"');
+      const moves = item.name === STATE_PENSION || same(item.category);
+      return { ...item, category: moves ? STATE_PENSION : item.category, pension: null };
+    });
+  }
+  return next;
+}
+
 // Version 10 had broker accounts only: every account is invested.
 function upgradeFromVersion10(value) {
   const next = { ...value, version: 11 };
@@ -338,6 +372,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 15) value = upgradeFromVersion15(value);
     if (isObject(value) && value.version === 16) value = upgradeFromVersion16(value);
     if (isObject(value) && value.version === 17) value = upgradeFromVersion17(value);
+    if (isObject(value) && value.version === 18) value = upgradeFromVersion18(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -389,13 +424,14 @@ export function parseStore(value) {
         seen.add(name.toLowerCase());
       });
     }
+    if (!value.categories.income.includes(STATE_PENSION)) throw new Error(`categories.income is missing "${STATE_PENSION}"`);
 
     const ids = new Set();
     for (const kind of KINDS) {
       if (!Array.isArray(value[kind])) throw new Error(`${kind} is not a list`);
       value[kind].forEach((item, i) => {
         const where = `${kind}[${i}]`;
-        checkKeys(item, kind === "expenses" ? EXPENSE_KEYS : ITEM_KEYS, where);
+        checkKeys(item, kind === "expenses" ? EXPENSE_KEYS : INCOME_KEYS, where);
         if (!isText(item.id) || item.id === "" || ids.has(item.id)) throw new Error(`${where} has a missing or repeated id`);
         ids.add(item.id);
         if (!isText(item.name) || item.name === "") throw new Error(`${where} has no name`);
@@ -410,6 +446,11 @@ export function parseStore(value) {
         if (!isBound(item.until)) throw new Error(`${where} until must be null, a month, an age or retirement`);
         if (kind === "expenses" && typeof item.active !== "boolean") throw new Error(`${where} active must be true or false`);
         if (kind === "expenses" && typeof item.essential !== "boolean") throw new Error(`${where} essential must be true or false`);
+        if (kind === "income") {
+          if (isObject(item.pension)) checkKeys(item.pension, PENSION_KEYS, `${where}.pension`);
+          const error = pensionError(item);
+          if (error) throw new Error(`${where}: ${error}`);
+        }
       });
     }
 
@@ -2242,7 +2283,9 @@ function sortRecords(store, records) {
 // Adds an expense or income item, or changes the one with its id. Checks the
 // item as parseStore does, and that it does not start and end at retirement.
 // Returns { ok: true, store } or { ok: false, error }.
+// Income without pension inputs gets none.
 export function saveItem(store, kind, item) {
+  if (kind === "income") item = { ...item, pension: item.pension ?? null };
   const error = itemError(store, kind, item);
   if (error) return { ok: false, error };
   const next = structuredClone(store);
@@ -2261,6 +2304,35 @@ function itemError(store, kind, item) {
   if (!isBound(item.until)) return "Choose when it ends";
   if (item.from?.at === "retirement" && item.until?.at === "retirement") return "It cannot start and end at retirement";
   if (kind === "expenses" && (typeof item.active !== "boolean" || typeof item.essential !== "boolean")) return "Active and essential must be true or false";
+  if (kind === "income") {
+    const error = pensionError(item);
+    if (error) return error;
+    // One state pension: income moves into the category only when none is.
+    const before = store.income.find((other) => other.id === item.id);
+    if (item.category === STATE_PENSION && before?.category !== STATE_PENSION && store.income.some((other) => other.category === STATE_PENSION)) {
+      return "There is a state pension already: edit that one";
+    }
+  }
+  return null;
+}
+
+const isPoints = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value < 1000;
+
+// What is wrong with an income's pension inputs (PENSION_KEYS), or null.
+// Only a state pension has them, paid every month from an age on, for good.
+// One without them (from before version 19) has the amount as entered.
+function pensionError(item) {
+  const p = item.pension;
+  if (p === null) return null;
+  if (!isObject(p) || !PENSION_KEYS.every((key) => key in p) || Object.keys(p).length !== PENSION_KEYS.length) return "Pension inputs must be null or the Rentenpunkte and the rest";
+  if (item.category !== STATE_PENSION) return `Only income in ${STATE_PENSION} is worked out from Rentenpunkte`;
+  if (!isPoints(p.points) || !isPoints(p.morePoints)) return "Rentenpunkte must be a number from 0";
+  if (p.points + p.morePoints <= 0) return "Rentenpunkte must come to more than 0";
+  if (!isCents(p.pointValue, { min: 1 })) return "The value of a point must be more than 0";
+  if (!isWholeIn(p.regularAge, RETIREMENT_AGES)) return `The regular age must be whole years from ${RETIREMENT_AGES.min} to ${RETIREMENT_AGES.max}`;
+  if (typeof p.deductions !== "number" || !(p.deductions >= 0 && p.deductions < 100)) return "Health and care insurance must be a percentage below 100";
+  if (item.everyMonths !== 1 || item.until !== null || !isObject(item.from) || !("age" in item.from)) return "A state pension is paid every month from an age on, for good";
+  if (item.from.age < p.regularAge - 4) return `A state pension starts at ${p.regularAge - 4} at the earliest`;
   return null;
 }
 
@@ -2395,6 +2467,7 @@ export function saveSettings(store, settings) {
 // Returns { ok: true, store } or { ok: false, error }.
 export function saveCategory(store, kind, oldName, name) {
   const clean = String(name ?? "").trim();
+  if (isBuiltIn(kind, oldName)) return { ok: false, error: `${oldName} is built in: it can't be renamed` };
   if (clean === "") return { ok: false, error: "Enter a name" };
   const list = store.categories[kind];
   if (oldName !== null && !list.includes(oldName)) return { ok: false, error: `"${oldName}" no longer exists` };
@@ -2411,8 +2484,16 @@ export function saveCategory(store, kind, oldName, name) {
   return { ok: true, store: next };
 }
 
-// Removes a category; what had it is left without one.
+// Whether a category is built in, such as State pension: it can't be
+// renamed or deleted.
+export function isBuiltIn(kind, name) {
+  return kind === "income" && name === STATE_PENSION;
+}
+
+// Removes a category; what had it is left without one. A built-in one
+// stays.
 export function deleteCategory(store, kind, name) {
+  if (isBuiltIn(kind, name)) return store;
   const next = structuredClone(store);
   next.categories[kind] = next.categories[kind].filter((c) => c !== name);
   for (const item of next[kind]) if (item.category === name) item.category = "";

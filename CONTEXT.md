@@ -13,6 +13,14 @@ _Avoid_: cost, bill, salary for income in general.
 retirement, at an age or in a month. An end is never, at retirement, at an
 age or after a month. Ages and retirement mean January of their year.
 
+**State pension** (`STATE_PENSION`): the built-in income category, which
+can't be renamed or deleted, and its income. The amount is worked out from
+Rentenpunkte (`statePension()`), paid every month from the age it starts,
+for good; the inputs it comes from (`pension`) are kept on the item. One
+from before version 19 has none, only its amount. One per file. _Avoid_:
+calling other pensions, such as a company pension, by it: they are
+ordinary income.
+
 **Essential**: an expense needed even on the leanest budget. The essential
 expenses make up Lean FI.
 

@@ -142,7 +142,8 @@ Finance window's browser profile. The data file stays.
   - Categories, one list for expenses and one for income. A new data file
     starts with a few common ones. Renaming a category renames it on every
     expense or income that has it; deleting one leaves them without a
-    category.
+    category. State pension, an income category, is built in: it can't be
+    renamed or deleted (see [Expenses and income](#expenses-and-income)).
   - Accounts, each with what it holds; see
     [Portfolio, net worth and returns](#portfolio-net-worth-and-returns).
     Deleting one deletes its monthly values too.
@@ -223,30 +224,35 @@ amounts: when the rent goes up, edit it and the numbers change.
   Inactive, but counts nowhere (not in the totals, the FI number or the
   charts) until **Activate** counts it again.
 
-![Expenses: essential ones marked, health insurance from retirement until 67 under Later, two inactive](docs/expenses.png)
+Two things, for Germany, add what changes when you stop working:
 
-Two helpers, for Germany, at the bottom of the pages, add what changes when
-you stop working:
-
-- **State pension** (under Income): your Rentenpunkte so far, from the
-  Renteninformation, plus those of the years you still plan to work,
-  times the value of a point (42,52 € from July 2026), 0,3 % less a month
-  before the regular age (67 for everyone born in 1964 or later, a field of
-  its own; at most 4 years) or 0,5 % more a month after it, less what pensioners pay for
-  health and care insurance (12,95 % by default). Added as the income
-  "State pension" from the age it starts, or updates it. The
-  Renteninformation's own pension at 67 assumes you pay in until then;
-  early retirees get less.
-- **Health and care insurance after you stop working** (under Expenses):
-  as a voluntary member of a statutory insurer, at least the minimum base
-  (1.318,33 € a month in 2026) × 14 % + the Zusatzbeitrag (2,9 % on
-  average) + care insurance (4,2 % without children, 3,6 % with): about
-  280 € a month. Added as the essential expense "Health and care
+- **State pension**, an income category of its own: picked in the Income
+  form, its fields take the place of the amount, how often, and when it
+  starts and ends. Your Rentenpunkte so far, from the Renteninformation,
+  plus those of the years you still plan to work, times the value of a
+  point (42,52 € from July 2026), 0,3 % less a month before the regular
+  age (67 for everyone born in 1964 or later, a field of its own; at most
+  4 years) or 0,5 % more a month after it, less what pensioners pay for
+  health and care insurance (12,95 % by default). The amount is worked out
+  as you type, and paid every month from the age it starts, for good. The
+  inputs are kept: its row in the list says how the amount comes about,
+  and Edit opens the same fields, filled in. The category is built in,
+  and there is one state pension. The Renteninformation's own pension at
+  67 assumes you pay in until then; early retirees get less. A state
+  pension added before kept only its amount: it moves into the category,
+  and Edit asks for its Rentenpunkte once.
+- **Health and care insurance after you stop working**, at the bottom of
+  Expenses: as a voluntary member of a statutory insurer, at least the
+  minimum base (1.318,33 € a month in 2026) × 14 % + the Zusatzbeitrag
+  (2,9 % on average) + care insurance (4,2 % without children, 3,6 % with):
+  about 280 € a month. Added as the essential expense "Health and care
   insurance" from retirement until the age the pension starts.
 
 Both numbers can be changed; income tax is left out.
 
-![Income: a salary until retirement, and the state pension helper](docs/income.png)
+![Expenses: essential ones marked, health insurance from retirement until 67 under Later, two inactive, and the health insurance helper](docs/expenses.png)
+
+![Income: a salary until retirement, and the state pension being edited, with how it is worked out](docs/income.png)
 
 ### Portfolio, net worth and returns
 
