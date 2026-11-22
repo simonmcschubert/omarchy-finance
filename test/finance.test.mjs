@@ -74,9 +74,10 @@ function withoutLater({ events, payInChanges, flat, ...s }) {
   const plain = ({ from, until, ...item }) => item;
   return {
     ...s,
+    categories: { ...s.categories, income: s.categories.income.filter((name) => name !== F.STATE_PENSION) },
     settings: (({ emergencyMonths, futurePayIn, payInsRiseWithInflation, coastPayIn, ...rest }) => rest)(s.settings),
     expenses: s.expenses.map(({ essential, ...item }) => plain(item)),
-    income: s.income.map(plain),
+    income: s.income.map(({ pension, ...item }) => plain(item)),
     records: s.records.map(({ oneOff, ...record }) => record),
     accounts: s.accounts.map(({ kind, ...account }) => account),
   };
@@ -705,7 +706,7 @@ test("a version 1 file is upgraded: euros, and the categories its items use", ()
   const s = result.store;
   assert.equal(s.version, F.VERSION);
   assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
-  assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: ["Work"] });
+  assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: [F.STATE_PENSION, "Work"] });
   assert.deepEqual(s.expenses.map((e) => e.category), ["Housing", "Housing", "", "Car"]);
   assert.deepEqual(s.expenses.map((e) => e.active), [true, true, true, true], "every expense was active");
   assert.equal("active" in s.income[0], false);
@@ -736,7 +737,7 @@ test("a version 2 file is upgraded: every expense is active", () => {
   assert.equal(s.version, F.VERSION);
   assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
   assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true, essential: false, from: null, until: null })));
-  assert.deepEqual(s.income, v2.income.map((i) => ({ ...i, from: null, until: { at: "retirement" } })));
+  assert.deepEqual(s.income, v2.income.map((i) => ({ ...i, from: null, until: { at: "retirement" }, pension: null })));
   assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events", "payInChanges", "flat"]);
   assert.equal("active" in v2.expenses[0], false, "the parsed value is left alone");
   assert.equal(F.metrics(s).baseExpenses, 100 + 30 / 12);
@@ -1018,7 +1019,8 @@ test("a version 8 file is upgraded: expenses always count, income until retireme
     version: F.VERSION,
     settings: { ...v8.settings, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 },
     expenses: [{ ...v8.expenses[0], from: null, until: null }],
-    income: [{ ...v8.income[0], from: null, until: { at: "retirement" } }],
+    categories: { expenses: [], income: [F.STATE_PENSION] },
+    income: [{ ...v8.income[0], from: null, until: { at: "retirement" }, pension: null }],
     accounts: [],
     events: [],
     payInChanges: [],
@@ -1730,7 +1732,7 @@ test("a new store starts with a few categories", () => {
 });
 
 test("categories: add, rename with their items, delete", () => {
-  let s = { ...F.emptyStore(), categories: { expenses: ["Housing"], income: ["Work"] } };
+  let s = { ...F.emptyStore(), categories: { expenses: ["Housing"], income: [F.STATE_PENSION, "Work"] } };
   s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, from: null, until: null, active: true, essential: true }).store;
   s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1, from: null, until: { at: "retirement" } }).store;
 
@@ -1755,6 +1757,115 @@ test("categories: add, rename with their items, delete", () => {
   assert.deepEqual(deleted.categories.expenses, []);
   assert.equal(deleted.expenses[0].category, "");
   for (const store of [added.store, renamed, deleted]) assert.equal(F.parseStore(JSON.parse(JSON.stringify(store))).ok, true);
+});
+
+test("State pension is a built-in income category: it can't be renamed or deleted", () => {
+  const s = F.emptyStore();
+  assert.deepEqual(s.categories.income, ["Side income", F.STATE_PENSION, "Work"]);
+  assert.deepEqual(F.saveCategory(s, "income", F.STATE_PENSION, "Rente"), { ok: false, error: "State pension is built in: it can't be renamed" });
+  assert.deepEqual(F.saveCategory(s, "income", null, "state pension"), { ok: false, error: '"State pension" already exists' });
+  assert.deepEqual(F.saveCategory(s, "income", "Work", "State Pension"), { ok: false, error: '"State pension" already exists' });
+  assert.equal(F.deleteCategory(s, "income", F.STATE_PENSION), s);
+  assert.equal(F.isBuiltIn("income", F.STATE_PENSION), true);
+  assert.equal(F.isBuiltIn("expenses", F.STATE_PENSION), false, "only for income");
+  assert.equal(F.saveCategory(s, "expenses", null, F.STATE_PENSION).ok, true, "an expense category of that name is an ordinary one");
+  assert.deepEqual(F.deleteCategory(s, "income", "Work").categories.income, ["Side income", F.STATE_PENSION]);
+  const without = { ...s, categories: { ...s.categories, income: ["Work"] } };
+  assert.match(F.parseStore(JSON.parse(JSON.stringify(without))).error, /categories.income is missing "State pension"/);
+});
+
+test("a state pension keeps the inputs it is worked out from", () => {
+  let s = F.saveSettings(F.emptyStore(), { birthYear: 1990 });
+  const inputs = { points: 14.2, morePoints: 15, pointValue: 4252, regularAge: 67, deductions: 12.95 };
+  const net = Math.round(F.statePension({ points: 29.2, pointValue: 4252, startAge: 67, regularAge: 67, deductions: 12.95 }).net);
+  assert.equal(net, 108080);
+  const pension = { id: "p", name: "Gesetzliche Rente", category: F.STATE_PENSION, amount: net, everyMonths: 1, from: { age: 67 }, until: null, pension: inputs };
+  const saved = F.saveItem(s, "income", pension);
+  assert.equal(saved.ok, true, saved.error);
+  s = saved.store;
+  assert.deepEqual(s.income, [pension]);
+  assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(s))), { ok: true, store: s });
+
+  // Other income has no inputs.
+  s = F.saveItem(s, "income", { id: "w", name: "Salary", category: "Work", amount: 300000, everyMonths: 1, from: null, until: { at: "retirement" } }).store;
+  assert.equal(s.income[1].pension, null);
+
+  for (const [item, error] of [
+    [{ ...pension, category: "Work" }, /Only income in State pension is worked out from Rentenpunkte/],
+    [{ ...pension, pension: { ...inputs, points: -1 } }, /Rentenpunkte must be a number from 0/],
+    [{ ...pension, pension: { ...inputs, points: 0, morePoints: 0 } }, /must come to more than 0/],
+    [{ ...pension, pension: { ...inputs, pointValue: 0 } }, /value of a point/],
+    [{ ...pension, pension: { ...inputs, regularAge: 67.5 } }, /regular age/],
+    [{ ...pension, pension: { ...inputs, deductions: 100 } }, /Health and care insurance/],
+    [{ ...pension, everyMonths: 12 }, /paid every month from an age on, for good/],
+    [{ ...pension, until: { age: 90 } }, /paid every month from an age on, for good/],
+    [{ ...pension, from: { at: "retirement" } }, /paid every month from an age on, for good/],
+    [{ ...pension, from: { age: 62 } }, /starts at 63 at the earliest/],
+  ]) {
+    assert.match(F.saveItem(s, "income", item).error, error);
+    const file = JSON.parse(JSON.stringify(s));
+    file.income[0] = item;
+    assert.match(F.parseStore(file).error, error);
+  }
+  assert.match(F.saveItem(s, "income", { ...pension, pension: { ...inputs, extra: 1 } }).error, /Pension inputs must be null/);
+  const file = JSON.parse(JSON.stringify(s));
+  file.income[0].pension.extra = 1;
+  assert.match(F.parseStore(file).error, /income\[0\].pension has unknown field "extra"/);
+
+  const two = JSON.parse(JSON.stringify(s));
+  two.income[1] = { ...two.income[1], category: F.STATE_PENSION };
+  assert.match(F.parseStore(two).error, /more than one state pension/);
+
+  // One state pension: a second is refused, the one there can change and
+  // can leave the category.
+  assert.deepEqual(F.saveItem(s, "income", { ...pension, id: "p2" }), { ok: false, error: "There is a state pension already: edit that one" });
+  assert.match(F.saveItem(s, "income", { ...s.income[1], category: F.STATE_PENSION }).error, /state pension already/);
+  assert.equal(F.saveItem(s, "income", { ...pension, from: { age: 63 } }).ok, true);
+  const plain = F.saveItem(s, "income", { ...pension, category: "", pension: null });
+  assert.equal(plain.ok, true, plain.error);
+  assert.equal(F.saveItem(plain.store, "income", { ...pension, id: "p2" }).ok, true, "with none left, a new one can be added");
+});
+
+test("a version 18 file is upgraded: the State pension category, and the helper's income in it", () => {
+  const v18 = {
+    ...F.emptyStore(),
+    version: 18,
+    categories: { expenses: [], income: ["Side income", "Work"] },
+    income: [
+      { id: "w", name: "Salary", category: "Work", amount: 300000, everyMonths: 1, from: null, until: { at: "retirement" } },
+      { id: "p", name: "State pension", category: "", amount: 108080, everyMonths: 1, from: { age: 67 }, until: null },
+      { id: "r", name: "Rent", category: "Side income", amount: 50000, everyMonths: 1, from: null, until: null },
+    ],
+  };
+  const result = F.parseStore(v18);
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.store, {
+    ...v18,
+    version: F.VERSION,
+    categories: { expenses: [], income: ["Side income", F.STATE_PENSION, "Work"] },
+    income: [{ ...v18.income[0], pension: null }, { ...v18.income[1], category: F.STATE_PENSION, pension: null }, { ...v18.income[2], pension: null }],
+  });
+  assert.equal(v18.income[1].category, "", "the parsed value is left alone");
+
+  // The helper's income moves from a category of its own too, and a
+  // category of the same name in other case becomes the built-in one, with
+  // one income in it: the helper's, or else the first.
+  const own = F.parseStore({
+    ...v18,
+    categories: { expenses: [], income: ["Pensions", "state pension"] },
+    income: [{ ...v18.income[2], name: "Rürup", category: "state pension" }, { ...v18.income[1], category: "Pensions" }],
+  });
+  assert.equal(own.ok, true, own.error);
+  assert.deepEqual(own.store.categories.income, ["Pensions", F.STATE_PENSION]);
+  assert.deepEqual(own.store.income.map((item) => item.category), ["", F.STATE_PENSION]);
+  const first = F.parseStore({
+    ...v18,
+    categories: { expenses: [], income: ["State pension"] },
+    income: [{ ...v18.income[0], category: "State pension" }, { ...v18.income[2], category: "State pension" }],
+  });
+  assert.deepEqual(first.store.income.map((item) => item.category), [F.STATE_PENSION, ""]);
+
+  assert.match(F.parseStore({ ...v18, income: [{ ...v18.income[0], pension: null }] }).error, /income has unknown field "pension"/);
 });
 
 test("exportCsv writes what planImport reads", () => {
@@ -2548,8 +2659,8 @@ function renting() {
   const expense = (id, name, amount, more = {}) => ({ id, name, category: "", amount: amount * EUR, everyMonths: 1, from: null, until: null, active: true, essential: true, ...more });
   s.expenses = [expense("rent", "Rent, cold", 900), expense("nk", "Nebenkosten", 250), expense("live", "Everything else", 1190),
     expense("hi", "Health insurance", 280, { from: { at: "retirement" }, until: { age: 66 } })];
-  s.income = [{ id: "sal", name: "Salary", category: "", amount: 4200 * EUR, everyMonths: 1, from: null, until: { at: "retirement" } },
-    { id: "pen", name: "State pension", category: "", amount: 1500 * EUR, everyMonths: 1, from: { age: 67 }, until: null }];
+  s.income = [{ id: "sal", name: "Salary", category: "", amount: 4200 * EUR, everyMonths: 1, from: null, until: { at: "retirement" }, pension: null },
+    { id: "pen", name: "State pension", category: F.STATE_PENSION, amount: 1500 * EUR, everyMonths: 1, from: { age: 67 }, until: null, pension: null }];
   return s;
 }
 
@@ -2598,11 +2709,12 @@ test("a version 16 file is upgraded: no flat to buy", () => {
 
 test("a version 17 file is upgraded: its flat ends no income", () => {
   const s = renting();
-  const v17 = { ...s, version: 17, flat: (({ incomeStops, ...rest }) => rest)(FLAT) };
+  const income = s.income.map(({ pension, ...item }) => item);
+  const v17 = { ...s, version: 17, income, flat: (({ incomeStops, ...rest }) => rest)(FLAT) };
   const result = F.parseStore(v17);
   assert.equal(result.ok, true, result.error);
   assert.deepEqual(result.store, { ...s, version: F.VERSION, flat: FLAT });
-  assert.deepEqual(F.parseStore({ ...s, version: 17, flat: null }).store, { ...s, version: F.VERSION, flat: null });
+  assert.deepEqual(F.parseStore({ ...s, version: 17, income, flat: null }).store, { ...s, version: F.VERSION, flat: null });
   assert.match(F.parseStore({ ...v17, flat: FLAT }).error, /unknown field "flat.incomeStops"/);
 });
 

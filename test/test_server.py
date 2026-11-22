@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
 
 STORE = {
-    "version": 18,
+    "version": 19,
     "settings": {
         "withdrawalRate": 4,
         "bufferPercent": 10,
@@ -31,7 +31,7 @@ STORE = {
         "payInsRiseWithInflation": False,
         "coastPayIn": 0,
     },
-    "categories": {"expenses": [], "income": []},
+    "categories": {"expenses": [], "income": ["State pension"]},
     "expenses": [],
     "income": [],
     "accounts": [],

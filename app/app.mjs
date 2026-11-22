@@ -26,6 +26,7 @@ let percent;
 let percentUnit;
 let plain;
 let plainRate;
+let plainPoints;
 let tenths;
 let zero;
 let whole;
@@ -40,6 +41,8 @@ function useFormats({ currency: code, numberFormat }) {
   percentUnit = new Intl.NumberFormat(numbers, { style: "unit", unit: "percent", maximumFractionDigits: RATE_DECIMALS });
   plain = new Intl.NumberFormat(numbers, { maximumFractionDigits: 2, useGrouping: false });
   plainRate = new Intl.NumberFormat(numbers, { maximumFractionDigits: RATE_DECIMALS, useGrouping: false });
+  // Rentenpunkte, with as many decimals as the Renteninformation gives.
+  plainPoints = new Intl.NumberFormat(numbers, { maximumFractionDigits: 4, useGrouping: false });
   tenths = new Intl.NumberFormat(numbers, { maximumFractionDigits: 1, useGrouping: false });
   zero = new Intl.NumberFormat(numbers, { minimumFractionDigits: 2 }).format(0);
   whole = new Intl.NumberFormat(numbers, { style: "currency", currency: code, maximumFractionDigits: 0 });
@@ -514,6 +517,11 @@ const state = {
   notice: null, // { kind: "error" | "info", text, retry }; retry: goes once the server answers
   view: "dashboard",
   editing: { expenses: null, income: null }, // item id being edited
+  // The Income form once a category is picked that changes its fields
+  // (State pension, or another after it), until the income is saved or the
+  // edit cancelled: { category, name, values }, values being what was typed
+  // in the fields of either kind, by name.
+  incomeDraft: null,
   editingEvent: null, // planned one-off being edited
   editingPayIn: null, // "now" or the id of a planned pay-in change being edited
   renaming: null, // { list: "accounts" | "expenses" | "income", key: account id or category name }
@@ -732,6 +740,7 @@ function showLocked() {
   state.importText = "";
   state.importPlan = null;
   state.editing = { expenses: null, income: null };
+  state.incomeDraft = null;
   state.editingEvent = null;
   state.editingPayIn = null;
   state.renaming = null;
@@ -1402,8 +1411,7 @@ function readBound(data, name, label) {
   return { bound: null };
 }
 
-// What the helpers below name the items they add, and find them by.
-const PENSION_NAME = "State pension";
+// What the health helper below names the expense it adds, and finds it by.
 const HEALTH_NAME = "Health and care insurance";
 
 // A decimal number such as "25,5" or "2.9"; null when it is none.
@@ -1412,79 +1420,68 @@ function readNumber(text, decimals = 4) {
   return result.ok ? result.value : null;
 }
 
-// Germany: Rentenpunkte to a state pension a month, added as income from
-// the age it starts.
-function pensionCard() {
-  const store = state.store;
+// Germany: the state pension, income in the built-in category State
+// pension. The Income form shows these fields in place of the amount, how
+// often and when: the amount is worked out from Rentenpunkte, paid every
+// month from the age it starts, for good. `item` is the income edited, or
+// null: its inputs fill the fields, the defaults of 2026 otherwise.
+function pensionFields(item) {
   const g = F.GERMANY_2026;
-  const existing = store.income.find((item) => item.name === PENSION_NAME) ?? null;
-  const result = h("p", { class: "helper-result", "aria-live": "polite" });
-  const read = (form) => {
-    const data = new FormData(form);
-    const points = readNumber(data.get("points"));
-    const more = readNumber(data.get("more"));
-    const pointValue = F.parseMoney(data.get("pointValue"));
-    const ageText = String(data.get("startAge")).trim();
-    const startAge = Number(ageText);
-    const regularText = String(data.get("regularAge")).trim();
-    const regularAge = Number(regularText);
-    const deductions = readNumber(data.get("deductions"), 2);
-    if (points === null) return { error: "Rentenpunkte so far: enter a number, such as 25,5." };
-    if (more === null) return { error: "More points: enter a number, or 0." };
-    if (!pointValue.ok || pointValue.cents <= 0) return { error: "Value of a point: enter an amount." };
-    if (!/^[0-9]+$/.test(regularText) || regularAge < F.RETIREMENT_AGES.min || regularAge > F.RETIREMENT_AGES.max) return { error: `Regular age: enter whole years from ${F.RETIREMENT_AGES.min} to ${F.RETIREMENT_AGES.max}.` };
-    if (!/^[0-9]+$/.test(ageText) || startAge < regularAge - 4 || startAge > F.AGES.max) return { error: `Starts at age: from ${regularAge - 4} on.` };
-    if (deductions === null || deductions >= 100) return { error: "Health and care insurance: enter a percentage." };
-    return { startAge, ...F.statePension({ points: points + more, pointValue: pointValue.cents, startAge, regularAge, deductions }) };
-  };
-  const show = (form) => {
-    const r = read(form);
-    if (r.error) {
-      result.textContent = String(new FormData(form).get("points")).trim() === "" ? "" : r.error;
-      return;
-    }
-    const change = r.change === 0 ? "" : ` (${signedPercent(r.change)} for starting ${r.change < 0 ? "early" : "late"})`;
-    result.textContent = `${money(r.gross)} a month before deductions${change}, ${money(r.net)} after health and care insurance, from age ${r.startAge}, in today's money.`;
-  };
-  const form = h("form", {
-    class: "helper-form",
-    oninput: (event) => show(event.currentTarget),
-    onsubmit: (event) => {
-      event.preventDefault();
-      const r = read(event.currentTarget);
-      if (r.error) return showError(event.currentTarget, r.error);
-      if (store.settings.birthYear === null) return showError(event.currentTarget, "The pension starts at an age, which needs your year of birth, in Settings.");
-      const item = { id: existing?.id ?? F.newId(), name: PENSION_NAME, category: existing?.category ?? "", amount: Math.round(r.net), everyMonths: 1, from: { age: r.startAge }, until: null };
-      const saved = F.saveItem(store, "income", item);
-      if (!saved.ok) return showError(event.currentTarget, `Can't add ${money(item.amount)} a month. ${saved.error}.`);
-      commit(saved.store, `${existing ? "Updated" : "Added"} ${PENSION_NAME}: ${money(item.amount)} a month from age ${r.startAge}.`);
-    },
-  },
-    field("Rentenpunkte so far", h("input", { name: "points", inputmode: "decimal", autocomplete: "off", placeholder: "25,5", required: true })),
-    field("More points until you stop working", h("input", { name: "more", inputmode: "decimal", autocomplete: "off", value: "0" }),
+  const p = item?.pension ?? null;
+  const regularAge = p?.regularAge ?? g.regularAge;
+  return [
+    field("Rentenpunkte so far", h("input", { name: "points", inputmode: "decimal", autocomplete: "off", placeholder: "25,5", required: true, value: p ? plainPoints.format(p.points) : "" }),
+      "From your Renteninformation: the Rentenpunkte (Entgeltpunkte) you have so far, not its pension at the regular age, which assumes you pay in until then."),
+    field("More points until you stop working", h("input", { name: "more", inputmode: "decimal", autocomplete: "off", value: plainPoints.format(p?.morePoints ?? 0) }),
       "About 1 a year at the average wage, 51.944 € in 2026."),
-    field("Value of a point", h("input", { name: "pointValue", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(g.pointValue) }),
+    field("Value of a point", h("input", { name: "pointValue", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(p?.pointValue ?? g.pointValue) }),
       "42,52 € from July 2026. In the forecast, the pension rises with inflation, as pensions about do."),
-    field("Regular age", h("input", { name: "regularAge", inputmode: "numeric", autocomplete: "off", value: String(g.regularAge) }),
+    field("Regular age", h("input", { name: "regularAge", inputmode: "numeric", autocomplete: "off", value: String(regularAge) }),
       `When the pension starts without deductions: ${g.regularAge} for everyone born in 1964 or later.`),
-    field("Starts at age", h("input", { name: "startAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.from?.age ?? g.regularAge) }),
+    field("Starts at age", h("input", { name: "startAge", inputmode: "numeric", autocomplete: "off", value: String(item?.from?.age ?? regularAge) }),
       "Each month before the regular age costs 0,3 %, at most 4 years early (63 with 35 years of contributions); each month after it adds 0,5 %."),
     field("Health and care insurance (%)",
-      h("input", { name: "deductions", inputmode: "decimal", autocomplete: "off", value: plain.format(g.pensionerRate + g.extraRate / 2 + g.careRateChildless) }),
+      h("input", { name: "deductions", inputmode: "decimal", autocomplete: "off", value: plain.format(p?.deductions ?? g.pensionerRate + g.extraRate / 2 + g.careRateChildless) }),
       "Pensioners pay half the general and the extra health rate (7,3 % + about 1,45 %) and the whole care rate (3,6 %, 4,2 % without children).",
       "Income tax is left out."),
-    h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, existing ? `Update ${PENSION_NAME}` : "Add as income")));
-  queueMicrotask(() => show(form));
-  return h("section", { class: "card" },
-    h("details", null,
-      h("summary", null, h("h2", null, "State pension (Germany)")),
-      h("p", null, "From your Renteninformation, enter the Rentenpunkte (Entgeltpunkte) you have so far, not its pension at the regular age: that assumes you pay in until then."),
-      form, result));
+  ];
 }
 
-// When the state pension starts: as entered with the pension helper, or the
-// regular age.
-const pensionAge = (store) => store.income.find((item) => item.name === PENSION_NAME)?.from?.age ?? F.GERMANY_2026.regularAge;
+// Reads pensionFields. Returns { startAge, inputs, gross, change, net }
+// (inputs as the item keeps them, amounts in cents) or { error }.
+function readPension(data) {
+  const points = readNumber(data.get("points"));
+  const more = readNumber(data.get("more"));
+  const pointValue = F.parseMoney(data.get("pointValue"));
+  const ageText = String(data.get("startAge")).trim();
+  const startAge = Number(ageText);
+  const regularText = String(data.get("regularAge")).trim();
+  const regularAge = Number(regularText);
+  const deductions = readNumber(data.get("deductions"), 2);
+  if (points === null) return { error: "Rentenpunkte so far: enter a number, such as 25,5." };
+  if (more === null) return { error: "More points: enter a number, or 0." };
+  if (points + more === 0) return { error: "Rentenpunkte: enter more than 0, so far or still to come." };
+  if (!pointValue.ok || pointValue.cents <= 0) return { error: "Value of a point: enter an amount." };
+  if (!/^[0-9]+$/.test(regularText) || regularAge < F.RETIREMENT_AGES.min || regularAge > F.RETIREMENT_AGES.max) return { error: `Regular age: enter whole years from ${F.RETIREMENT_AGES.min} to ${F.RETIREMENT_AGES.max}.` };
+  if (!/^[0-9]+$/.test(ageText) || startAge < regularAge - 4 || startAge > F.AGES.max) return { error: `Starts at age: from ${regularAge - 4} on.` };
+  if (deductions === null || deductions >= 100) return { error: "Health and care insurance: enter a percentage." };
+  const inputs = { points, morePoints: more, pointValue: pointValue.cents, regularAge, deductions };
+  return { startAge, inputs, ...F.statePension({ points: points + more, pointValue: pointValue.cents, startAge, regularAge, deductions }) };
+}
+
+// How a state pension comes about, from its inputs: "29,2 points ×
+// 42,52 € = 1.242 € · −12,95 % health and care", with the change for
+// starting early or late at `startAge` between them.
+function pensionWorking(inputs, startAge) {
+  const { points, morePoints, pointValue, regularAge, deductions } = inputs;
+  const { change } = F.statePension({ points: points + morePoints, pointValue, startAge, regularAge, deductions });
+  const early = change === 0 ? "" : ` · ${change < 0 ? "−" : "+"}${percent.format(Math.abs(change))} for starting ${change < 0 ? "early" : "late"}`;
+  return `${plainPoints.format(points + morePoints)} points × ${moneyExact(pointValue)} = ${money((points + morePoints) * pointValue)}${early} · −${percentUnit.format(deductions)} health and care`;
+}
+
+// When the state pension starts: as entered under Income, or the regular
+// age.
+const pensionAge = (store) => store.income.find((item) => item.category === F.STATE_PENSION)?.from?.age ?? F.GERMANY_2026.regularAge;
 
 // Germany: health and care insurance at the minimum, as a voluntary member,
 // from retirement until the pension starts.
@@ -1532,16 +1529,15 @@ function healthCard() {
       "Your insurer's extra rate, 2,9 % on average in 2026, on top of the general rate of 14 % (without sick pay) and care insurance."),
     field("Until age (the pension starts)",
       h("input", { name: "untilAge", inputmode: "numeric", autocomplete: "off", value: String(existing?.until?.age ?? pensionAge(store)) }),
-      "From the pension on, insured as a pensioner (KVdR, after 9/10 of the second half of your working life insured), only the pension counts; that is in the pension helper under Income."),
+      "From the pension on, insured as a pensioner (KVdR, after 9/10 of the second half of your working life insured), only the pension counts; that is the State pension under Income."),
     h("label", { class: "check" }, h("input", { type: "checkbox", name: "childless", checked: true }), "No children (care insurance 4,2 % instead of 3,6 %)"),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, existing ? `Update ${HEALTH_NAME}` : "Add as expense")));
   queueMicrotask(() => show(form));
-  return h("section", { class: "card" },
-    h("details", null,
-      h("summary", null, h("h2", null, "Health and care insurance after you stop working (Germany)")),
-      h("p", null, "While you work, health and care insurance come out of your pay. Living off the portfolio before the pension, you insure yourself as a voluntary member of a statutory insurer, ",
-        "and pay at least on the minimum base: about 280 € a month in 2026. Added as an essential expense."),
-      form, result));
+  return h("section", { class: "card spaced" },
+    h("h2", null, "Health and care insurance after you stop working (Germany)"),
+    h("p", null, "While you work, health and care insurance come out of your pay. Living off the portfolio before the pension, you insure yourself as a voluntary member of a statutory insurer, ",
+      "and pay at least on the minimum base: about 280 € a month in 2026. Added as an essential expense."),
+    form, result);
 }
 
 function viewItems(kind) {
@@ -1577,13 +1573,60 @@ function viewItems(kind) {
   }
 
   const categories = store.categories[kind];
+  // A state pension is worked out from Rentenpunkte: with State pension
+  // picked, the form shows those fields in place of the amount, how often,
+  // and when it starts and ends.
+  const draft = kind === "income" ? state.incomeDraft : null;
+  const picked = draft?.category ?? editing?.category ?? "";
+  const pension = kind === "income" && picked === F.STATE_PENSION;
+  // One state pension: adding another, or moving income into it, offers to
+  // edit the one there is.
+  const otherPension = pension && editing?.category !== F.STATE_PENSION ? items.find((item) => item.category === F.STATE_PENSION) ?? null : null;
+  const edit = (item) => {
+    state.editing[kind] = item.id;
+    if (kind === "income") state.incomeDraft = null;
+    state.focus = "#item-name";
+    render();
+  };
+  // Saved, or the edit cancelled: the form starts afresh.
+  const reset = () => {
+    state.editing[kind] = null;
+    if (kind === "income") state.incomeDraft = null;
+  };
+  const worked = pension ? h("output", { class: "worked-out", "aria-live": "polite" }, "–") : null;
+  const result = pension ? h("p", { class: "pension-result", "aria-live": "polite" }) : null;
+  const showPension = (form) => {
+    const data = new FormData(form);
+    const r = readPension(data);
+    if (r.error) {
+      worked.textContent = "–";
+      result.textContent = String(data.get("points")).trim() === "" ? "" : r.error;
+      return;
+    }
+    const year = birthYear === null ? "" : ` (${birthYear + r.startAge})`;
+    worked.textContent = `${money(r.net)} / month`;
+    result.textContent = `${pensionWorking(r.inputs, r.startAge)} = ${money(r.net)} a month from age ${r.startAge}${year}, in today's money.`;
+  };
   const form = h("form", {
-    class: "item-form",
+    class: pension ? "item-form pension-form" : "item-form",
+    oninput: pension ? (event) => showPension(event.currentTarget) : null,
     onsubmit: (event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
       const name = String(data.get("name")).trim();
       const category = String(data.get("category")).trim();
+      if (pension) {
+        const r = readPension(data);
+        let error = name === "" ? "Enter a name." : r.error ?? null;
+        if (!error && birthYear === null) error = "The pension starts at an age, which needs your year of birth, in Settings.";
+        if (error) return showError(event.currentTarget, error);
+        const item = { id: editing?.id ?? F.newId(), name, category: F.STATE_PENSION, amount: Math.round(r.net), everyMonths: 1, from: { age: r.startAge }, until: null, pension: r.inputs };
+        const saved = F.saveItem(store, kind, item);
+        if (!saved.ok) return showError(event.currentTarget, `${saved.error}.`);
+        reset();
+        state.focus = "#item-name";
+        return commit(saved.store, `${editing ? "Saved" : "Added"} ${name}: ${money(item.amount)} a month from age ${r.startAge}.`);
+      }
       const amount = F.parseMoney(data.get("amount"));
       const everyMonths = Number(data.get("everyMonths"));
       let error = null;
@@ -1608,46 +1651,86 @@ function viewItems(kind) {
       if (kind === "expenses") {
         item.active = editing?.active ?? true;
         item.essential = data.get("essential") === "on";
+      } else {
+        item.pension = null;
       }
       const saved = F.saveItem(store, kind, item);
       if (!saved.ok) return showError(event.currentTarget, `${saved.error}.`);
-      state.editing[kind] = null;
+      reset();
       state.focus = "#item-name";
       commit(saved.store, editing ? `Saved ${name}.` : `Added ${name}.`);
     },
   },
-    h("label", null, "Name", h("input", { id: "item-name", name: "name", required: true, autocomplete: "off", value: editing?.name ?? "", placeholder: kind === "expenses" ? "Rent" : "Salary" })),
+    h("label", null, "Name", h("input", { id: "item-name", name: "name", required: true, autocomplete: "off", value: draft?.name ?? editing?.name ?? "", placeholder: kind === "expenses" ? "Rent" : "Salary" })),
     h("div", { class: "field" },
       h("span", { class: "field-label" }, h("label", { for: "item-category" }, "Category"),
         h("a", { class: "label-link", href: "#settings" }, categories.length ? "Edit" : "Add categories")),
-      h("select", { id: "item-category", name: "category", value: editing?.category ?? "" },
+      h("select", { id: "item-category", name: "category", value: picked,
+        // Into or out of State pension: the form draws its other fields.
+        onchange: kind === "income" ? (event) => {
+          const category = event.target.value;
+          if ((category === F.STATE_PENSION) === pension) return;
+          // Every field, also an age or month its start or end hides now.
+          const typed = Object.fromEntries([...event.target.form.elements].filter((control) => control.name).map((control) => [control.name, control.value]));
+          const name = String(typed.name).trim();
+          state.incomeDraft = { category, name: name === "" && category === F.STATE_PENSION ? F.STATE_PENSION : name, values: { ...draft?.values, ...typed } };
+          state.focus = "#item-category";
+          render();
+        } : null },
         h("option", { value: "" }, "No category"),
         categories.map((c) => h("option", { value: c }, c)))),
-    h("label", null, kind === "income" ? "Amount (net)" : "Amount", h("input", { name: "amount", class: "amount", inputmode: "decimal", autocomplete: "off", required: true, value: editing ? inputMoney(editing.amount) : "", placeholder: zero })),
-    h("label", null, "Paid every … months",
-      h("input", { name: "everyMonths", type: "number", min: 1, max: 120, step: 1, required: true, list: "intervals", value: String(editing?.everyMonths ?? 1) })),
-    h("datalist", { id: "intervals" }, INTERVALS.map(([v, label]) => h("option", { value: String(v), label }))),
-    boundField("from", "Starts", editing ? editing.from : null,
-      [["none", "Now"], ["retirement", "At retirement"], ["age", "At age"], ["month", "In month"]],
-      kind === "expenses"
-        ? ["An expense that starts at retirement, such as health insurance, raises what the portfolio pays from then; one that ends, such as a loan, lowers it.",
-            "Ages and retirement start in January of their year."]
-        : null),
-    boundField("until", "Ends", editing ? editing.until : kind === "income" ? { at: "retirement" } : null,
-      [["none", "Never"], ["retirement", "At retirement"], ["age", "At age"], ["month", "After month"]],
-      kind === "income"
-        ? ["Income that goes on after retirement, such as a pension or rent, lowers what the portfolio pays: let it end never, or at an age.",
-            "Ages and retirement start in January of their year."]
-        : null),
-    kind === "expenses"
-      ? h("div", { class: "check-row" },
-          h("label", { class: "check" }, h("input", { type: "checkbox", name: "essential", checked: editing?.essential ?? false }), "Essential"),
-          info("Essential", "Needed even on the leanest budget, such as rent, food and insurance.", "Essential expenses make up Lean FI on the dashboard."))
-      : null,
+    pension ? [
+      h("div", { class: "field pension-amount" }, h("span", { class: "field-label" }, "Amount (net), worked out"), worked),
+      h("div", { class: "pension-fields" }, pensionFields(editing)),
+      result,
+      otherPension
+        ? h("p", { class: "pension-note" }, "There is a state pension already: ",
+            h("button", { type: "button", class: "link", onclick: () => edit(otherPension) }, `Edit ${otherPension.name}`))
+        : null,
+    ] : regularFields(),
     h("div", { class: "form-actions" },
       h("button", { type: "submit", class: "primary" }, editing ? "Save" : "Add"),
-      editing ? h("button", { type: "button", onclick: () => { state.editing[kind] = null; render(); } }, "Cancel") : null),
+      editing ? h("button", { type: "button", onclick: () => { reset(); render(); } }, "Cancel") : null),
   );
+  // What was typed in these fields before the category switched them out.
+  for (const [key, value] of Object.entries(draft?.values ?? {})) {
+    const control = form.elements[key];
+    if (key === "name" || key === "category" || !control) continue;
+    control.value = value;
+    // A start or end shows its age or month field for its choice.
+    if (control instanceof HTMLSelectElement) control.dispatchEvent(new Event("change"));
+  }
+  // Once the page is drawn: a redraw that keeps what was typed
+  // (keepingDrafts) puts it back after this.
+  if (pension) queueMicrotask(() => showPension(form));
+
+  // The amount, how often, and when it starts and ends: for every expense
+  // and income but a state pension.
+  function regularFields() {
+    return [
+      h("label", null, kind === "income" ? "Amount (net)" : "Amount", h("input", { name: "amount", class: "amount", inputmode: "decimal", autocomplete: "off", required: true, value: editing ? inputMoney(editing.amount) : "", placeholder: zero })),
+      h("label", null, "Paid every … months",
+        h("input", { name: "everyMonths", type: "number", min: 1, max: 120, step: 1, required: true, list: "intervals", value: String(editing?.everyMonths ?? 1) })),
+      h("datalist", { id: "intervals" }, INTERVALS.map(([v, label]) => h("option", { value: String(v), label }))),
+      boundField("from", "Starts", editing ? editing.from : null,
+        [["none", "Now"], ["retirement", "At retirement"], ["age", "At age"], ["month", "In month"]],
+        kind === "expenses"
+          ? ["An expense that starts at retirement, such as health insurance, raises what the portfolio pays from then; one that ends, such as a loan, lowers it.",
+              "Ages and retirement start in January of their year."]
+          : null),
+      boundField("until", "Ends", editing ? editing.until : kind === "income" ? { at: "retirement" } : null,
+        [["none", "Never"], ["retirement", "At retirement"], ["age", "At age"], ["month", "After month"]],
+        kind === "income"
+          ? ["Income that goes on after retirement, such as a pension or rent, lowers what the portfolio pays: let it end never, or at an age.",
+              "Ages and retirement start in January of their year."]
+          : null),
+      kind === "expenses"
+        ? h("div", { class: "check-row" },
+            h("label", { class: "check" }, h("input", { type: "checkbox", name: "essential", checked: editing?.essential ?? false }), "Essential"),
+            info("Essential", "Needed even on the leanest budget, such as rent, food and insurance.", "Essential expenses make up Lean FI on the dashboard."))
+        : null,
+    ];
+  }
 
   // The amount and how often it is paid are in the form: the list shows
   // what each counts a month.
@@ -1655,10 +1738,14 @@ function viewItems(kind) {
     h("div", null, item.name, item.essential ? h("span", { class: "badge", title: "Counts for Lean FI" }, "Essential") : null,
       windowText(item) ? h("div", { class: "sub" }, windowText(item)) : null,
       // Listed apart from their category, so they show it here.
-      !active.includes(item) && item.category ? h("div", { class: "sub" }, item.category) : null),
+      !active.includes(item) && item.category ? h("div", { class: "sub" }, item.category) : null,
+      // A state pension says how it comes about.
+      item.category === F.STATE_PENSION && kind === "income"
+        ? h("div", { class: "sub" }, item.pension ? pensionWorking(item.pension, item.from.age) : "Edit it to work it out from your Rentenpunkte.")
+        : null),
     h("div", { class: "num" }, money(F.monthlyAmount(item))),
     h("div", { class: "actions" },
-      h("button", { type: "button", class: "link", onclick: () => { state.editing[kind] = item.id; state.focus = "#item-name"; render(); } }, "Edit"),
+      h("button", { type: "button", class: "link", onclick: () => edit(item) }, "Edit"),
       kind === "expenses"
         ? h("button", { type: "button", class: "link",
             title: item.active ? "Keep it in the list, but leave it out of every total and chart" : "Count it again",
@@ -1674,7 +1761,7 @@ function viewItems(kind) {
         : null,
       h("button", { type: "button", class: "link danger", onclick: () => {
         if (!confirm(`Delete ${item.name}?`)) return;
-        if (state.editing[kind] === item.id) state.editing[kind] = null;
+        if (state.editing[kind] === item.id) reset();
         commit(F.deleteItem(store, kind, item.id), `Deleted ${item.name}.`);
       } }, "Delete")));
 
@@ -1692,13 +1779,14 @@ function viewItems(kind) {
     if (list.length === 0) return;
     group(title, note, [...list].sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name)), true);
   };
-  apart("Later", later, "not counted yet");
+  apart("Later", later, "not in this month's total");
   apart("Ended", ended, "no longer counted");
   apart("Inactive", inactive, "not counted");
 
   return h("div", null,
     card([names.title, kind === "income"
-      ? info("income", "Regular income after tax, such as a salary, rent or a pension. A yearly bonus counts as one twelfth a month.")
+      ? info("income", "Regular income after tax, such as a salary, rent or a pension. A yearly bonus counts as one twelfth a month.",
+          `For your state pension, pick the category ${F.STATE_PENSION}: its amount is worked out from your Rentenpunkte.`)
       : info("expenses", "Regular payments only, such as rent, insurance and subscriptions. A yearly one counts as one twelfth a month.",
           ["Pay-ins to broker accounts go under ", h("a", { href: "#portfolio" }, "Portfolio"), ", not here."])],
       summary,
@@ -1707,7 +1795,7 @@ function viewItems(kind) {
     items.length
       ? card(null, h("div", { class: "item-list" }, groups))
       : null,
-    kind === "income" ? pensionCard() : healthCard());
+    kind === "expenses" ? healthCard() : null);
 }
 
 // ---------------------------------------------------------------- portfolio
@@ -3242,6 +3330,12 @@ function nameList({ list, rows, placeholder, addLabel, save, remove, control, ad
         h("button", { type: "submit", class: "primary" }, "Save"),
         h("button", { type: "button", onclick: () => { state.renaming = null; render(); } }, "Cancel")));
     }
+    // Built in: it can't be renamed or deleted, and says why.
+    if (row.fixed) {
+      return h("li", null,
+        h("span", { class: "grow" }, row.name), h("span", { class: "muted" }, row.detail),
+        h("span", { class: "built-in" }, "Built in", info(row.name, ...row.fixed)));
+    }
     return h("li", null,
       h("span", { class: "grow" }, row.name), control ? control(row) : null, h("span", { class: "muted" }, row.detail),
       h("button", { type: "button", class: "link", "aria-label": `Rename ${row.name}`,
@@ -3294,7 +3388,10 @@ function categoryList(store, kind) {
     list: kind,
     rows: store.categories[kind].map((name) => {
       const count = F.categoryUse(store, kind, name);
-      return { key: name, name, count, detail: count ? entries(count) : "not used" };
+      const fixed = F.isBuiltIn(kind, name)
+        ? ["Its income is worked out from your Rentenpunkte, under Income, so it can't be renamed or deleted.", "Company and private pensions go under a category of your own."]
+        : null;
+      return { key: name, name, count, fixed, detail: count ? entries(count) : "not used" };
     }),
     placeholder: kind === "expenses" ? "New expense category" : "New income category",
     addLabel: "Add",
@@ -3318,44 +3415,43 @@ function importCard(store) {
       document.getElementById("import-result")?.remove();
     } });
   textarea.value = state.importText;
-  return h("section", { class: "card" },
-    h("details", { open: state.importText !== "" || null },
-      h("summary", null, h("h2", null, "Import past months from CSV")),
-      h("p", null, "One row per account and month, with the columns ", h("code", null, "date"), ", ", h("code", null, "account"), ", ",
-        h("code", null, "value"), ", ", h("code", null, "pay_in"), ", ", h("code", null, "one_off"), " and ", h("code", null, "kind"),
-        " (the last three optional; kind is what a new account holds: invested, cash, emergency, property, pension or debt). Dates as 2025-01-31, 2025.01.31 or 31.01.2025: a row counts for the month of its date. ",
-        "Semicolons, commas or tabs work, and so do amounts like 1.234,56 or 1,234.56. ",
-        "Rows for a month and account that already exist replace the old values. New account names become new accounts."),
-      h("div", { class: "form-actions" },
-        h("label", { class: "file" }, "Choose a file…", h("input", { type: "file", accept: ".csv,.tsv,.txt,text/csv,text/plain", onchange: async (event) => {
-          const file = event.target.files[0];
-          if (!file) return;
-          state.importText = await file.text();
-          state.importPlan = F.planImport(state.store, state.importText);
-          render();
-        } })),
-        h("span", { class: "muted" }, "or paste rows from a spreadsheet:")),
-      textarea,
-      h("div", { class: "form-actions" },
-        h("button", { type: "button", onclick: () => { state.importPlan = F.planImport(store, state.importText); render(); } }, "Check"),
-        plan && plan.errors.length === 0 && plan.entries.length > 0
-          ? h("button", { id: "import-go", type: "button", class: "primary", onclick: () => {
-              // Accounts may have changed since Check: check again against
-              // the current data, and show the new result instead of
-              // importing if it differs from what is on screen.
-              const fresh = F.planImport(state.store, state.importText);
-              if (JSON.stringify(fresh) !== JSON.stringify(plan)) {
-                state.importPlan = fresh;
-                return render();
-              }
-              const count = fresh.entries.length;
-              const next = F.applyImport(state.store, fresh);
-              state.importText = "";
-              state.importPlan = null;
-              commit(next, `Imported ${count} ${count === 1 ? "row" : "rows"}.`);
-            } }, `Import ${plan.entries.length} ${plan.entries.length === 1 ? "row" : "rows"}`)
-          : null),
-      plan ? importResult(plan) : null));
+  return h("section", { class: "card spaced" },
+    h("h2", null, "Import past months from CSV"),
+    h("p", null, "One row per account and month, with the columns ", h("code", null, "date"), ", ", h("code", null, "account"), ", ",
+      h("code", null, "value"), ", ", h("code", null, "pay_in"), ", ", h("code", null, "one_off"), " and ", h("code", null, "kind"),
+      " (the last three optional; kind is what a new account holds: invested, cash, emergency, property, pension or debt). Dates as 2025-01-31, 2025.01.31 or 31.01.2025: a row counts for the month of its date. ",
+      "Semicolons, commas or tabs work, and so do amounts like 1.234,56 or 1,234.56. ",
+      "Rows for a month and account that already exist replace the old values. New account names become new accounts."),
+    h("div", { class: "form-actions" },
+      h("label", { class: "file" }, "Choose a file…", h("input", { type: "file", accept: ".csv,.tsv,.txt,text/csv,text/plain", onchange: async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        state.importText = await file.text();
+        state.importPlan = F.planImport(state.store, state.importText);
+        render();
+      } })),
+      h("span", { class: "muted" }, "or paste rows from a spreadsheet:")),
+    textarea,
+    h("div", { class: "form-actions" },
+      h("button", { type: "button", onclick: () => { state.importPlan = F.planImport(store, state.importText); render(); } }, "Check"),
+      plan && plan.errors.length === 0 && plan.entries.length > 0
+        ? h("button", { id: "import-go", type: "button", class: "primary", onclick: () => {
+            // Accounts may have changed since Check: check again against
+            // the current data, and show the new result instead of
+            // importing if it differs from what is on screen.
+            const fresh = F.planImport(state.store, state.importText);
+            if (JSON.stringify(fresh) !== JSON.stringify(plan)) {
+              state.importPlan = fresh;
+              return render();
+            }
+            const count = fresh.entries.length;
+            const next = F.applyImport(state.store, fresh);
+            state.importText = "";
+            state.importPlan = null;
+            commit(next, `Imported ${count} ${count === 1 ? "row" : "rows"}.`);
+          } }, `Import ${plan.entries.length} ${plan.entries.length === 1 ? "row" : "rows"}`)
+        : null),
+    plan ? importResult(plan) : null);
 }
 
 function exportCard(store) {

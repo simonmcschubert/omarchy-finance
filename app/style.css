@@ -1527,8 +1527,7 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible,
-textarea:focus-visible,
-summary:focus-visible {
+textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -1635,6 +1634,52 @@ label {
 .item-form .check-row {
   grid-row: 3;
   grid-column: 1 / -1;
+}
+
+/* A state pension: its amount, worked out, where the amount and how often
+   are; its fields in the row of the start and end, three a line; and what
+   they come to under them. */
+.pension-form .pension-amount {
+  grid-column: 3 / 5;
+}
+
+.worked-out {
+  display: block;
+  padding: 6px 0;
+  color: var(--fg-strong);
+  font-weight: 600;
+}
+
+.pension-form .pension-fields {
+  grid-row: 2;
+  grid-column: 1 / 5;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.pension-form .pension-fields input {
+  width: 100%;
+}
+
+.pension-form .pension-result,
+.pension-form .pension-note {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.pension-form .pension-result {
+  grid-row: 3;
+  color: var(--fg-strong);
+}
+
+.pension-form .pension-result:empty {
+  display: none;
+}
+
+.pension-form .pension-note {
+  grid-row: 4;
 }
 
 /* A checkbox with its ⓘ after it. */
@@ -1804,20 +1849,9 @@ form.inline input {
   height: 1px;
 }
 
-details summary {
-  cursor: pointer;
-  list-style-position: outside;
-}
-
-details summary h2 {
-  display: inline;
-}
-
-details[open] > summary {
-  margin-bottom: 8px;
-}
-
-details > * + * {
+/* A card of a heading, text and a form, its parts one under another with
+   room between them. */
+.card.spaced > * + * {
   margin-top: 10px;
 }
 
@@ -2047,6 +2081,14 @@ table.entry th {
   width: 13em;
 }
 
+/* In place of Rename and Delete, for a category that has neither. */
+.name-list li > .built-in {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-muted);
+}
+
 .name-list li form.inline {
   flex: 1;
   margin: 0;
@@ -2106,9 +2148,17 @@ table.entry th {
 
   .item-form .bound.from,
   .item-form .bound.until,
-  .item-form .check-row {
+  .item-form .check-row,
+  .pension-form .pension-amount,
+  .pension-form .pension-fields,
+  .pension-form .pension-result,
+  .pension-form .pension-note {
     grid-row: auto;
     grid-column: 1 / -1;
+  }
+
+  .pension-form .pension-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
