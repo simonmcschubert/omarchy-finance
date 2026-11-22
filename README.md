@@ -122,6 +122,11 @@ Finance window's browser profile. The data file stays.
     they are unless you choose otherwise (see Future pay-ins). Data files from before this setting get
     3 % inflation and 3 points more expected return, so 5 % after inflation
     becomes 8 % before it.
+  - Life expectancy (default 100): the age your money should last to. The
+    forecast ends with that year, and a plan lasts when money is left
+    then; an Altersvorsorgedepot pays out until then too. Never below the
+    retirement age. Data files from before this setting keep 120, the age
+    the forecast used to go to.
   - Future pay-ins: what you pay in a month from now on, for the investment
     rate, the milestones, the Path to FI chart and the forecast. **Now** is
     the average pay-in of the last 12 months (default), which follows your
@@ -160,11 +165,6 @@ Finance window's browser profile. The data file stays.
     starts without deductions. The forecast works out when you could stop
     sooner. The forecast needs the year of birth; it is
     empty until entered. Ages and retirement start in January of their year.
-  - Life expectancy (default 100): the age your money should last to. The
-    forecast ends with that year, and a plan lasts when money is left
-    then; an Altersvorsorgedepot pays out until then too. Never below the
-    retirement age. Data files from before this setting keep 120, the age
-    the forecast used to go to.
   - The [lock](#lock): on or off.
   - Where the data file and its daily backups are, and which updates to
     offer.
