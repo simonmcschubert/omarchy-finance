@@ -1326,8 +1326,9 @@ export function depotAllowance(paid, children = 0) {
 const isDepot = (item) => item.category === DEPOT && isObject(item.depot);
 
 // The month an Altersvorsorgedepot is worked out from and what it holds
-// then: its account's latest value, or 0 without an account or a value,
-// in the latest month any account has a value (this month without one).
+// then: its account's latest value (own), or 0 without an account or a
+// value, in the latest month any account has a value (this month without
+// one).
 // today: the month whose money the projections are in, that of the
 // portfolio's latest value (the forecast's start), else that month too.
 function depotBase(store, depot) {
@@ -1337,7 +1338,7 @@ function depotBase(store, depot) {
   const own = latest(depot.account === null ? [] : store.records.filter((r) => r.account === depot.account));
   const any = latest(store.records);
   const index = monthIndex(own ? own.month : any ? any.month : currentMonth());
-  return { index, value: own ? own.value : 0, today: portfolio ? monthIndex(portfolio.month) : index };
+  return { index, value: own ? own.value : 0, own: own !== null, today: portfolio ? monthIndex(portfolio.month) : index };
 }
 
 // Worked out once per store, item, last month paid in and growth: an item
@@ -1350,7 +1351,7 @@ const depotCaches = new WeakMap();
 // gets what you pay in every month from DEPOT_RULES.start while you work,
 // until it pays out, and each year's Zulagen in the January after (when it
 // starts paying out at the latest): of its year's months paid in, those
-// before that month too, which its value already holds. From January of its payout age it pays
+// before that month too, which its own value already holds. From January of its payout age it pays
 // the same amount in today's money every month until the end of the life
 // expectancy (85 at the least, as the law has it): what it holds then,
 // spent to nothing by then while the rest keeps growing, less the income
@@ -1375,8 +1376,9 @@ export function depotIncome(store, item, retirement, growth = store.settings.exp
   const opens = monthIndex(r.start);
   const firstPaid = Math.max(base.index + 1, opens);
   const lastPaid = Math.min(retirement, start) - 1;
-  // The first month whose Zulagen are still to come: its year's January.
-  const firstCounted = Math.max(Math.floor(base.index / 12) * 12, opens);
+  // The first month whose Zulagen are still to come: its year's January,
+  // when its value holds what was paid in since.
+  const firstCounted = base.own ? Math.max(Math.floor(base.index / 12) * 12, opens) : firstPaid;
   const key = `${Math.max(lastPaid, firstCounted - 1)} ${growth}`;
   if (results.has(key)) return results.get(key);
   const end = Math.max((birthYear + lifeExpectancy + 1) * 12, (birthYear + r.payoutUntil) * 12);

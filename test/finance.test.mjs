@@ -3128,6 +3128,12 @@ test("depotIncome: what is paid in and the Zulagen until you stop working, paid 
   june.records = june.records.map((record) => (record.account === "d" ? { ...record, month: "2027-06", value: 10600 * EUR } : record));
   close(income(june, at(2057)).value, keep.value, "with a value in June");
   close(income(june, at(2027, 7)).value, (10600 + 240) * EUR, "stopping after June 2027");
+  // Without a value of its own it starts from 0 then, with nothing paid in
+  // before.
+  const none = depotStore({ depot: { account: null } });
+  none.records = june.records.map((record) => ({ ...record, month: "2027-06" }));
+  assert.equal(income(none, at(2027, 7)).value, 0);
+  close(income(none, at(2028)).value, (600 + 240) * EUR, "six months paid in");
 });
 
 test("depotIncome: with growth and inflation, the payout rises with prices and spends the depot by the end", () => {
