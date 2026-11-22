@@ -304,8 +304,9 @@ function upgradeFromVersion17(value) {
 
 // Version 18 had no built-in State pension category, and the state pension
 // helper kept none of its inputs: no income has any. The category joins the
-// list, a category of the same name in other case becoming it, and the
-// helper's income, named "State pension", moves into it.
+// list, a category of the same name in other case becoming it. One income
+// goes in it: the helper's, named "State pension", or else the first in that
+// category; the others there are left without a category.
 function upgradeFromVersion18(value) {
   const next = { ...value, version: 19 };
   const same = (name) => isText(name) && name.toLowerCase() === STATE_PENSION.toLowerCase();
@@ -313,11 +314,13 @@ function upgradeFromVersion18(value) {
     next.categories = { ...value.categories, income: [...value.categories.income.filter((name) => !same(name)), STATE_PENSION].sort(compareNames) };
   }
   if (Array.isArray(value.income)) {
+    const items = value.income.filter(isObject);
+    const pension = items.find((item) => item.name === STATE_PENSION) ?? items.find((item) => same(item.category));
     next.income = value.income.map((item) => {
       if (!isObject(item)) return item;
       if ("pension" in item) throw new Error('income has unknown field "pension"');
-      const moves = item.name === STATE_PENSION || same(item.category);
-      return { ...item, category: moves ? STATE_PENSION : item.category, pension: null };
+      const category = item === pension ? STATE_PENSION : same(item.category) ? "" : item.category;
+      return { ...item, category, pension: null };
     });
   }
   return next;
@@ -453,6 +456,7 @@ export function parseStore(value) {
         }
       });
     }
+    if (value.income.filter((item) => item.category === STATE_PENSION).length > 1) throw new Error("income has more than one state pension");
 
     if (!Array.isArray(value.accounts)) throw new Error("accounts is not a list");
     const accountIds = new Set();
@@ -2307,9 +2311,7 @@ function itemError(store, kind, item) {
   if (kind === "income") {
     const error = pensionError(item);
     if (error) return error;
-    // One state pension: income moves into the category only when none is.
-    const before = store.income.find((other) => other.id === item.id);
-    if (item.category === STATE_PENSION && before?.category !== STATE_PENSION && store.income.some((other) => other.category === STATE_PENSION)) {
+    if (item.category === STATE_PENSION && store.income.some((other) => other.category === STATE_PENSION && other.id !== item.id)) {
       return "There is a state pension already: edit that one";
     }
   }
@@ -2320,7 +2322,8 @@ const isPoints = (value) => typeof value === "number" && Number.isFinite(value) 
 
 // What is wrong with an income's pension inputs (PENSION_KEYS), or null.
 // Only a state pension has them, paid every month from an age on, for good.
-// One without them (from before version 19) has the amount as entered.
+// One without them (from before version 19) has the amount as entered. There
+// is one state pension at most.
 function pensionError(item) {
   const p = item.pension;
   if (p === null) return null;

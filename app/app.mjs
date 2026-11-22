@@ -517,9 +517,10 @@ const state = {
   notice: null, // { kind: "error" | "info", text, retry }; retry: goes once the server answers
   view: "dashboard",
   editing: { expenses: null, income: null }, // item id being edited
-  // The category and name in the Income form once a category is picked that
-  // changes its fields (State pension, or another after it), until the
-  // income is saved or the edit cancelled: { category, name }.
+  // The Income form once a category is picked that changes its fields
+  // (State pension, or another after it), until the income is saved or the
+  // edit cancelled: { category, name, values }, values being what was typed
+  // in the fields of either kind, by name.
   incomeDraft: null,
   editingEvent: null, // planned one-off being edited
   editingPayIn: null, // "now" or the id of a planned pay-in change being edited
@@ -1468,13 +1469,13 @@ function readPension(data) {
 }
 
 // How a state pension comes about, from its inputs: "29,2 points ×
-// 42,52 € = 1.242 € · −12,95 % health and care". `startAge` for the change
-// for starting early or late.
+// 42,52 € = 1.242 € · −12,95 % health and care", with the change for
+// starting early or late at `startAge` between them.
 function pensionWorking(inputs, startAge) {
   const { points, morePoints, pointValue, regularAge, deductions } = inputs;
-  const r = F.statePension({ points: points + morePoints, pointValue, startAge, regularAge, deductions });
-  const change = r.change === 0 ? "" : ` (${signedPercent(r.change)} for starting ${r.change < 0 ? "early" : "late"})`;
-  return `${plainPoints.format(points + morePoints)} points × ${moneyExact(pointValue)} = ${money(r.gross)}${change} · −${percentUnit.format(deductions)} health and care`;
+  const { change } = F.statePension({ points: points + morePoints, pointValue, startAge, regularAge, deductions });
+  const early = change === 0 ? "" : ` · ${change < 0 ? "−" : "+"}${percent.format(Math.abs(change))} for starting ${change < 0 ? "early" : "late"}`;
+  return `${plainPoints.format(points + morePoints)} points × ${moneyExact(pointValue)} = ${money((points + morePoints) * pointValue)}${early} · −${percentUnit.format(deductions)} health and care`;
 }
 
 // When the state pension starts: as entered under Income, or the regular
@@ -1668,8 +1669,9 @@ function viewItems(kind) {
         onchange: kind === "income" ? (event) => {
           const category = event.target.value;
           if ((category === F.STATE_PENSION) === pension) return;
-          const name = String(new FormData(event.target.form).get("name")).trim();
-          state.incomeDraft = { category, name: name === "" && category === F.STATE_PENSION ? F.STATE_PENSION : name };
+          const typed = Object.fromEntries(new FormData(event.target.form));
+          const name = String(typed.name).trim();
+          state.incomeDraft = { category, name: name === "" && category === F.STATE_PENSION ? F.STATE_PENSION : name, values: { ...draft?.values, ...typed } };
           state.focus = "#item-category";
           render();
         } : null },
@@ -1688,6 +1690,14 @@ function viewItems(kind) {
       h("button", { type: "submit", class: "primary" }, editing ? "Save" : "Add"),
       editing ? h("button", { type: "button", onclick: () => { reset(); render(); } }, "Cancel") : null),
   );
+  // What was typed in these fields before the category switched them out.
+  for (const [key, value] of Object.entries(draft?.values ?? {})) {
+    const control = form.elements[key];
+    if (key === "name" || key === "category" || !control) continue;
+    control.value = value;
+    // A start or end shows its age or month field for its choice.
+    if (control instanceof HTMLSelectElement) control.dispatchEvent(new Event("change"));
+  }
   if (pension) showPension(form);
 
   // The amount, how often, and when it starts and ends: for every expense

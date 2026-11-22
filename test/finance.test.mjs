@@ -1812,6 +1812,10 @@ test("a state pension keeps the inputs it is worked out from", () => {
   file.income[0].pension.extra = 1;
   assert.match(F.parseStore(file).error, /income\[0\].pension has unknown field "extra"/);
 
+  const two = JSON.parse(JSON.stringify(s));
+  two.income[1] = { ...two.income[1], category: F.STATE_PENSION };
+  assert.match(F.parseStore(two).error, /more than one state pension/);
+
   // One state pension: a second is refused, the one there can change and
   // can leave the category.
   assert.deepEqual(F.saveItem(s, "income", { ...pension, id: "p2" }), { ok: false, error: "There is a state pension already: edit that one" });
@@ -1844,15 +1848,22 @@ test("a version 18 file is upgraded: the State pension category, and the helper'
   assert.equal(v18.income[1].category, "", "the parsed value is left alone");
 
   // The helper's income moves from a category of its own too, and a
-  // category of the same name in other case becomes the built-in one.
+  // category of the same name in other case becomes the built-in one, with
+  // one income in it: the helper's, or else the first.
   const own = F.parseStore({
     ...v18,
     categories: { expenses: [], income: ["Pensions", "state pension"] },
-    income: [{ ...v18.income[1], category: "Pensions" }, { ...v18.income[2], name: "Rürup", category: "state pension" }],
+    income: [{ ...v18.income[2], name: "Rürup", category: "state pension" }, { ...v18.income[1], category: "Pensions" }],
   });
   assert.equal(own.ok, true, own.error);
   assert.deepEqual(own.store.categories.income, ["Pensions", F.STATE_PENSION]);
-  assert.deepEqual(own.store.income.map((item) => item.category), [F.STATE_PENSION, F.STATE_PENSION]);
+  assert.deepEqual(own.store.income.map((item) => item.category), ["", F.STATE_PENSION]);
+  const first = F.parseStore({
+    ...v18,
+    categories: { expenses: [], income: ["State pension"] },
+    income: [{ ...v18.income[0], category: "State pension" }, { ...v18.income[2], category: "State pension" }],
+  });
+  assert.deepEqual(first.store.income.map((item) => item.category), [F.STATE_PENSION, ""]);
 
   assert.match(F.parseStore({ ...v18, income: [{ ...v18.income[0], pension: null }] }).error, /income has unknown field "pension"/);
 });
