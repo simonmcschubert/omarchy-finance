@@ -158,7 +158,7 @@ const ACCOUNT_KIND_LABELS = {
 const kindLabel = (kind) => ACCOUNT_KIND_LABELS[kind] ?? kind;
 const isInvested = (account) => account.kind === "invested";
 
-// In this order on Ctrl+1 to Ctrl+7.
+// In this order on Alt+1 to Alt+7.
 const VIEWS = [
   ["dashboard", "Dashboard"],
   ["forecast", "Forecast"],
@@ -844,7 +844,7 @@ addEventListener("hashchange", () => {
   scrollTo(0, 0);
 });
 
-// Ctrl+1 to Ctrl+7 open the views. Matched by key position, not by the
+// Alt+1 to Alt+7 open the views. Matched by key position, not by the
 // character, so it works the same on every keyboard layout.
 addEventListener("keydown", (event) => {
   // Ctrl+L locks Finance, when the lock is on, and unlocks it again. A held
@@ -863,7 +863,7 @@ addEventListener("keydown", (event) => {
     return;
   }
   const digit = /^(?:Digit|Numpad)([1-9])$/.exec(event.code);
-  if (!digit || !event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) return;
+  if (!digit || !event.altKey || event.ctrlKey || event.shiftKey || event.metaKey) return;
   const view = VIEWS[Number(digit[1]) - 1];
   if (!view) return;
   event.preventDefault();
@@ -950,8 +950,8 @@ function render() {
       href: `#${view}`,
       class: view === state.view ? "active" : null,
       "aria-current": view === state.view ? "page" : null,
-      title: `${label} (Ctrl+${i + 1})`,
-      "aria-keyshortcuts": `Control+${i + 1}`,
+      title: `${label} (Alt+${i + 1})`,
+      "aria-keyshortcuts": `Alt+${i + 1}`,
     }, label)),
   );
 

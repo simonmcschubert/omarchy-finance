@@ -178,7 +178,7 @@ it, or press Enter on it, to open it; Esc or a click elsewhere closes it.
 
 ![The ⓘ next to FI, open: the FI number and how it is worked out](docs/info.png)
 
-`Ctrl+1` to `Ctrl+7` open Dashboard, Forecast, What if, Portfolio, Expenses,
+`Alt+1` to `Alt+7` open Dashboard, Forecast, What if, Portfolio, Expenses,
 Income and Settings. `Ctrl+Shift+H`, or the eye at the right end of the top bar, hides
 every amount (as `••• €`, in charts and amount fields too) and keeps the
 percentages, for sharing the screen; again shows them. The choice is kept in
