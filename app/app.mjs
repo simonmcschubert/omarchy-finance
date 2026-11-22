@@ -740,6 +740,7 @@ function showLocked() {
   state.importText = "";
   state.importPlan = null;
   state.editing = { expenses: null, income: null };
+  state.incomeDraft = null;
   state.editingEvent = null;
   state.editingPayIn = null;
   state.renaming = null;
