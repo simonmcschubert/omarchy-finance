@@ -21,6 +21,19 @@ from before version 19 has none, only its amount. One per file. _Avoid_:
 calling other pensions, such as a company pension, by it: they are
 ordinary income.
 
+**Altersvorsorgedepot** (`DEPOT`): the other built-in income category, and
+its income: the German pension depot of 2027, which the state adds
+**Zulagen** to (`depotAllowance()`, `DEPOT_RULES`). Its inputs (`depot`)
+are the pension account that holds it (or none yet), what is paid in a
+month (150 € at most, what gets a Zulage), the years Kindergeld ends, its
+costs and the income tax on its payout; it pays out from an age of 65 to
+70, for good. Its amount is never what is entered: `depotIncome()` works
+it out for each plan's retirement and growth, from the account's latest
+value, what is paid in until that plan stops working and the Zulagen a
+year after, paid out evenly in today's money until the life expectancy
+(85 at the least), less the tax. `incomeIn()` gives the income with it, as
+`budget()` and `needIn()` count it. One per file.
+
 **Essential**: an expense needed even on the leanest budget. The essential
 expenses make up Lean FI.
 
@@ -29,6 +42,10 @@ nowhere. Income is never inactive.
 
 **Buffer**: a percentage added on top of the expenses, for what the list
 misses.
+
+**Life expectancy** (`lifeExpectancy`, 100 by default; 120 for files from
+before version 20): the age the money should last to. The forecast ends
+with its year.
 
 **Retirement month**: January of the year of the retirement age
 (`retirementIndex`). Without a year of birth, retirement and ages are never
@@ -165,10 +182,12 @@ Today's money is the default; the choice is kept in the browser.
   retirement.
 
 The low and high growth run each plan with the dates of the expected
-return, so they show what happens to the same plan. A plan **lasts** when
-money is left at the end of age 120 (`SHOWN_AGE`), where the forecast ends.
-Its bar and chart are drawn only to the end of age 85 (`CHART_AGE`,
-`shownUntil()`), or to 120 when the forecast starts at 85 or later.
+return, so they show what happens to the same plan; an Altersvorsorgedepot
+grows by each run's growth too. A plan **lasts** when money is left at the
+end of the life expectancy, where the forecast ends. Its bar and chart are
+drawn only to the end of age 85 (`CHART_AGE`, `shownUntil()`) or of the
+life expectancy when that comes first, or to the life expectancy when the
+forecast starts at 85 or later.
 
 **Lasts even at** (`lastsWith`): what the portfolio would need at a plan's
 _turn_, the end of its last month paid in in full (now when there is none),
@@ -194,7 +213,7 @@ even at the low growth.
 - _Stop working at an age_ (`fiOutlook().stopAfter()`): stops working in
   January of the age picked, whatever the portfolio has then, drawn as
   the Forecast draws its plans, to the end of age 85 (`CHART_AGE`).
-  Whether its money lasts is still worked out to `SHOWN_AGE`.
+  Whether its money lasts is still worked out to the life expectancy.
 - _Spend more or less_ (`spendingWhatIf()`): every expense a share more
   or less (`SPENDING_STEPS`), for good, with the income the same: what is
   spent less is paid in while working, what is spent more comes out of

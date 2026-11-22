@@ -59,14 +59,32 @@ function monthsWith(start, paid, rate, goal, inflation = 0) {
 // the future pay-in; as version 12 had them, without the future pay-in;
 // as version 13 had them, without the choice to raise pay-ins; and as
 // version 14 had them, without the coast pay-in.
-const SETTINGS_V14 = (({ coastPayIn, ...rest }) => rest)(F.DEFAULT_SETTINGS);
+const SETTINGS_V19 = (({ lifeExpectancy, ...rest }) => rest)(F.DEFAULT_SETTINGS);
+const SETTINGS_V14 = (({ coastPayIn, ...rest }) => rest)(SETTINGS_V19);
 const SETTINGS_V13 = (({ payInsRiseWithInflation, ...rest }) => rest)(SETTINGS_V14);
 const SETTINGS_V12 = (({ futurePayIn, ...rest }) => rest)(SETTINGS_V13);
 const SETTINGS_V11 = (({ emergencyMonths, ...rest }) => rest)(SETTINGS_V12);
 // An empty store as versions 14 to 16 had it, without a flat; and as
 // versions 10 to 13 had it, also without planned pay-in changes.
-const EMPTY_V16 = (({ flat, ...rest }) => rest)(F.emptyStore());
+// An empty store as version 19 had it: without the life expectancy and
+// the Altersvorsorgedepot category.
+const EMPTY_V19 = {
+  ...F.emptyStore(),
+  version: 19,
+  settings: SETTINGS_V19,
+  categories: { ...F.emptyStore().categories, income: F.emptyStore().categories.income.filter((name) => name !== F.DEPOT) },
+};
+const EMPTY_V16 = (({ flat, ...rest }) => rest)(EMPTY_V19);
 const EMPTY_V13 = (({ payInChanges, ...rest }) => rest)(EMPTY_V16);
+
+// What upgrading a file of version 19 or before to 20 adds to it: a life
+// expectancy of 120, the Altersvorsorgedepot category, and no depot inputs.
+const withV20 = (s) => ({
+  ...s,
+  settings: { lifeExpectancy: 120, ...s.settings },
+  categories: { ...s.categories, income: [...s.categories.income, F.DEPOT].sort((a, b) => a.localeCompare(b)) },
+  income: s.income.map((item) => ({ ...item, depot: null })),
+});
 
 // An upgraded store without what versions after 7 added, to compare with
 // the file it came from.
@@ -74,10 +92,10 @@ function withoutLater({ events, payInChanges, flat, ...s }) {
   const plain = ({ from, until, ...item }) => item;
   return {
     ...s,
-    categories: { ...s.categories, income: s.categories.income.filter((name) => name !== F.STATE_PENSION) },
-    settings: (({ emergencyMonths, futurePayIn, payInsRiseWithInflation, coastPayIn, ...rest }) => rest)(s.settings),
+    categories: { ...s.categories, income: s.categories.income.filter((name) => name !== F.STATE_PENSION && name !== F.DEPOT) },
+    settings: (({ emergencyMonths, futurePayIn, payInsRiseWithInflation, coastPayIn, lifeExpectancy, ...rest }) => rest)(s.settings),
     expenses: s.expenses.map(({ essential, ...item }) => plain(item)),
-    income: s.income.map(({ pension, ...item }) => plain(item)),
+    income: s.income.map(({ pension, depot, ...item }) => plain(item)),
     records: s.records.map(({ oneOff, ...record }) => record),
     accounts: s.accounts.map(({ kind, ...account }) => account),
   };
@@ -705,8 +723,8 @@ test("a version 1 file is upgraded: euros, and the categories its items use", ()
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
-  assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: [F.STATE_PENSION, "Work"] });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "EUR", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0, lifeExpectancy: 120 });
+  assert.deepEqual(s.categories, { expenses: ["Car", "Housing"], income: [F.DEPOT, F.STATE_PENSION, "Work"] });
   assert.deepEqual(s.expenses.map((e) => e.category), ["Housing", "Housing", "", "Car"]);
   assert.deepEqual(s.expenses.map((e) => e.active), [true, true, true, true], "every expense was active");
   assert.equal("active" in s.income[0], false);
@@ -735,9 +753,9 @@ test("a version 2 file is upgraded: every expense is active", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
+  assert.deepEqual(s.settings, { ...v2.settings, numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0, lifeExpectancy: 120 });
   assert.deepEqual(s.expenses, v2.expenses.map((e) => ({ ...e, active: true, essential: false, from: null, until: null })));
-  assert.deepEqual(s.income, v2.income.map((i) => ({ ...i, from: null, until: { at: "retirement" }, pension: null })));
+  assert.deepEqual(s.income, v2.income.map((i) => ({ ...i, from: null, until: { at: "retirement" }, pension: null, depot: null })));
   assert.deepEqual(Object.keys(s), ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events", "payInChanges", "flat"]);
   assert.equal("active" in v2.expenses[0], false, "the parsed value is left alone");
   assert.equal(F.metrics(s).baseExpenses, 100 + 30 / 12);
@@ -760,7 +778,7 @@ test("a version 3 file is upgraded: the default number format", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
+  assert.deepEqual(s.settings, { withdrawalRate: 3.5, bufferPercent: 5, currency: "USD", numberFormat: "1.000.000,00", expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0, lifeExpectancy: 120 });
   assert.deepEqual({ ...withoutLater(s), version: 3, settings: v3.settings }, v3, "nothing else changes");
   assert.equal("numberFormat" in v3.settings, false, "the parsed value is left alone");
 
@@ -783,7 +801,7 @@ test("a version 4 file is upgraded: the default expected return", () => {
   const s = result.store;
   assert.equal(s.version, F.VERSION);
   // 5 % after inflation then, so 8 % before 3 % inflation now.
-  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
+  assert.deepEqual(s.settings, { ...v4.settings, expectedReturn: 8, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0, lifeExpectancy: 120 });
   assert.deepEqual({ ...withoutLater(s), version: 4, settings: v4.settings }, v4, "nothing else changes");
   assert.equal("expectedReturn" in v4.settings, false, "the parsed value is left alone");
 
@@ -949,7 +967,7 @@ test("a version 5 file is upgraded: no birth year, retirement at 67", () => {
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v5.settings, expectedReturn: 9, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
+  assert.deepEqual(s.settings, { ...v5.settings, expectedReturn: 9, inflation: 3, birthYear: null, retirementAge: 67, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0, lifeExpectancy: 120 });
   assert.deepEqual({ ...withoutLater(s), version: 5, settings: v5.settings }, v5, "nothing else changes");
   assert.equal("birthYear" in v5.settings, false, "the parsed value is left alone");
 
@@ -971,7 +989,7 @@ test("a version 6 file is upgraded: the expected return before inflation, and 3 
   assert.equal(result.ok, true, result.error);
   const s = result.store;
   assert.equal(s.version, F.VERSION);
-  assert.deepEqual(s.settings, { ...v6.settings, expectedReturn: 7.25, inflation: 3, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 });
+  assert.deepEqual(s.settings, { ...v6.settings, expectedReturn: 7.25, inflation: 3, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0, lifeExpectancy: 120 });
   assert.deepEqual({ ...withoutLater(s), version: 6, settings: v6.settings }, v6, "nothing else changes");
   assert.equal(v6.settings.expectedReturn, 4.25, "the parsed value is left alone");
 
@@ -1017,10 +1035,10 @@ test("a version 8 file is upgraded: expenses always count, income until retireme
   assert.deepEqual(result.store, {
     ...v8,
     version: F.VERSION,
-    settings: { ...v8.settings, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 },
+    settings: { ...v8.settings, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0, lifeExpectancy: 120 },
     expenses: [{ ...v8.expenses[0], from: null, until: null }],
-    categories: { expenses: [], income: [F.STATE_PENSION] },
-    income: [{ ...v8.income[0], from: null, until: { at: "retirement" }, pension: null }],
+    categories: { expenses: [], income: [F.DEPOT, F.STATE_PENSION] },
+    income: [{ ...v8.income[0], from: null, until: { at: "retirement" }, pension: null, depot: null }],
     accounts: [],
     events: [],
     payInChanges: [],
@@ -1171,7 +1189,7 @@ test("a version 11 file is upgraded: an emergency fund of 6 months", () => {
   const v11 = { ...EMPTY_V13, version: 11, settings: { ...SETTINGS_V11, bufferPercent: 5 } };
   const result = F.parseStore(v11);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v11, version: F.VERSION, settings: { ...v11.settings, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 }, payInChanges: [], flat: null });
+  assert.deepEqual(result.store, withV20({ ...v11, version: F.VERSION, settings: { ...v11.settings, emergencyMonths: 6, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0, lifeExpectancy: 120 }, payInChanges: [], flat: null }));
   assert.match(F.parseStore({ ...v11, settings: { ...v11.settings, emergencyMonths: 3 } }).error, /unknown field "emergencyMonths"/);
 });
 
@@ -1179,7 +1197,7 @@ test("a version 12 file is upgraded: projections go on with the average pay-in",
   const v12 = { ...EMPTY_V13, version: 12, settings: { ...SETTINGS_V12, bufferPercent: 5 } };
   const result = F.parseStore(v12);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v12, version: F.VERSION, settings: { ...v12.settings, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0 }, payInChanges: [], flat: null });
+  assert.deepEqual(result.store, withV20({ ...v12, version: F.VERSION, settings: { ...v12.settings, futurePayIn: null, payInsRiseWithInflation: false, coastPayIn: 0, lifeExpectancy: 120 }, payInChanges: [], flat: null }));
   assert.match(F.parseStore({ ...v12, settings: { ...v12.settings, futurePayIn: 100 } }).error, /unknown field "futurePayIn"/);
   const own = F.saveSettings(result.store, { futurePayIn: 150000 });
   assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(own))), { ok: true, store: own });
@@ -1189,7 +1207,7 @@ test("a version 13 file is upgraded: no planned pay-in changes, and pay-ins stay
   const v13 = { ...EMPTY_V13, version: 13, settings: { ...SETTINGS_V13, futurePayIn: 150000 } };
   const result = F.parseStore(v13);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v13, version: F.VERSION, settings: { ...v13.settings, payInsRiseWithInflation: false, coastPayIn: 0 }, payInChanges: [], flat: null });
+  assert.deepEqual(result.store, withV20({ ...v13, version: F.VERSION, settings: { ...v13.settings, payInsRiseWithInflation: false, coastPayIn: 0, lifeExpectancy: 120 }, payInChanges: [], flat: null }));
   assert.match(F.parseStore({ ...v13, settings: { ...v13.settings, payInsRiseWithInflation: true } }).error, /unknown field "payInsRiseWithInflation"/);
   assert.match(F.parseStore({ ...v13, payInChanges: [] }).error, /unknown field "payInChanges"/);
 });
@@ -1202,7 +1220,7 @@ test("a version 15 file is upgraded: cash accounts become the emergency fund", (
   };
   const result = F.parseStore(v15);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v15, version: F.VERSION, accounts: [v15.accounts[0], { ...v15.accounts[1], kind: "emergency" }, v15.accounts[2]], flat: null });
+  assert.deepEqual(result.store, withV20({ ...v15, version: F.VERSION, accounts: [v15.accounts[0], { ...v15.accounts[1], kind: "emergency" }, v15.accounts[2]], flat: null }));
   assert.equal(v15.accounts[1].kind, "cash", "the parsed value is left alone");
   const cash = F.saveAccount(result.store, null, "Flat savings", "cash").store;
   assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(cash))), { ok: true, store: cash }, "a new cash account stays cash");
@@ -1212,7 +1230,7 @@ test("a version 14 file is upgraded: the Coast plan pays in nothing after Coast 
   const v14 = { ...EMPTY_V16, version: 14, settings: { ...SETTINGS_V14, futurePayIn: 150000, payInsRiseWithInflation: true } };
   const result = F.parseStore(v14);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v14, version: F.VERSION, settings: { ...v14.settings, coastPayIn: 0 }, flat: null });
+  assert.deepEqual(result.store, withV20({ ...v14, version: F.VERSION, settings: { ...v14.settings, coastPayIn: 0, lifeExpectancy: 120 }, flat: null }));
   assert.match(F.parseStore({ ...v14, settings: { ...v14.settings, coastPayIn: 0 } }).error, /unknown field "coastPayIn"/);
   const coast = F.saveSettings(result.store, { coastPayIn: 20000 });
   assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(coast))), { ok: true, store: coast });
@@ -1732,7 +1750,7 @@ test("a new store starts with a few categories", () => {
 });
 
 test("categories: add, rename with their items, delete", () => {
-  let s = { ...F.emptyStore(), categories: { expenses: ["Housing"], income: [F.STATE_PENSION, "Work"] } };
+  let s = { ...F.emptyStore(), categories: { expenses: ["Housing"], income: [F.DEPOT, F.STATE_PENSION, "Work"] } };
   s = F.saveItem(s, "expenses", { id: "e", name: "Rent", category: "Housing", amount: 100, everyMonths: 1, from: null, until: null, active: true, essential: true }).store;
   s = F.saveItem(s, "income", { id: "i", name: "Salary", category: "Work", amount: 100, everyMonths: 1, from: null, until: { at: "retirement" } }).store;
 
@@ -1761,7 +1779,7 @@ test("categories: add, rename with their items, delete", () => {
 
 test("State pension is a built-in income category: it can't be renamed or deleted", () => {
   const s = F.emptyStore();
-  assert.deepEqual(s.categories.income, ["Side income", F.STATE_PENSION, "Work"]);
+  assert.deepEqual(s.categories.income, [F.DEPOT, "Side income", F.STATE_PENSION, "Work"]);
   assert.deepEqual(F.saveCategory(s, "income", F.STATE_PENSION, "Rente"), { ok: false, error: "State pension is built in: it can't be renamed" });
   assert.deepEqual(F.saveCategory(s, "income", null, "state pension"), { ok: false, error: '"State pension" already exists' });
   assert.deepEqual(F.saveCategory(s, "income", "Work", "State Pension"), { ok: false, error: '"State pension" already exists' });
@@ -1769,8 +1787,8 @@ test("State pension is a built-in income category: it can't be renamed or delete
   assert.equal(F.isBuiltIn("income", F.STATE_PENSION), true);
   assert.equal(F.isBuiltIn("expenses", F.STATE_PENSION), false, "only for income");
   assert.equal(F.saveCategory(s, "expenses", null, F.STATE_PENSION).ok, true, "an expense category of that name is an ordinary one");
-  assert.deepEqual(F.deleteCategory(s, "income", "Work").categories.income, ["Side income", F.STATE_PENSION]);
-  const without = { ...s, categories: { ...s.categories, income: ["Work"] } };
+  assert.deepEqual(F.deleteCategory(s, "income", "Work").categories.income, [F.DEPOT, "Side income", F.STATE_PENSION]);
+  const without = { ...s, categories: { ...s.categories, income: [F.DEPOT, "Work"] } };
   assert.match(F.parseStore(JSON.parse(JSON.stringify(without))).error, /categories.income is missing "State pension"/);
 });
 
@@ -1779,7 +1797,7 @@ test("a state pension keeps the inputs it is worked out from", () => {
   const inputs = { points: 14.2, morePoints: 15, pointValue: 4252, regularAge: 67, deductions: 12.95 };
   const net = Math.round(F.statePension({ points: 29.2, pointValue: 4252, startAge: 67, regularAge: 67, deductions: 12.95 }).net);
   assert.equal(net, 108080);
-  const pension = { id: "p", name: "Gesetzliche Rente", category: F.STATE_PENSION, amount: net, everyMonths: 1, from: { age: 67 }, until: null, pension: inputs };
+  const pension = { id: "p", name: "Gesetzliche Rente", category: F.STATE_PENSION, amount: net, everyMonths: 1, from: { age: 67 }, until: null, pension: inputs, depot: null };
   const saved = F.saveItem(s, "income", pension);
   assert.equal(saved.ok, true, saved.error);
   s = saved.store;
@@ -1828,7 +1846,7 @@ test("a state pension keeps the inputs it is worked out from", () => {
 
 test("a version 18 file is upgraded: the State pension category, and the helper's income in it", () => {
   const v18 = {
-    ...F.emptyStore(),
+    ...EMPTY_V19,
     version: 18,
     categories: { expenses: [], income: ["Side income", "Work"] },
     income: [
@@ -1839,12 +1857,12 @@ test("a version 18 file is upgraded: the State pension category, and the helper'
   };
   const result = F.parseStore(v18);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, {
+  assert.deepEqual(result.store, withV20({
     ...v18,
     version: F.VERSION,
     categories: { expenses: [], income: ["Side income", F.STATE_PENSION, "Work"] },
     income: [{ ...v18.income[0], pension: null }, { ...v18.income[1], category: F.STATE_PENSION, pension: null }, { ...v18.income[2], pension: null }],
-  });
+  }));
   assert.equal(v18.income[1].category, "", "the parsed value is left alone");
 
   // The helper's income moves from a category of its own too, and a
@@ -1856,7 +1874,7 @@ test("a version 18 file is upgraded: the State pension category, and the helper'
     income: [{ ...v18.income[2], name: "Rürup", category: "state pension" }, { ...v18.income[1], category: "Pensions" }],
   });
   assert.equal(own.ok, true, own.error);
-  assert.deepEqual(own.store.categories.income, ["Pensions", F.STATE_PENSION]);
+  assert.deepEqual(own.store.categories.income, [F.DEPOT, "Pensions", F.STATE_PENSION]);
   assert.deepEqual(own.store.income.map((item) => item.category), ["", F.STATE_PENSION]);
   const first = F.parseStore({
     ...v18,
@@ -1919,6 +1937,7 @@ function plan(changes = {}) {
     fiNumber: 600000 * EUR,
     birthYear: 1990,
     retirementAge: 67,
+    lifeExpectancy: 120,
     growth: 5,
     contribution: 1000 * EUR,
     coastContribution: 0,
@@ -2194,19 +2213,24 @@ test("forecast: retire at FI takes out expenses from the month after FI", () => 
   assert.ok(slow.values.slice(k).every((v) => v === 0));
 });
 
-test("forecast: a plan lasts only when money is left at age 120", () => {
+test("forecast: a plan lasts only when money is left at the life expectancy", () => {
   // Already at 30 × yearly expenses at 36, living off it at 3 % growth:
   // that lasts about 74 years, past 95 but not to 120.
   const f = F.forecast(plan({ value: 2000 * EUR * 12 * 30, growth: 3 }));
   const fi = f.plans.fi;
   assert.equal(fi.fiMonth, "2026-10");
   const age = F.ageIn(fi.runsOut, 1990);
-  assert.ok(age > 95 && age <= F.SHOWN_AGE, `runs out at ${age}`);
+  assert.ok(age > 95 && age <= 120, `runs out at ${age}`);
   assert.equal(fi.values.at(-1), 0);
   // 40 × at 3 %: taking out 2.5 % a year, it lasts.
   const lasting = F.forecast(plan({ value: 2000 * EUR * 12 * 40, growth: 3 })).plans.fi;
   assert.equal(lasting.runsOut, null);
   assert.ok(lasting.values.at(-1) > 0, "still money at 120");
+  // To 95, the 30 × lasts: the forecast ends with that year.
+  const shorter = F.forecast(plan({ value: 2000 * EUR * 12 * 30, growth: 3, lifeExpectancy: 95 }));
+  assert.equal(shorter.months.at(-1), "2085-12");
+  assert.equal(shorter.plans.fi.runsOut, null);
+  assert.deepEqual(shorter.plans.fi.values, fi.values.slice(0, shorter.months.length));
 });
 
 test("forecast ends in December of age 120 even with less than ten years left", () => {
@@ -2290,7 +2314,7 @@ test("fiOutlook plans: each plan's phases, with a pension as a step while retire
   });
   const o = F.fiOutlook(s, "2026-11");
   const result = o.plans("nominal");
-  assert.deepEqual([result.months[0], result.months.at(-1), result.retirement], ["2026-10", "2110-12", "2057-01"]);
+  assert.deepEqual([result.months[0], result.months.at(-1), result.retirement], ["2026-10", "2090-12", "2057-01"], "to the end of 100, the life expectancy");
   assert.deepEqual(result.plans.map((p) => p.key), ["fi", "coast", "keep", "safe"]);
   const [fi, coast, keep, safe] = result.plans;
   const at = (month) => F.monthIndex(month) - F.monthIndex("2026-10");
@@ -2342,7 +2366,7 @@ test("fiOutlook plans: each plan's phases, with a pension as a step while retire
   assert.deepEqual(safe.phases[1].steps.map((st) => st.from), [at(safe.retires), at("2057-01")]);
   // As forecast() runs it at 3 %: a year sooner runs out.
   const stopAfter = (last) => F.forecast({
-    start: "2026-10", value: 200000 * EUR, birthYear: 1990, retirementAge: 67, inflation: 0, growth: 3, coastContribution: 0,
+    start: "2026-10", value: 200000 * EUR, birthYear: 1990, retirementAge: 67, lifeExpectancy: 100, inflation: 0, growth: 3, coastContribution: 0,
     contribution: (i) => (i >= F.monthIndex("2035-01") ? 1500 : 1000) * EUR, need: (i, from) => F.needIn(s, i, from), goal: () => 0,
     fixed: { coast: null, fi: last },
   }).plans.fi;
@@ -2354,7 +2378,7 @@ test("fiOutlook plans: each plan's phases, with a pension as a step while retire
   // runs out.
   const turn = at(fi.stopInvesting);
   const topped = (extra) => F.forecast({
-    start: "2026-10", value: 200000 * EUR, birthYear: 1990, retirementAge: 67, inflation: 0, growth: 3, coastContribution: 0,
+    start: "2026-10", value: 200000 * EUR, birthYear: 1990, retirementAge: 67, lifeExpectancy: 100, inflation: 0, growth: 3, coastContribution: 0,
     contribution: (i) => (i >= F.monthIndex("2035-01") ? 1500 : 1000) * EUR, need: (i, from) => F.needIn(s, i, from), goal: () => 0,
     fixed: { coast: null, fi: fi.stopInvesting }, oneOffs: (i) => (i === F.monthIndex(fi.stopInvesting) ? extra : 0),
   }).plans.fi;
@@ -2370,7 +2394,7 @@ test("fiOutlook plans: each plan's phases, with a pension as a step while retire
   assert.ok(fi.lastsWith.low < fi.values.mid[turn]);
   // Coasting from now turns now: what it needs is what it has to be now.
   assert.equal(coast.lastsWith.low, F.forecast({
-    start: "2026-10", value: 200000 * EUR, birthYear: 1990, retirementAge: 67, inflation: 0, growth: 3, coastContribution: 0,
+    start: "2026-10", value: 200000 * EUR, birthYear: 1990, retirementAge: 67, lifeExpectancy: 100, inflation: 0, growth: 3, coastContribution: 0,
     contribution: 1000 * EUR, need: (i, from) => F.needIn(s, i, from), goal: () => 0, fixed: { coast: "2026-10", fi: null },
   }).plans.coast.needs[0]);
   // The safe plan lasts at 3 %: it has more than it needs then.
@@ -2649,6 +2673,7 @@ const FLAT = { month: "2028-01", price: 350000 * EUR, costsPercent: 11, ownMoney
 function renting() {
   const s = F.emptyStore();
   s.settings.birthYear = 1990;
+  s.settings.lifeExpectancy = 120;
   s.accounts = [{ id: "b", name: "Broker", kind: "invested" }, { id: "c", name: "Flat savings", kind: "cash" }, { id: "e", name: "Tagesgeld", kind: "emergency" }];
   let value = 70000 * EUR;
   for (let i = 0; i < 25; i++) {
@@ -2659,8 +2684,8 @@ function renting() {
   const expense = (id, name, amount, more = {}) => ({ id, name, category: "", amount: amount * EUR, everyMonths: 1, from: null, until: null, active: true, essential: true, ...more });
   s.expenses = [expense("rent", "Rent, cold", 900), expense("nk", "Nebenkosten", 250), expense("live", "Everything else", 1190),
     expense("hi", "Health insurance", 280, { from: { at: "retirement" }, until: { age: 66 } })];
-  s.income = [{ id: "sal", name: "Salary", category: "", amount: 4200 * EUR, everyMonths: 1, from: null, until: { at: "retirement" }, pension: null },
-    { id: "pen", name: "State pension", category: F.STATE_PENSION, amount: 1500 * EUR, everyMonths: 1, from: { age: 67 }, until: null, pension: null }];
+  s.income = [{ id: "sal", name: "Salary", category: "", amount: 4200 * EUR, everyMonths: 1, from: null, until: { at: "retirement" }, pension: null, depot: null },
+    { id: "pen", name: "State pension", category: F.STATE_PENSION, amount: 1500 * EUR, everyMonths: 1, from: { age: 67 }, until: null, pension: null, depot: null }];
   return s;
 }
 
@@ -2700,21 +2725,27 @@ test("a flat is checked when read, kept apart from the plan, and deleted", () =>
 });
 
 test("a version 16 file is upgraded: no flat to buy", () => {
-  const v16 = { ...(({ flat, ...rest }) => rest)(F.emptyStore()), version: 16 };
+  const v16 = { ...EMPTY_V16, version: 16 };
   const result = F.parseStore(v16);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store, { ...v16, version: F.VERSION, flat: null });
+  assert.deepEqual(result.store, withV20({ ...v16, version: F.VERSION, flat: null }));
   assert.match(F.parseStore({ ...v16, flat: null }).error, /unknown field "flat"/);
 });
 
 test("a version 17 file is upgraded: its flat ends no income", () => {
   const s = renting();
-  const income = s.income.map(({ pension, ...item }) => item);
-  const v17 = { ...s, version: 17, income, flat: (({ incomeStops, ...rest }) => rest)(FLAT) };
+  // As version 19 had it, and before that the state pension's inputs.
+  const old = {
+    ...s,
+    settings: (({ lifeExpectancy, ...rest }) => rest)(s.settings),
+    categories: { ...s.categories, income: s.categories.income.filter((name) => name !== F.DEPOT) },
+  };
+  const income = s.income.map(({ pension, depot, ...item }) => item);
+  const v17 = { ...old, version: 17, income, flat: (({ incomeStops, ...rest }) => rest)(FLAT) };
   const result = F.parseStore(v17);
   assert.equal(result.ok, true, result.error);
   assert.deepEqual(result.store, { ...s, version: F.VERSION, flat: FLAT });
-  assert.deepEqual(F.parseStore({ ...s, version: 17, income, flat: null }).store, { ...s, version: F.VERSION, flat: null });
+  assert.deepEqual(F.parseStore({ ...old, version: 17, income, flat: null }).store, { ...s, version: F.VERSION, flat: null });
   assert.match(F.parseStore({ ...v17, flat: FLAT }).error, /unknown field "flat.incomeStops"/);
 });
 
@@ -2870,7 +2901,7 @@ test("stopAfter: stop working at an age you pick, as the Forecast describes its 
   assert.equal(F.fiOutlook(sixties, "2027-03").stopAfter(null), null);
 });
 
-test("shownUntil: a plan shown to an age, worked out to SHOWN_AGE", () => {
+test("shownUntil: a plan shown to an age, worked out to the life expectancy", () => {
   const s = renting();
   // Care from 90 on: a step while retired, after the months shown.
   s.expenses.push({ id: "care", name: "Care", category: "", amount: 500 * EUR, everyMonths: 1, from: { age: 90 }, until: null, active: true, essential: true });
@@ -2887,7 +2918,7 @@ test("shownUntil: a plan shown to an age, worked out to SHOWN_AGE", () => {
   assert.equal(shown.months.at(-1), "2075-12");
   for (const g of F.GROWTHS) assert.deepEqual(shown.plan.values[g], plan.values[g].slice(0, n), g);
   // Whether the money lasts, and what would make it, stay as worked out to
-  // SHOWN_AGE.
+  // the life expectancy, 120.
   assert.deepEqual([shown.plan.runsOut, shown.plan.lastsWith, shown.plan.stopInvesting, shown.plan.retires, shown.plan.key],
     [plan.runsOut, plan.lastsWith, plan.stopInvesting, plan.retires, plan.key]);
   // The phases and their steps end at 85 at the latest; none starts after.
@@ -2900,7 +2931,7 @@ test("shownUntil: a plan shown to an age, worked out to SHOWN_AGE", () => {
   assert.deepEqual(shown.plan.phases.map((p) => [p.kind, p.from]), kept.map((p) => [p.kind, p.from]));
   assert.deepEqual(shown.plan.phases.slice(0, -1), kept.slice(0, -1), "the phases before the last stay as they are");
   // A later age than the forecast shows all of it.
-  assert.deepEqual(F.shownUntil(result, 1990, F.SHOWN_AGE), { months, plan });
+  assert.deepEqual(F.shownUntil(result, 1990, 120), { months, plan });
   assert.deepEqual(F.shownUntil(result, 1990, 200), { months, plan });
   // So does an age that has come by the first month: 85 in 2026 or 86.
   const retired = F.fiOutlook({ ...s, settings: { ...s.settings, birthYear: 1941 } }, "2026-11").plans("nominal");
@@ -3020,4 +3051,250 @@ test("growth and inflation: when you could stop at other returns and inflation",
   assert.equal(odd.cells.flat().filter((c) => c.plan).length, 1);
   assert.deepEqual(F.growthWhatIf({ ...s, settings: { ...s.settings, expectedReturn: 1 } }, "2026-11").returns, [-1, 0, 1, 2, 3]);
   assert.equal(F.growthWhatIf({ ...s, settings: { ...s.settings, birthYear: null } }, "2026-11"), null);
+});
+
+// ---------------------------------------------------------------- Altersvorsorgedepot
+
+// Born 1990, an Altersvorsorgedepot holding 10.000 € in December 2026 that
+// pays out from 65 (January 2055), with 100 € a month paid in, a life
+// expectancy of 85 and nothing growing; 2.000 € a month of expenses, and
+// 500.000 € in a broker account.
+function depotStore({ depot = {}, item = {}, settings = {} } = {}) {
+  const s = F.emptyStore();
+  s.settings = { ...s.settings, birthYear: 1990, expectedReturn: 0, inflation: 0, lifeExpectancy: 85, bufferPercent: 0, ...settings };
+  s.accounts = [{ id: "b", name: "Broker", kind: "invested" }, { id: "d", name: "AVD", kind: "pension" }];
+  s.records = [
+    { month: "2026-12", account: "b", value: 500000 * EUR, payIn: 0, oneOff: 0 },
+    { month: "2026-12", account: "d", value: 10000 * EUR, payIn: 0, oneOff: 0 },
+  ];
+  s.expenses = [{ id: "e", name: "Everything", category: "", amount: 2000 * EUR, everyMonths: 1, from: null, until: null, active: true, essential: true }];
+  s.income = [{
+    id: "avd", name: F.DEPOT, category: F.DEPOT, amount: 0, everyMonths: 1, from: { age: 65 }, until: null, pension: null,
+    depot: { account: "d", contribution: 100 * EUR, children: [], costs: 0, tax: 0, ...depot }, ...item,
+  }];
+  return s;
+}
+const at = (year, month = 1) => year * 12 + month - 1; // a month index
+
+test("depotAllowance: 50 % of the first 360 €, 25 % up to 1.800 €, 100 % up to 300 € per child, nothing below 120 €", () => {
+  const cases = [
+    [0, 0, 0], [119.99, 0, 0], [120, 0, 60], [360, 0, 180], [1200, 0, 390], [1800, 0, 540], [6840, 0, 540],
+    [119.99, 2, 0], [120, 2, 60 + 240], [300, 2, 150 + 600], [1800, 2, 540 + 600],
+  ];
+  for (const [paid, children, total] of cases) assert.equal(F.depotAllowance(Math.round(paid * EUR), children).total, total * EUR, `${paid} € with ${children} children`);
+  assert.deepEqual(F.depotAllowance(1800 * EUR, 2), { basic: 540 * EUR, children: 600 * EUR, total: 1140 * EUR });
+});
+
+test("depotIncome: what is paid in and the Zulagen until you stop working, paid out evenly until the life expectancy", () => {
+  const s = depotStore();
+  const item = s.income[0];
+  const income = (store, retire, growth) => F.depotIncome(store, store.income[0], retire, growth);
+  // Working to 67: 100 € a month from January 2027 until it pays out in
+  // January 2055, 28 years with 390 € of Zulagen each, the last ones when it
+  // starts; then 252 months to the end of 85.
+  const keep = income(s, at(2057));
+  assert.deepEqual([keep.from, keep.start, keep.months], [at(2026, 12), at(2055), 252]);
+  close(keep.value, (10000 + 28 * 1200 + 28 * 390) * EUR, "what it holds at 65");
+  close(keep.gross, keep.value / 252, "spent evenly");
+  assert.equal(keep.net, Math.round(keep.gross));
+  assert.equal(keep.allowance, 390 * EUR);
+  // Stopping at 50 pays in for 13 years; stopping in July 2040 also for
+  // half of 2040, with its Zulagen on 600 €.
+  close(income(s, at(2040)).value, (10000 + 13 * 1590) * EUR, "stopping at 50");
+  close(income(s, at(2040, 7)).value, (10000 + 13 * 1590 + 600 + 240) * EUR, "stopping in July");
+  // Below 10 € a month, no Zulagen; children add 300 € each while
+  // Kindergeld is paid, until 2030 here.
+  close(income(depotStore({ depot: { contribution: 9 * EUR } }), at(2057)).value, (10000 + 28 * 108) * EUR, "no Zulagen");
+  close(income(depotStore({ depot: { children: [2030] } }), at(2057)).value, keep.value + 4 * 300 * EUR, "a child until 2030");
+  // Paying out until 100 spreads it over 432 months; before 85, it still
+  // runs to 85, the least the law has.
+  assert.equal(income(depotStore({ settings: { lifeExpectancy: 100 } }), at(2057)).months, 432);
+  assert.equal(income(depotStore({ settings: { lifeExpectancy: 80 } }), at(2057)).months, 240);
+  // From 70 and working to 67: paid into for 30 years, out for 192 months.
+  const late = income(depotStore({ item: { from: { age: 70 } } }), at(2057));
+  assert.deepEqual([late.start, late.months], [at(2060), 192]);
+  close(late.value, (10000 + 30 * 1590) * EUR, "from 70");
+  // Less the income tax.
+  const taxed = income(depotStore({ depot: { tax: 15 } }), at(2057));
+  assert.equal(taxed.net, Math.round(keep.gross * 0.85));
+  // Without a year of birth, nothing.
+  assert.equal(income(depotStore({ settings: { birthYear: null } }), at(2057)), null);
+  assert.equal(item, s.income[0], "the store is left alone");
+
+  // A value entered in June 2027 holds what was paid in since January:
+  // those months still count for 2027's Zulagen, so the depot comes to the
+  // same, and stopping in June 2027 gets Zulagen on six months.
+  const june = depotStore();
+  june.records = june.records.map((record) => (record.account === "d" ? { ...record, month: "2027-06", value: 10600 * EUR } : record));
+  close(income(june, at(2057)).value, keep.value, "with a value in June");
+  close(income(june, at(2027, 7)).value, (10600 + 240) * EUR, "stopping after June 2027");
+  // Without a value of its own it starts from 0 then, with nothing paid in
+  // before.
+  const none = depotStore({ depot: { account: null } });
+  none.records = june.records.map((record) => ({ ...record, month: "2027-06" }));
+  assert.equal(income(none, at(2027, 7)).value, 0);
+  close(income(none, at(2028)).value, (600 + 240) * EUR, "six months paid in");
+});
+
+test("depotIncome: with growth and inflation, the payout rises with prices and spends the depot by the end", () => {
+  const s = depotStore({ depot: { costs: 0.5, tax: 20 }, settings: { inflation: 2 } });
+  const r = F.depotIncome(s, s.income[0], at(2050), 5);
+  const factor = 1 + monthly(5 - 0.5);
+  // What it holds when it starts paying, in the money of then, paid out
+  // each month as forecast() pays income: in today's money, risen by the
+  // inflation since December 2026.
+  let value = F.inflated(r.value, 2, r.start - 1 - r.from);
+  for (let index = r.start; index < r.start + r.months; index++) value = value * factor - F.inflated(r.gross, 2, index - r.from);
+  assert.ok(Math.abs(value) < 1, `left at the end: ${value}`);
+  assert.equal(r.net, Math.round(r.gross * 0.8));
+  // More growth pays more.
+  assert.ok(F.depotIncome(s, s.income[0], at(2050), 7).gross > r.gross);
+  // Its value from June 2026, with the portfolio's from December: in
+  // December's money, as the forecast counts, six months of inflation on.
+  const older = depotStore({ depot: { contribution: 0 }, settings: { expectedReturn: 3, inflation: 3 } });
+  older.records = older.records.map((record) => (record.account === "d" ? { ...record, month: "2026-06" } : record));
+  const kept = F.depotIncome(older, older.income[0], at(2057));
+  assert.equal(kept.from, at(2026, 12));
+  close(kept.value, F.inflated(10000 * EUR, 3, 6), "in December's money");
+  // Paying out already at 71: what it holds now, spread over the rest.
+  const old = depotStore({ settings: { birthYear: 1955 } });
+  const now = F.depotIncome(old, old.income[0], at(2022), 0);
+  assert.deepEqual([now.start, now.months], [at(2027), (1955 + 86 - 2027) * 12]);
+  close(now.value, 10000 * EUR, "nothing paid in any more");
+});
+
+test("an Altersvorsorgedepot pays what each plan's retirement and growth make of it", () => {
+  const s = depotStore();
+  const depotIn = (retire, growth) => F.incomeIn(s, retire, growth)[0].amount;
+  assert.equal(depotIn(at(2057)), F.depotIncome(s, s.income[0], at(2057)).net);
+  assert.ok(depotIn(at(2040)) < depotIn(at(2057)), "stopping sooner pays in for fewer years");
+  assert.ok(depotIn(at(2057), 3) > depotIn(at(2057), 0), "more growth pays more");
+  const plain = store({ income: [{ id: "w", name: "Salary", category: "", amount: 100, everyMonths: 1 }] });
+  assert.equal(F.incomeIn(plain, at(2057)), plain.income, "without a depot, the income as it is");
+  // What the portfolio pays at 70: the expenses less the depot.
+  assert.equal(F.needIn(s, at(2060), at(2040)), 2000 * EUR - depotIn(at(2040)));
+  assert.equal(F.needIn(s, at(2060), at(2040), { growth: 3 }), 2000 * EUR - depotIn(at(2040), 3));
+  assert.equal(F.needIn(s, at(2054), at(2040)), 2000 * EUR, "nothing before 65");
+  assert.equal(F.budget(s, at(2060), at(2040)).income.now[0].amount, depotIn(at(2040)));
+
+  // On the Forecast, stopping at 50: a step at 65, where it starts paying
+  // what stopping at 50 leaves it, and the money lasts to 85.
+  const o = F.fiOutlook(s, "2027-01");
+  const plan = o.stopAfter("2039-12", "nominal");
+  assert.equal(plan.months.at(-1), "2075-12", "to the end of 85");
+  const steps = plan.plan.phases.at(-1).steps;
+  assert.deepEqual(steps.map((st) => [plan.months[st.from], st.amount]), [["2040-01", 2000 * EUR], ["2055-01", 2000 * EUR - depotIn(at(2040))]]);
+  assert.deepEqual(steps[1].changes, [{ name: F.DEPOT, kind: "income", starts: true }]);
+  // Working to 67 leaves it more.
+  const keep = o.plans("nominal").plans.find((p) => p.key === "keep");
+  assert.equal(keep.phases.at(-1).steps[0].amount, 2000 * EUR - depotIn(at(2057)));
+  // At the low growth the depot grows less too: what the portfolio pays at
+  // 70 is the low growth's need.
+  const low = o.forecast({ growth: "low" }).plans.keep;
+  const k = at(2060) - at(2026, 12);
+  assert.ok(low.values[k] > 0);
+  close(low.values[k - 1] * (1 + monthly(-2)) - low.values[k], 2000 * EUR - F.incomeIn(s, at(2057), -2)[0].amount, "at -2 %");
+});
+
+test("an Altersvorsorgedepot is built-in income worked out from its inputs, one per file, held in a pension account", () => {
+  const s = depotStore();
+  assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(s))), { ok: true, store: s });
+  assert.equal(F.isBuiltIn("income", F.DEPOT), true);
+  assert.deepEqual(F.saveCategory(s, "income", F.DEPOT, "AVD"), { ok: false, error: "Altersvorsorgedepot is built in: it can't be renamed" });
+  assert.equal(F.deleteCategory(s, "income", F.DEPOT), s);
+  const without = { ...s, categories: { ...s.categories, income: [F.STATE_PENSION] } };
+  assert.match(F.parseStore(JSON.parse(JSON.stringify(without))).error, /categories.income is missing "Altersvorsorgedepot"/);
+
+  const item = s.income[0];
+  const depot = item.depot;
+  assert.equal(F.saveItem(s, "income", { ...item, depot: { ...depot, account: null } }).ok, true, "no account yet: it starts from 0");
+  assert.equal(F.saveItem(s, "income", { ...item, amount: 0 }).ok, true, "it may come to 0");
+  for (const [changed, error] of [
+    [{ ...item, category: "Work", amount: 100 }, /Only income in Altersvorsorgedepot is worked out from a depot/],
+    [{ ...item, depot: null }, /is worked out from what you pay in/],
+    [{ ...item, depot: { ...depot, contribution: 150.01 * EUR } }, /What you pay in must be from 0 to 150 a month/],
+    [{ ...item, depot: { ...depot, contribution: -1 } }, /What you pay in must be from 0/],
+    [{ ...item, depot: { ...depot, children: ["2030"] } }, /Kindergeld must end in a year/],
+    [{ ...item, depot: { ...depot, costs: 10 } }, /Costs must be a percentage/],
+    [{ ...item, depot: { ...depot, tax: 100 } }, /Income tax must be a percentage below 100/],
+    [{ ...item, everyMonths: 12 }, /pays out every month from an age on, for good/],
+    [{ ...item, until: { age: 90 } }, /pays out every month from an age on, for good/],
+    [{ ...item, from: { at: "retirement" } }, /pays out every month from an age on, for good/],
+    [{ ...item, from: { age: 64 } }, /starts paying out at an age from 65 to 70/],
+    [{ ...item, from: { age: 71 } }, /starts paying out at an age from 65 to 70/],
+    [{ ...item, depot: { ...depot, account: "gone" } }, /The depot's account no longer exists/],
+    [{ ...item, depot: { ...depot, account: "b" } }, /The depot's account, Broker, must hold pension assets/],
+    [{ ...item, amount: -1 }, /below 0|not negative/],
+  ]) {
+    assert.match(F.saveItem(s, "income", changed).error, error);
+    const file = JSON.parse(JSON.stringify(s));
+    file.income[0] = changed;
+    assert.match(F.parseStore(file).error, error);
+  }
+  assert.match(F.saveItem(s, "income", { ...item, depot: { ...depot, extra: 1 } }).error, /Depot inputs must be null/);
+  const extra = JSON.parse(JSON.stringify(s));
+  extra.income[0].depot.extra = 1;
+  assert.match(F.parseStore(extra).error, /income\[0\].depot has unknown field "extra"/);
+
+  // One depot.
+  assert.deepEqual(F.saveItem(s, "income", { ...item, id: "avd2" }), { ok: false, error: "There is an Altersvorsorgedepot already: edit that one" });
+  const two = JSON.parse(JSON.stringify(s));
+  two.income.push({ ...item, id: "avd2" });
+  assert.match(F.parseStore(two).error, /more than one Altersvorsorgedepot/);
+  // Other income has no depot inputs.
+  const salary = F.saveItem(s, "income", { id: "w", name: "Salary", category: "", amount: 100, everyMonths: 1, from: null, until: null });
+  assert.equal(salary.store.income[1].depot, null);
+
+  // Its account stays pension assets while it holds the depot; deleted, the
+  // depot starts from 0.
+  assert.deepEqual(F.saveAccount(s, "d", "AVD", "invested"), { ok: false, error: "AVD holds the Altersvorsorgedepot under Income: it stays pension assets" });
+  assert.equal(F.saveAccount(s, "d", "Trade Republic AVD", "pension").ok, true);
+  const deleted = F.deleteAccount(s, "d");
+  assert.equal(deleted.income[0].depot.account, null);
+  assert.deepEqual(F.parseStore(JSON.parse(JSON.stringify(deleted))), { ok: true, store: deleted });
+  // A flat can't end it, nor income the flat ends that becomes one.
+  assert.match(F.saveFlat(s, { ...FLAT, stops: [], incomeStops: ["avd"] }).error, /can't name the Altersvorsorgedepot/);
+  const room = { id: "room", name: "Room", category: "", amount: 300 * EUR, everyMonths: 1, from: null, until: null };
+  const flat = F.saveFlat(F.saveItem({ ...s, income: [] }, "income", room).store, { ...FLAT, stops: [], incomeStops: ["room"] }).store;
+  const moved = F.saveItem(flat, "income", { ...item, id: "room" });
+  assert.equal(moved.ok, true, moved.error);
+  assert.deepEqual(moved.store.flat.incomeStops, []);
+  assert.equal(F.parseStore(JSON.parse(JSON.stringify(moved.store))).ok, true);
+});
+
+test("a version 19 file is upgraded: the money lasts to 120 as before, and the Altersvorsorgedepot category", () => {
+  const v19 = {
+    ...EMPTY_V19,
+    categories: { expenses: [], income: ["altersvorsorgedepot", F.STATE_PENSION, "Work"] },
+    income: [
+      { id: "w", name: "Salary", category: "Work", amount: 300000, everyMonths: 1, from: null, until: { at: "retirement" }, pension: null },
+      { id: "a", name: "AVD payout", category: "altersvorsorgedepot", amount: 30000, everyMonths: 1, from: { age: 65 }, until: null, pension: null },
+    ],
+  };
+  const result = F.parseStore(v19);
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.store.settings.lifeExpectancy, 120);
+  assert.deepEqual(result.store.categories.income, [F.DEPOT, F.STATE_PENSION, "Work"]);
+  // Income in a category of that name was entered by hand: it leaves it.
+  assert.deepEqual(result.store.income.map((item) => [item.category, item.depot]), [["Work", null], ["", null]]);
+  assert.equal(v19.income[1].category, "altersvorsorgedepot", "the parsed value is left alone");
+  assert.match(F.parseStore({ ...v19, settings: { ...v19.settings, lifeExpectancy: 90 } }).error, /unknown field "lifeExpectancy"/);
+  assert.match(F.parseStore({ ...v19, income: [{ ...v19.income[0], depot: null }] }).error, /income has unknown field "depot"/);
+});
+
+test("the life expectancy: from the retirement age to 120, where the forecast ends", () => {
+  const s = F.saveSettings(F.emptyStore(), { birthYear: 1990 });
+  assert.equal(s.settings.lifeExpectancy, 100, "100 for a new file");
+  for (const [lifeExpectancy, ok] of [[100, true], [67, true], [120, true], [66, false], [121, false], [90.5, false], [null, false]]) {
+    assert.equal(F.parseStore(JSON.parse(JSON.stringify(F.saveSettings(s, { lifeExpectancy })))).ok, ok, String(lifeExpectancy));
+  }
+  assert.match(F.parseStore({ ...s, settings: { ...s.settings, lifeExpectancy: 49, retirementAge: 40 } }).error, /at least 50/);
+  // The plans go to the end of its year, and last when money is left then:
+  // 30 × yearly expenses at 3 % lasts past 95 but not to 120.
+  const o = (lifeExpectancy) => F.fiOutlook(outlookStore({ value: 2000 * EUR * 12 * 30, goal: 600000 * EUR, rate: 3, settings: { birthYear: 1990, lifeExpectancy } }), "2026-11");
+  const to = (lifeExpectancy) => o(lifeExpectancy).plans("nominal");
+  assert.equal(to(95).months.at(-1), "2085-12");
+  assert.equal(to(120).months.at(-1), "2110-12");
+  assert.equal(o(95).stopsWorking().runsOut, null);
+  assert.notEqual(o(120).stopsWorking().runsOut, null);
 });

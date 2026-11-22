@@ -4,7 +4,7 @@
 // Money is stored as whole cents (integers): hundredths of the currency set
 // in settings. Months are "YYYY-MM" strings.
 
-export const VERSION = 19;
+export const VERSION = 20;
 
 export const KINDS = Object.freeze(["expenses", "income"]);
 
@@ -27,6 +27,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   inflation: 3,
   birthYear: null, // not set until entered; the forecast needs it
   retirementAge: 67,
+  // The age the money should last to: the forecast ends with its year,
+  // and a plan lasts when money is left then.
+  lifeExpectancy: 100,
   emergencyMonths: 6, // the emergency fund to keep, in months of expenses
   // What is paid in a month from now on, in cents, for the investment rate
   // and every projection; null: the average pay-in of the last 12 months.
@@ -44,6 +47,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
 // What the birth year and the retirement age may be.
 export const BIRTH_YEARS = Object.freeze({ min: 1900, max: 2100 });
 export const RETIREMENT_AGES = Object.freeze({ min: 30, max: 80 });
+// What the life expectancy may be; it is never below the retirement age.
+export const LIFE_EXPECTANCIES = Object.freeze({ min: 50, max: 120 });
 // What the emergency fund target may be, in months of expenses.
 export const EMERGENCY_MONTHS = Object.freeze({ min: 0, max: 60 });
 // What the age an expense or income starts or ends at may be.
@@ -54,11 +59,16 @@ export const AGES = Object.freeze({ min: 0, max: 120 });
 // (the item's pension inputs, statePension()).
 export const STATE_PENSION = "State pension";
 
+// The income category of the Altersvorsorgedepot: built in like State
+// pension. Its income is worked out for each plan from the depot's inputs
+// (the item's depot, depotIncome()).
+export const DEPOT = "Altersvorsorgedepot";
+
 // What a new data file starts with; categories can be changed in Settings,
-// all but State pension.
+// all but the built-in ones.
 export const STARTER_CATEGORIES = Object.freeze({
   expenses: Object.freeze(["Food", "Health", "Housing", "Insurance", "Leisure", "Subscriptions", "Transport"]),
-  income: Object.freeze(["Side income", STATE_PENSION, "Work"]),
+  income: Object.freeze([DEPOT, "Side income", STATE_PENSION, "Work"]),
 });
 
 export function emptyStore() {
@@ -79,16 +89,24 @@ export function emptyStore() {
 // ---------------------------------------------------------------- file format
 
 const STORE_KEYS = ["version", "settings", "categories", "expenses", "income", "accounts", "records", "events", "payInChanges", "flat"];
-const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge", "emergencyMonths", "futurePayIn", "payInsRiseWithInflation", "coastPayIn"];
+const SETTINGS_KEYS = ["withdrawalRate", "bufferPercent", "currency", "numberFormat", "expectedReturn", "inflation", "birthYear", "retirementAge", "lifeExpectancy", "emergencyMonths", "futurePayIn", "payInsRiseWithInflation", "coastPayIn"];
+// The settings of versions up to 19, which had no life expectancy.
+const SETTINGS_KEYS_V19 = SETTINGS_KEYS.filter((key) => key !== "lifeExpectancy");
 const ITEM_KEYS = ["id", "name", "category", "amount", "everyMonths", "from", "until"];
 const EXPENSE_KEYS = [...ITEM_KEYS, "active", "essential"];
-const INCOME_KEYS = [...ITEM_KEYS, "pension"];
+const INCOME_KEYS = [...ITEM_KEYS, "pension", "depot"];
 // What a state pension is worked out from, saved so that it can be changed
 // later (statePension()): the Rentenpunkte so far and those still to come
 // while working, the value of a point in cents, the regular age, and what is
 // paid for health and care insurance, in percent. It starts at the item's
 // from.age.
 const PENSION_KEYS = ["points", "morePoints", "pointValue", "regularAge", "deductions"];
+// What an Altersvorsorgedepot is worked out from (depotIncome()): the
+// pension account that holds it (its id, or null before there is one),
+// what you pay in a month in cents, the last year Kindergeld is paid for
+// each child, its costs and the income tax on what it pays out, in percent
+// a year and of the payout. It pays out from the item's from.age.
+const DEPOT_KEYS = ["account", "contribution", "children", "costs", "tax"];
 const ACCOUNT_KEYS = ["id", "name", "kind"];
 const RECORD_KEYS = ["month", "account", "value", "payIn", "oneOff"];
 const EVENT_KEYS = ["id", "name", "month", "amount"];
@@ -242,7 +260,7 @@ function upgradeFromVersion9(value) {
 function upgradeFromVersion11(value) {
   const next = { ...value, version: 12 };
   if (isObject(value.settings)) {
-    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => !["emergencyMonths", "futurePayIn", "payInsRiseWithInflation", "coastPayIn"].includes(key)), "settings");
+    checkKeys(value.settings, SETTINGS_KEYS_V19.filter((key) => !["emergencyMonths", "futurePayIn", "payInsRiseWithInflation", "coastPayIn"].includes(key)), "settings");
     next.settings = { ...value.settings, emergencyMonths: DEFAULT_SETTINGS.emergencyMonths };
   }
   return next;
@@ -252,7 +270,7 @@ function upgradeFromVersion11(value) {
 function upgradeFromVersion12(value) {
   const next = { ...value, version: 13 };
   if (isObject(value.settings)) {
-    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => !["futurePayIn", "payInsRiseWithInflation", "coastPayIn"].includes(key)), "settings");
+    checkKeys(value.settings, SETTINGS_KEYS_V19.filter((key) => !["futurePayIn", "payInsRiseWithInflation", "coastPayIn"].includes(key)), "settings");
     next.settings = { ...value.settings, futurePayIn: DEFAULT_SETTINGS.futurePayIn };
   }
   return next;
@@ -264,7 +282,7 @@ function upgradeFromVersion13(value) {
   if (isObject(value) && "payInChanges" in value) throw new Error('The file has unknown field "payInChanges"');
   const next = { ...value, version: 14, payInChanges: [] };
   if (isObject(value.settings)) {
-    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "payInsRiseWithInflation" && key !== "coastPayIn"), "settings");
+    checkKeys(value.settings, SETTINGS_KEYS_V19.filter((key) => key !== "payInsRiseWithInflation" && key !== "coastPayIn"), "settings");
     next.settings = { ...value.settings, payInsRiseWithInflation: DEFAULT_SETTINGS.payInsRiseWithInflation };
   }
   return next;
@@ -275,7 +293,7 @@ function upgradeFromVersion13(value) {
 function upgradeFromVersion14(value) {
   const next = { ...value, version: 15 };
   if (isObject(value.settings)) {
-    checkKeys(value.settings, SETTINGS_KEYS.filter((key) => key !== "coastPayIn"), "settings");
+    checkKeys(value.settings, SETTINGS_KEYS_V19.filter((key) => key !== "coastPayIn"), "settings");
     next.settings = { ...value.settings, coastPayIn: DEFAULT_SETTINGS.coastPayIn };
   }
   return next;
@@ -321,6 +339,32 @@ function upgradeFromVersion18(value) {
       if ("pension" in item) throw new Error('income has unknown field "pension"');
       const category = item === pension ? STATE_PENSION : same(item.category) ? "" : item.category;
       return { ...item, category, pension: null };
+    });
+  }
+  return next;
+}
+
+// Version 19 had no life expectancy: the money had to last to 120, which
+// upgraded files keep. Nor had it the built-in Altersvorsorgedepot
+// category: it joins the list, a category of the same name in other case
+// becoming it. The income that had such a category was entered by hand,
+// not worked out from a depot, so it is left without a category; no income
+// has depot inputs.
+function upgradeFromVersion19(value) {
+  const next = { ...value, version: 20 };
+  const same = (name) => isText(name) && name.toLowerCase() === DEPOT.toLowerCase();
+  if (isObject(value.settings)) {
+    checkKeys(value.settings, SETTINGS_KEYS_V19, "settings");
+    next.settings = { ...value.settings, lifeExpectancy: 120 };
+  }
+  if (isObject(value.categories) && Array.isArray(value.categories.income)) {
+    next.categories = { ...value.categories, income: [...value.categories.income.filter((name) => !same(name)), DEPOT].sort(compareNames) };
+  }
+  if (Array.isArray(value.income)) {
+    next.income = value.income.map((item) => {
+      if (!isObject(item)) return item;
+      if ("depot" in item) throw new Error('income has unknown field "depot"');
+      return { ...item, category: same(item.category) ? "" : item.category, depot: null };
     });
   }
   return next;
@@ -376,6 +420,7 @@ export function parseStore(value) {
     if (isObject(value) && value.version === 16) value = upgradeFromVersion16(value);
     if (isObject(value) && value.version === 17) value = upgradeFromVersion17(value);
     if (isObject(value) && value.version === 18) value = upgradeFromVersion18(value);
+    if (isObject(value) && value.version === 19) value = upgradeFromVersion19(value);
     checkKeys(value, STORE_KEYS, "The file");
     if (Number.isInteger(value.version) && value.version > VERSION) {
       throw new Error(`it was saved by a newer version of Finance (file version ${value.version}); reload the page or update Finance`);
@@ -383,7 +428,7 @@ export function parseStore(value) {
     if (value.version !== VERSION) throw new Error(`unsupported version ${JSON.stringify(value.version)}`);
 
     checkKeys(value.settings, SETTINGS_KEYS, "settings");
-    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, inflation, birthYear, retirementAge, emergencyMonths, futurePayIn, payInsRiseWithInflation, coastPayIn } = value.settings;
+    const { withdrawalRate, bufferPercent, currency, numberFormat, expectedReturn, inflation, birthYear, retirementAge, lifeExpectancy, emergencyMonths, futurePayIn, payInsRiseWithInflation, coastPayIn } = value.settings;
     if (typeof withdrawalRate !== "number" || !(withdrawalRate > 0 && withdrawalRate <= 100)) {
       throw new Error("settings.withdrawalRate must be above 0 and at most 100");
     }
@@ -406,6 +451,9 @@ export function parseStore(value) {
     if (!isWholeIn(retirementAge, RETIREMENT_AGES)) {
       throw new Error(`settings.retirementAge must be a whole number from ${RETIREMENT_AGES.min} to ${RETIREMENT_AGES.max}`);
     }
+    if (!isWholeIn(lifeExpectancy, LIFE_EXPECTANCIES) || lifeExpectancy < retirementAge) {
+      throw new Error(`settings.lifeExpectancy must be a whole number from the retirement age to ${LIFE_EXPECTANCIES.max}, and at least ${LIFE_EXPECTANCIES.min}`);
+    }
     if (!isWholeIn(emergencyMonths, EMERGENCY_MONTHS)) {
       throw new Error(`settings.emergencyMonths must be a whole number from ${EMERGENCY_MONTHS.min} to ${EMERGENCY_MONTHS.max}`);
     }
@@ -427,7 +475,7 @@ export function parseStore(value) {
         seen.add(name.toLowerCase());
       });
     }
-    if (!value.categories.income.includes(STATE_PENSION)) throw new Error(`categories.income is missing "${STATE_PENSION}"`);
+    for (const name of [STATE_PENSION, DEPOT]) if (!value.categories.income.includes(name)) throw new Error(`categories.income is missing "${name}"`);
 
     const ids = new Set();
     for (const kind of KINDS) {
@@ -441,7 +489,9 @@ export function parseStore(value) {
         if (item.category !== "" && !value.categories[kind].includes(item.category)) {
           throw new Error(`${where} has a category that is not in categories.${kind}`);
         }
-        if (!isCents(item.amount, { min: 1 })) throw new Error(`${where} amount must be a positive number of cents`);
+        // An Altersvorsorgedepot's amount is worked out, and may come to 0.
+        const least = kind === "income" && item.category === DEPOT ? 0 : 1;
+        if (!isCents(item.amount, { min: least })) throw new Error(`${where} amount must be ${least ? "a positive number of cents" : "a number of cents, not negative"}`);
         if (!Number.isInteger(item.everyMonths) || item.everyMonths < 1 || item.everyMonths > 120) {
           throw new Error(`${where} everyMonths must be a whole number from 1 to 120`);
         }
@@ -451,12 +501,14 @@ export function parseStore(value) {
         if (kind === "expenses" && typeof item.essential !== "boolean") throw new Error(`${where} essential must be true or false`);
         if (kind === "income") {
           if (isObject(item.pension)) checkKeys(item.pension, PENSION_KEYS, `${where}.pension`);
-          const error = pensionError(item);
+          if (isObject(item.depot)) checkKeys(item.depot, DEPOT_KEYS, `${where}.depot`);
+          const error = pensionError(item) ?? depotError(item);
           if (error) throw new Error(`${where}: ${error}`);
         }
       });
     }
     if (value.income.filter((item) => item.category === STATE_PENSION).length > 1) throw new Error("income has more than one state pension");
+    if (value.income.filter((item) => item.category === DEPOT).length > 1) throw new Error(`income has more than one ${DEPOT}`);
 
     if (!Array.isArray(value.accounts)) throw new Error("accounts is not a list");
     const accountIds = new Set();
@@ -471,6 +523,10 @@ export function parseStore(value) {
       if (!ACCOUNT_KINDS.includes(account.kind)) throw new Error(`${where} kind must be ${ACCOUNT_KINDS.join(", ")}`);
       accountIds.add(account.id);
       accountNames.add(key);
+    });
+    value.income.forEach((item, i) => {
+      const error = depotAccountError(item, value.accounts);
+      if (error) throw new Error(`income[${i}]: ${error}`);
     });
 
     if (!Array.isArray(value.records)) throw new Error("records is not a list");
@@ -747,7 +803,9 @@ const bufferOn = (amount, settings) => (amount * settings.bufferPercent) / 100;
 
 // The budget of the month of `index` when retirement starts in the month of
 // `retirement` (by default when the settings say). Amounts are a month, in
-// today's money, and may carry fractions of a cent.
+// today's money, and may carry fractions of a cent. An Altersvorsorgedepot
+// pays what it would for that retirement at the expected return
+// (incomeIn).
 // Returns {
 //   expenses: { now, later, ended, inactive: the expenses by where they
 //     stand (statusIn), in the store's order; monthly: those that count,
@@ -766,7 +824,7 @@ export function budget(store, index, retirement = retirementIndex(store.settings
     return lists;
   };
   const expenses = sorted(store.expenses);
-  const income = sorted(store.income);
+  const income = sorted(incomeIn(store, retirement));
   const monthly = sum(expenses.now.map(monthlyAmount));
   const essential = sum(expenses.now.filter((item) => item.essential).map(monthlyAmount));
   const total = monthly + bufferOn(monthly, settings);
@@ -781,12 +839,14 @@ export function budget(store, index, retirement = retirementIndex(store.settings
 }
 
 // budget(store, index, retirement).need, or .essentialNeed with essential,
-// without the lists: the projections ask for it month after month.
-export function needIn(store, index, retirement, { essential = false } = {}) {
+// without the lists: the projections ask for it month after month. An
+// Altersvorsorgedepot grows by `growth` % a year (the expected return by
+// default), as budget() has it.
+export function needIn(store, index, retirement, { essential = false, growth } = {}) {
   const { birthYear } = store.settings;
   const counts = (item) => countsIn(item, index, birthYear, retirement);
   const expenses = sum(store.expenses.filter((item) => counts(item) && (!essential || item.essential)).map(monthlyAmount));
-  const income = sum(store.income.filter(counts).map(monthlyAmount));
+  const income = sum(incomeIn(store, retirement, growth).filter(counts).map(monthlyAmount));
   return Math.max(0, expenses + bufferOn(expenses, store.settings) - income);
 }
 
@@ -1225,6 +1285,153 @@ export const GERMANY_2026 = Object.freeze({
   regularAge: 67,
 });
 
+// The Altersvorsorgedepot, from 2027: a pension depot the state adds
+// Zulagen to, paid out from 65 (Altersvorsorgereformgesetz of 26 May 2026,
+// BGBl. 2026 I Nr. 156). Amounts in cents.
+export const DEPOT_RULES = Object.freeze({
+  // The first month it can be paid into.
+  start: "2027-01",
+  // Below this own contribution in a year, no Zulage at all (§ 86 EStG).
+  minimum: 12000,
+  // The Grundzulage: 50 % of the own contributions of a year up to
+  // `firstTier`, and 25 % of those above it up to `subsidised` (§ 84 EStG).
+  firstTier: 36000,
+  subsidised: 180000,
+  firstRate: 0.5,
+  secondRate: 0.25,
+  // The Kinderzulage: 100 % of the own contributions, up to this, for each
+  // child Kindergeld is paid for (§ 85 EStG).
+  perChild: 30000,
+  // The ages it may start paying out at, and the age a withdrawal plan
+  // runs to at the least (§ 1 AltZertG).
+  payoutAges: Object.freeze({ min: 65, max: 70 }),
+  payoutUntil: 85,
+  // The most a month Finance takes: what gets a Zulage. More may be paid
+  // in, but it is taxed otherwise when paid out.
+  contribution: 15000,
+});
+
+// The Zulagen on `paid` own contributions in a year, with `children`
+// children Kindergeld is paid for that year: { basic, children, total },
+// in whole cents. Nothing below the minimum.
+export function depotAllowance(paid, children = 0) {
+  const r = DEPOT_RULES;
+  if (paid < r.minimum) return { basic: 0, children: 0, total: 0 };
+  const counted = Math.min(paid, r.subsidised);
+  const basic = Math.round(r.firstRate * Math.min(counted, r.firstTier) + r.secondRate * Math.max(0, counted - r.firstTier));
+  const forChildren = children * Math.min(paid, r.perChild);
+  return { basic, children: forChildren, total: basic + forChildren };
+}
+
+const isDepot = (item) => item.category === DEPOT && isObject(item.depot);
+
+// The month an Altersvorsorgedepot is worked out from and what it holds
+// then: its account's latest value (own), or 0 without an account or a
+// value, in the latest month any account has a value (this month without
+// one).
+// today: the month whose money the projections are in, that of the
+// portfolio's latest value (the forecast's start), else that month too.
+function depotBase(store, depot) {
+  const latest = (records) => records.reduce((a, r) => (a === null || r.month > a.month ? r : a), null);
+  const invested = new Set(store.accounts.filter((a) => a.kind === "invested").map((a) => a.id));
+  const portfolio = latest(store.records.filter((r) => invested.has(r.account)));
+  const own = latest(depot.account === null ? [] : store.records.filter((r) => r.account === depot.account));
+  const any = latest(store.records);
+  const index = monthIndex(own ? own.month : any ? any.month : currentMonth());
+  return { index, value: own ? own.value : 0, own: own !== null, today: portfolio ? monthIndex(portfolio.month) : index };
+}
+
+// Worked out once per store, item, last month paid in and growth: an item
+// being typed is a new one each time.
+const depotCaches = new WeakMap();
+
+// What the Altersvorsorgedepot `item` pays a month for a plan that retires
+// in the month of `retirement` (an index), growing by `growth` % a year
+// before its costs. From the month it is worked out from (depotBase) it
+// gets what you pay in every month from DEPOT_RULES.start while you work,
+// until it pays out, and each year's Zulagen in the January after (when it
+// starts paying out at the latest): of its year's months paid in, those
+// before that month too, which its own value already holds. From January of its payout age it pays
+// the same amount in today's money every month until the end of the life
+// expectancy (85 at the least, as the law has it): what it holds then,
+// spent to nothing by then while the rest keeps growing, less the income
+// tax on it. Today's money is that of the portfolio's latest value, as in
+// the forecast (depotBase).
+// Returns { from: today's month, start: the first month it pays (indexes),
+// months: how many it pays, value: what it holds when it starts paying,
+// allowance: the Zulagen of a year you pay in (with the children of the
+// first such year), gross and net: what it pays a month before and after
+// the tax }, all in today's money, net in whole cents; null without a
+// year of birth.
+export function depotIncome(store, item, retirement, growth = store.settings.expectedReturn) {
+  const { birthYear, lifeExpectancy, inflation } = store.settings;
+  if (birthYear === null) return null;
+  if (!depotCaches.has(store)) depotCaches.set(store, new WeakMap());
+  const items = depotCaches.get(store);
+  if (!items.has(item)) items.set(item, { base: depotBase(store, item.depot), results: new Map() });
+  const { base, results } = items.get(item);
+  const d = item.depot;
+  const r = DEPOT_RULES;
+  const start = Math.max((birthYear + item.from.age) * 12, base.index + 1);
+  const opens = monthIndex(r.start);
+  const firstPaid = Math.max(base.index + 1, opens);
+  const lastPaid = Math.min(retirement, start) - 1;
+  // The first month whose Zulagen are still to come: its year's January,
+  // when its value holds what was paid in since.
+  const firstCounted = base.own ? Math.max(Math.floor(base.index / 12) * 12, opens) : firstPaid;
+  const key = `${Math.max(lastPaid, firstCounted - 1)} ${growth}`;
+  if (results.has(key)) return results.get(key);
+  const end = Math.max((birthYear + lifeExpectancy + 1) * 12, (birthYear + r.payoutUntil) * 12);
+  const factor = 1 + monthlyRate(growth - d.costs);
+  // Grown from the month after `index` until the month before it pays out.
+  const grown = (amount, index) => amount * factor ** Math.max(0, start - 1 - index);
+  const children = (year) => d.children.filter((until) => until >= year).length;
+  const allowanceOf = (year, months) => depotAllowance(d.contribution * months, children(year)).total;
+  let value = grown(base.value, base.index);
+  if (lastPaid >= firstPaid) {
+    // What is paid in at the end of each month, from firstPaid to lastPaid.
+    const n = lastPaid - firstPaid + 1;
+    value += grown(d.contribution, lastPaid) * (factor === 1 ? n : (factor ** n - 1) / (factor - 1));
+  }
+  // Each year's Zulagen, at the start of the January after.
+  for (let year = Math.floor(firstCounted / 12); year <= Math.floor(lastPaid / 12); year++) {
+    const months = Math.min(lastPaid, year * 12 + 11) - Math.max(firstCounted, year * 12) + 1;
+    if (months > 0) value += grown(allowanceOf(year, months), (year + 1) * 12 - 1);
+  }
+  const months = Math.max(0, end - start);
+  const today = deflated(value, inflation, start - 1 - base.today);
+  // The growth after inflation, a month.
+  const real = factor / (1 + monthlyRate(inflation)) - 1;
+  const gross = months === 0 ? 0 : Math.abs(real) < 1e-12 ? today / months : (today * real) / (1 - (1 + real) ** -months);
+  const result = {
+    from: base.today,
+    start,
+    months,
+    value: today,
+    allowance: allowanceOf(Math.floor(firstPaid / 12), 12),
+    gross,
+    net: Math.round(gross * (1 - d.tax / 100)),
+  };
+  results.set(key, result);
+  return result;
+}
+
+// The income as a plan that retires in the month of `retirement` counts
+// it, at `growth` % a year: an Altersvorsorgedepot pays what depotIncome()
+// works out for them, the rest what was entered.
+export function incomeIn(store, retirement, growth = store.settings.expectedReturn) {
+  if (!store.income.some(isDepot)) return store.income;
+  if (!incomeCaches.has(store)) incomeCaches.set(store, new Map());
+  const cache = incomeCaches.get(store);
+  const key = `${retirement} ${growth}`;
+  if (!cache.has(key)) cache.set(key, store.income.map((item) => (isDepot(item) ? { ...item, amount: depotIncome(store, item, retirement, growth)?.net ?? 0 } : item)));
+  return cache.get(key);
+}
+
+// incomeIn()'s lists, per store, retirement and growth: the projections ask
+// for them month after month.
+const incomeCaches = new WeakMap();
+
 // Current numbers for the dashboard, for the month `now`. Amounts are in
 // cents and may carry fractions of a cent; round when displaying. Ratios
 // are fractions (0.25). Income and expenses are the ones that count now;
@@ -1322,9 +1529,6 @@ export function growthRates(expectedReturn) {
   return { low: expectedReturn - RETURN_SPREAD, mid: expectedReturn, high: expectedReturn + RETURN_SPREAD };
 }
 export const GROWTHS = Object.freeze(["low", "mid", "high"]);
-// The forecast is shown up to the end of the year of this age, and a plan
-// lasts when money is still left then.
-export const SHOWN_AGE = 120;
 
 // keep: pay in until retirement.
 // coast: pay in until Coast FI, then the smaller amount until retirement.
@@ -1347,7 +1551,9 @@ export function ageIn(month, birthYear) {
 // retirement starts. A milestone counts only before retirement.
 //
 // params: { start (month), value, expenses (a month), fiNumber, birthYear,
-// retirementAge, growth (percent a year, before inflation), inflation
+// retirementAge, lifeExpectancy (the forecast goes on to the end of the year
+// of this age, and a plan lasts when money is still left then), growth
+// (percent a year, before inflation), inflation
 // (percent a year), contribution (a month), coastContribution (a month),
 // need(index, retirement), goal(index) }. contribution may also be a
 // function of the month index: what is paid in that month, in the money of
@@ -1382,7 +1588,7 @@ export function ageIn(month, birthYear) {
 // the money to last to the end, with what this run pays in and takes out
 // after it (0: any value lasts; one-offs taken out count in full) }.
 export function forecast(params) {
-  const { start, value, expenses, fiNumber, birthYear, retirementAge, growth, inflation = 0, contribution, coastContribution } = params;
+  const { start, value, expenses, fiNumber, birthYear, retirementAge, lifeExpectancy, growth, inflation = 0, contribution, coastContribution } = params;
   const need = params.need ?? (() => expenses);
   const goal = params.goal ?? (() => fiNumber);
   const paidIn = typeof contribution === "function" ? contribution : () => contribution;
@@ -1392,7 +1598,7 @@ export function forecast(params) {
   const first = monthIndex(start);
   const retires = birthYear != null;
   const retirement = retirementIndex({ birthYear, retirementAge });
-  const ageLimit = (birthYear + SHOWN_AGE) * 12 + 11;
+  const ageLimit = (birthYear + lifeExpectancy) * 12 + 11;
   const lastShown = retires ? Math.max(first, ageLimit) : first + MAX_PROJECTION_MONTHS;
   const fixed = params.fixed ? { coast: params.fixed.coast && monthIndex(params.fixed.coast), fi: params.fixed.fi && monthIndex(params.fixed.fi) } : null;
   // What the portfolio pays in the month of `index`, retired from the month
@@ -1551,7 +1757,7 @@ function inTodaysMoney(result, inflation) {
 // what-if pays in less while its loan runs. The phases still show the
 // plan's amounts.
 export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } = {}) {
-  const { birthYear, retirementAge, expectedReturn, inflation } = store.settings;
+  const { birthYear, retirementAge, lifeExpectancy, expectedReturn, inflation } = store.settings;
   const nowIndex = monthIndex(now);
   const series = portfolioSeries(store);
   const last = series.at(-1) ?? null;
@@ -1571,12 +1777,15 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
   const goal = (essential) => (index) => fiNumberIn(store, Math.max(index, nowIndex), { essential });
   const fiNumber = goal(false)(first + 1);
 
-  // What the portfolio pays in a month, retired from `from`: the same in
-  // every run, so worked out once.
+  // What the portfolio pays in a month, retired from `from`, at `growth`
+  // ("low", "mid" or "high", for an Altersvorsorgedepot): the same in
+  // every run at that growth, so worked out once; without a depot, the
+  // same at every growth.
   const needs = new Map();
-  const need = (index, from) => {
-    const key = `${index} ${from}`;
-    if (!needs.has(key)) needs.set(key, needIn(store, index, from));
+  const depot = store.income.some(isDepot);
+  const need = (growth) => (index, from) => {
+    const key = depot ? `${index} ${from} ${growth}` : `${index} ${from}`;
+    if (!needs.has(key)) needs.set(key, needIn(store, index, from, { growth: rates[growth] }));
     return needs.get(key);
   };
   // forecast() runs, and plans() in each money, once each.
@@ -1588,10 +1797,10 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
     const key = `${essential} ${growth} ${coastContribution} ${fixed?.coast} ${fixed?.fi} ${flat}`;
     if (!runs.has(key)) {
       runs.set(key, forecast({
-        start, value, birthYear, retirementAge, inflation, coastContribution, fixed,
+        start, value, birthYear, retirementAge, lifeExpectancy, inflation, coastContribution, fixed,
         contribution: flat === null ? paidIn : (index) => (rises ? inflated(flat, inflation, index - first) : flat),
         growth: rates[growth],
-        need,
+        need: need(growth),
         goal: goal(essential),
         oneOffs: (index) => oneOffsIn(store, index),
         takenOut: (index) => oneOffsIn(store, index, { out: true }),
@@ -1776,7 +1985,7 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
     // and high growth show what happens to the same plan when markets do
     // worse or better. Values in "nominal" money (of each month) or
     // "today"'s. null without a year of birth. Otherwise {
-    //   months: shown months, from start to the end of SHOWN_AGE,
+    //   months: shown months, from start to the end of the life expectancy,
     //   retirement: its first month,
     //   plans: [{ key: "fi" (Retire early), "coast", "keep" or "safe", or
     //     just "keep" once retired,
@@ -1786,11 +1995,12 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
     //       Coast FI by then, or only in the month before),
     //     values: { low, mid, high }, one per shown month,
     //     runsOut: { low, mid, high }, the first month with nothing left, or
-    //       null when money is left at the end of SHOWN_AGE,
+    //       null when money is left at the end of the life expectancy,
     //     lastsWith: { low, mid, high }, what the portfolio has to be more
     //       than at its turn, the end of stopInvesting (of start when that
-    //       is null), for the money to last to the end of SHOWN_AGE with
-    //       the plan's course from there on: forecast()'s needs,
+    //       is null), for the money to last to the end of the life
+    //       expectancy with the plan's course from there on: forecast()'s
+    //       needs,
     //     phases: [{ kind: "invest", "coast" or "retired", from, to (indexes
     //       of shown months; the last phase ends at months.length),
     //       steps }] }] }
@@ -1872,8 +2082,9 @@ export function fiOutlook(store, now = currentMonth(), { payIn: adjust = null } 
     // the first month lived off the portfolio, the month after FI, or null
     // when FI doesn't come before the month before retirement; runsOut:
     // the first month with nothing left after it, or null when it lasts
-    // to the end of SHOWN_AGE (also when it doesn't stop) }. null without
-    // a year of birth, or once retired. The What if page compares it.
+    // to the end of the life expectancy (also when it doesn't stop) }.
+    // null without a year of birth, or once retired. The What if page
+    // compares it.
     stopsWorking() {
       if (!Number.isFinite(retirement) || retired) return null;
       const result = run();
@@ -1930,15 +2141,16 @@ export const PAY_IN_STEPS = [0, 500, 1000, 1500, 2000, 2500, 3000].map((units) =
 // plan. Buying a flat (below) is one too.
 
 // The Forecast and What if draw their plans only up to the end of the
-// year of this age, while whether the money lasts is still worked out to
-// SHOWN_AGE.
+// year of this age (or of the life expectancy when that comes first),
+// while whether the money lasts is still worked out to the life
+// expectancy.
 export const CHART_AGE = 85;
 
 // The months and a plan of plans() or stopAfter() ({ months, plan }),
 // shown only up to the end of the year of `age`: the values and phases end
-// there, while runsOut and lastsWith stay as worked out to SHOWN_AGE. All
-// of them when they end sooner, or when the months start in that year or
-// later.
+// there, while runsOut and lastsWith stay as worked out to the life
+// expectancy. All of them when they end sooner, or when the months start
+// in that year or later.
 export function shownUntil({ months, plan }, birthYear, age) {
   const from = (birthYear + age) * 12; // January of `age`
   if (monthIndex(months[0]) >= from) return { months, plan };
@@ -2095,6 +2307,7 @@ export function flatError(flat, expenses, income) {
   if (flat.stops.some((id) => !expenses.some((item) => item.id === id))) return "stops names an unknown expense";
   if (!Array.isArray(flat.incomeStops) || new Set(flat.incomeStops).size !== flat.incomeStops.length) return "incomeStops must be a list of income ids, each once";
   if (flat.incomeStops.some((id) => !income.some((item) => item.id === id))) return "incomeStops names an unknown income";
+  if (flat.incomeStops.some((id) => income.some((item) => item.id === id && item.category === DEPOT))) return `incomeStops can't name the ${DEPOT}`;
   return null;
 }
 
@@ -2287,34 +2500,76 @@ function sortRecords(store, records) {
 // Adds an expense or income item, or changes the one with its id. Checks the
 // item as parseStore does, and that it does not start and end at retirement.
 // Returns { ok: true, store } or { ok: false, error }.
-// Income without pension inputs gets none.
+// Income without pension or depot inputs gets none.
 export function saveItem(store, kind, item) {
-  if (kind === "income") item = { ...item, pension: item.pension ?? null };
+  if (kind === "income") item = { ...item, pension: item.pension ?? null, depot: item.depot ?? null };
   const error = itemError(store, kind, item);
   if (error) return { ok: false, error };
   const next = structuredClone(store);
   const at = next[kind].findIndex((existing) => existing.id === item.id);
   if (at === -1) next[kind].push({ ...item });
   else next[kind][at] = { ...item };
+  // A flat can't end an Altersvorsorgedepot: income that becomes one isn't
+  // ended any more.
+  if (kind === "income" && item.category === DEPOT && next.flat) next.flat.incomeStops = next.flat.incomeStops.filter((stop) => stop !== item.id);
   return { ok: true, store: next };
 }
 
 function itemError(store, kind, item) {
   if (!isText(item.name) || item.name === "") return "Enter a name";
   if (item.category !== "" && !store.categories[kind].includes(item.category)) return `Category "${item.category}" no longer exists`;
-  if (!isCents(item.amount, { min: 1 })) return item.amount >= MAX_CENTS ? "Amount is too large" : "Amount must be more than 0";
+  // An Altersvorsorgedepot's amount is worked out, and may come to 0.
+  const least = kind === "income" && item.category === DEPOT ? 0 : 1;
+  if (!isCents(item.amount, { min: least })) return item.amount >= MAX_CENTS ? "Amount is too large" : least ? "Amount must be more than 0" : "Amount must not be below 0";
   if (!Number.isInteger(item.everyMonths) || item.everyMonths < 1 || item.everyMonths > 120) return "Paid every must be whole months from 1 to 120";
   if (!isBound(item.from)) return "Choose when it starts";
   if (!isBound(item.until)) return "Choose when it ends";
   if (item.from?.at === "retirement" && item.until?.at === "retirement") return "It cannot start and end at retirement";
   if (kind === "expenses" && (typeof item.active !== "boolean" || typeof item.essential !== "boolean")) return "Active and essential must be true or false";
   if (kind === "income") {
-    const error = pensionError(item);
+    const error = pensionError(item) ?? depotError(item) ?? depotAccountError(item, store.accounts);
     if (error) return error;
     if (item.category === STATE_PENSION && store.income.some((other) => other.category === STATE_PENSION && other.id !== item.id)) {
       return "There is a state pension already: edit that one";
     }
+    if (item.category === DEPOT && store.income.some((other) => other.category === DEPOT && other.id !== item.id)) {
+      return `There is an ${DEPOT} already: edit that one`;
+    }
   }
+  return null;
+}
+
+const isPercentBelow = (value, max) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value < max;
+
+// What is wrong with an income's depot inputs (DEPOT_KEYS), or null. Only
+// an Altersvorsorgedepot has them, and it always has: it pays out every
+// month from an age on, for good (until the life expectancy). Whether its
+// account is there is depotAccountError's. Income a what-if makes up may
+// have no depot key at all.
+function depotError(item) {
+  const d = item.depot ?? null;
+  if (d === null) return item.category === DEPOT ? `An ${DEPOT} is worked out from what you pay in and the rest` : null;
+  if (!isObject(d) || !DEPOT_KEYS.every((key) => key in d) || Object.keys(d).length !== DEPOT_KEYS.length) return "Depot inputs must be null or the account and the rest";
+  if (item.category !== DEPOT) return `Only income in ${DEPOT} is worked out from a depot`;
+  if (d.account !== null && !(isText(d.account) && d.account !== "")) return "The depot's account must be an account's id, or null";
+  if (!isCents(d.contribution, { min: 0 }) || d.contribution > DEPOT_RULES.contribution) return `What you pay in must be from 0 to ${DEPOT_RULES.contribution / 100} a month`;
+  if (!Array.isArray(d.children) || d.children.length > 20 || !d.children.every((year) => isWholeIn(year, BIRTH_YEARS))) return "Kindergeld must end in a year, one for each child";
+  if (!isPercentBelow(d.costs, 10)) return "Costs must be a percentage from 0 to below 10";
+  if (!isPercentBelow(d.tax, 100)) return "Income tax must be a percentage below 100";
+  if (item.everyMonths !== 1 || item.until !== null || !isObject(item.from) || !("age" in item.from)) return `An ${DEPOT} pays out every month from an age on, for good`;
+  const { min, max } = DEPOT_RULES.payoutAges;
+  if (item.from.age < min || item.from.age > max) return `An ${DEPOT} starts paying out at an age from ${min} to ${max}`;
+  return null;
+}
+
+// What is wrong with the account an Altersvorsorgedepot is held in, or
+// null: it is one of `accounts`, holding pension assets.
+function depotAccountError(item, accounts) {
+  const id = item.depot?.account ?? null;
+  if (id === null) return null;
+  const account = accounts.find((a) => a.id === id);
+  if (!account) return "The depot's account no longer exists";
+  if (account.kind !== "pension") return `The depot's account, ${account.name}, must hold pension assets`;
   return null;
 }
 
@@ -2362,6 +2617,9 @@ export function saveAccount(store, id, name, kind) {
   if (kind !== undefined && !ACCOUNT_KINDS.includes(kind)) return { ok: false, error: "Choose what the account holds" };
   const other = findAccount(store, clean);
   if (other && other.id !== id) return { ok: false, error: `"${clean}" already exists` };
+  if (kind !== undefined && kind !== "pension" && id !== null && store.income.some((item) => item.depot?.account === id)) {
+    return { ok: false, error: `${clean} holds the ${DEPOT} under Income: it stays pension assets` };
+  }
   const next = structuredClone(store);
   const account = next.accounts.find((a) => a.id === id);
   if (account) {
@@ -2373,10 +2631,12 @@ export function saveAccount(store, id, name, kind) {
   return { ok: true, store: next };
 }
 
+// An Altersvorsorgedepot it held has no account after it: it starts from 0.
 export function deleteAccount(store, id) {
   const next = structuredClone(store);
   next.accounts = next.accounts.filter((a) => a.id !== id);
   next.records = next.records.filter((r) => r.account !== id);
+  for (const item of next.income) if (item.depot?.account === id) item.depot.account = null;
   return next;
 }
 
@@ -2487,10 +2747,10 @@ export function saveCategory(store, kind, oldName, name) {
   return { ok: true, store: next };
 }
 
-// Whether a category is built in, such as State pension: it can't be
-// renamed or deleted.
+// Whether a category is built in, State pension or Altersvorsorgedepot:
+// it can't be renamed or deleted.
 export function isBuiltIn(kind, name) {
-  return kind === "income" && name === STATE_PENSION;
+  return kind === "income" && (name === STATE_PENSION || name === DEPOT);
 }
 
 // Removes a category; what had it is left without one. A built-in one

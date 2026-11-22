@@ -160,6 +160,11 @@ Finance window's browser profile. The data file stays.
     starts without deductions. The forecast works out when you could stop
     sooner. The forecast needs the year of birth; it is
     empty until entered. Ages and retirement start in January of their year.
+  - Life expectancy (default 100): the age your money should last to. The
+    forecast ends with that year, and a plan lasts when money is left
+    then; an Altersvorsorgedepot pays out until then too. Never below the
+    retirement age. Data files from before this setting keep 120, the age
+    the forecast used to go to.
   - The [lock](#lock): on or off.
   - Where the data file and its daily backups are, and which updates to
     offer.
@@ -224,7 +229,7 @@ amounts: when the rent goes up, edit it and the numbers change.
   Inactive, but counts nowhere (not in the totals, the FI number or the
   charts) until **Activate** counts it again.
 
-Two things, for Germany, add what changes when you stop working:
+Three things, for Germany, add what changes when you stop working:
 
 - **State pension**, an income category of its own: picked in the Income
   form, its fields take the place of the amount, how often, and when it
@@ -241,6 +246,30 @@ Two things, for Germany, add what changes when you stop working:
   67 assumes you pay in until then; early retirees get less. A state
   pension added before kept only its amount: it moves into the category,
   and Edit asks for its Rentenpunkte once.
+- **Altersvorsorgedepot**, the pension depot the state subsidises from
+  2027 (Altersvorsorgereformgesetz of 26 May 2026), another income
+  category of its own: picked in the Income form, its fields take the
+  place of the amount, how often, and when it starts and ends. The pension
+  account its value is entered in (or none yet: it starts from 0), what
+  you pay in a month (at most 150 €, 1.800 € a year: what gets a Zulage),
+  the last year of Kindergeld for each child, the age it pays out from (65
+  to 70), its costs a year (0,2 % by default) and the income tax on what
+  it pays out (15 % by default: it is taxed in full as income). The state
+  adds Zulagen once you pay in 120 € a year: 50 % of the first 360 €, 25 %
+  up to 1.800 € (540 € at most), and 100 % up to 300 € per child, each
+  year's in the January after. Its amount is never fixed: every plan works
+  it out for when it stops working, as you pay in and get Zulagen only
+  while you work. From the account's latest value it grows by the expected
+  return less the costs (by the low and high growth in their runs), then
+  pays out the same amount in today's money every month until your life
+  expectancy (85 at the least, as the law has it), less the tax. Stopping
+  at 50 instead of 67 leaves it much less. Its row says what it comes from
+  and its amount for working to the retirement age. The category is built
+  in, and there is one depot; its account stays pension assets while it
+  holds it, and a flat can't end it. Left out: the 30 % lump sum, payouts
+  that change every few years, a second contract, contributions above
+  150 € a month, and the tax refund a high income brings on top of the
+  Zulage, which goes to you rather than into the depot.
 - **Health and care insurance after you stop working**, at the bottom of
   Expenses: as a voluntary member of a statutory insurer, at least the
   minimum base (1.318,33 € a month in 2026) × 14 % + the Zusatzbeitrag
@@ -248,19 +277,22 @@ Two things, for Germany, add what changes when you stop working:
   about 280 € a month. Added as the essential expense "Health and care
   insurance" from retirement until the age the pension starts.
 
-Both numbers can be changed; income tax is left out.
+All the numbers can be changed. Income tax is left out but for the
+Altersvorsorgedepot's.
 
 ![Expenses: essential ones marked, health insurance from retirement until 67 under Later, two inactive, and the health insurance helper](docs/expenses.png)
 
 ![Income: a salary until retirement, and the state pension being edited, with how it is worked out](docs/income.png)
+
+![Income: the Altersvorsorgedepot being edited, worked out for working to 67, and its row under Later](docs/depot.png)
 
 ### Portfolio, net worth and returns
 
 Each account holds something: **invested** (brokers, ETF savings plans:
 the portfolio), **cash** (money you may spend, such as savings for a
 flat), **emergency fund** (Tagesgeld you keep for emergencies),
-**property**, **pension assets** (Riester, Rürup, a company pension: locked
-until retirement) or **debt** (what is still owed, such as a mortgage). Only
+**property**, **pension assets** (Riester, Rürup, an Altersvorsorgedepot, a
+company pension: locked until retirement) or **debt** (what is still owed, such as a mortgage). Only
 invested accounts are the portfolio that the FI number, Time to FI and the
 forecast count; all of them, debts taken off, are the net worth. Accounts
 are set up in Settings; those from before kinds, and new ones from a CSV
@@ -399,11 +431,12 @@ plan:
 | --- | --- |
 | Stop investing · now (or the age of Coast FI) | investing until Coast FI, then coasting: working, and paying in only the amount set for after Coast FI in Settings (default 0), then retired from the retirement age |
 | Stop working · 53 (the age FI is reached) | investing until FI, then retired from the month after |
-| Even at 6 % · 56 | investing until January of the first age from which the money lasts to 120 even at the low growth, then retired. Only when stopping at FI runs out at the low growth; “–” when no age before the retirement age lasts |
+| Even at 6 % · 56 | investing until January of the first age from which the money lasts to the life expectancy even at the low growth, then retired. Only when stopping at FI runs out at the low growth; “–” when no age before the retirement age lasts |
 | At the latest · 67 (the retirement age) | investing until retirement, then retired |
 
-Under the age, each card says whether that plan's money lasts: “Lasts to
-120” even at the low growth (6 % by default), “6 %: empty at 83” when it
+Under the age, each card says whether that plan's money lasts to the life
+expectancy from Settings: “Lasts to 100” even at the low growth (6 % by
+default), “6 %: empty at 83” when it
 runs out at the low growth only, “Empty at 90” when it runs out at the
 expected return. A plan that doesn't happen before retirement says “Not
 before 67”. Once retired, one card says so.
@@ -411,10 +444,11 @@ before 67”. Once retired, one card says so.
 Click a card, or move with the arrow keys, to see its plan in the card
 below (the picked card has a bright border and corner): its name, with a
 check, warning or cross for whether the money lasts, its bar on an age line
-from now to 85, and its chart. Whether the money lasts is still worked out
-to 120: a plan that runs out at 90 says so on its card, with no mark on
-the bar or the chart. Once you are 85, they go to 120. The plan picked
-stays picked in this browser.
+from now to 85 (or to the life expectancy, when that is sooner), and its
+chart. Whether the money lasts is still worked out to the life
+expectancy: a plan that runs out at 90 says so on its card, with no mark
+on the bar or the chart. Once you are 85, they go to the life expectancy.
+The plan picked stays picked in this browser.
 
 Each phase is a stretch of the bar: **Investing** (blue) with what is paid
 in a month as planned in Settings, a part for each amount (`+1.400 €`, then
@@ -426,8 +460,8 @@ Above the bar, what the portfolio has when a phase or step ends. A plan
 that doesn't happen before retirement says “Not before 67”.
 
 While retired, a step splits the bar wherever that amount changes, with its
-cause under it: an income that starts (“+ State pension”, a private
-pension, rent) or an expense that ends. A cause that would run into the one
+cause under it: an income that starts (“+ State pension”,
+“+ Altersvorsorgedepot”, a private pension, rent) or an expense that ends. A cause that would run into the one
 before goes a line lower. The bar's height splits into what the portfolio
 pays (orange) and what other income pays (aqua), so a large pension shows
 as mostly aqua, a small one as a thin line, and none as orange to the end.
@@ -439,7 +473,8 @@ Where the money runs out, the portfolio's part of the bar turns red
 When the picked plan runs out, a line under its name says what would make
 it last anyway: “Lasts even at 6 % with 781.000 € at 53 (+242.000 €)”.
 That is the portfolio it would need when it stops investing or working
-(now, for a plan that stops now) for the money to last to 120 with only
+(now, for a plan that stops now) for the money to last to the life
+expectancy with only
 the low growth from then on, up to whole thousands; in brackets, how much
 more that is than it would have then at the low growth.
 
@@ -467,7 +502,7 @@ not in the data file.
   Settings (3 % a year by default). Pay-ins stay the same unless they rise.
 - The growth is the same every year. Real markets are not, and bad years
   right after you start living off the portfolio hurt most. Taxes are left
-  out.
+  out, but for the income tax set on an Altersvorsorgedepot.
 
 **Planned one-offs**, in Settings › Data, are money that comes in
 or goes out once in a month to come: an inheritance, a house deposit, a
@@ -502,8 +537,8 @@ the Forecast draws its plans: the name with a check, warning or cross and
 whether the money lasts, the bar of the phases on the age line, and the
 chart with the band from 2 points less to 2 points more growth. The bar
 and the chart end at 85, while whether the money lasts is still worked out
-to 120, as on the Forecast: a plan that runs out at 90 says so by its
-name. When
+to the life expectancy, as on the Forecast: a plan that runs out at 90
+says so by its name. When
 the money runs out, the line under the name says what the portfolio would
 need when you stop to last even at the low growth, as on the Forecast. It
 starts at the first age whose January is no sooner than Stop working stops
@@ -554,7 +589,8 @@ to count it, add it to the planned one-offs in Settings › Data.
 with the expected return from 2 points less to 2 points more (a row each)
 and inflation from 1 point less to 1 point more, never below 0 (a column
 each). Yours from Settings is framed. Under an age, where the money runs
-out at that return after stopping then; nothing when it lasts to 120, and
+out at that return after stopping then; nothing when it lasts to the life
+expectancy, and
 “–” when you can't stop before the retirement age. Hovering a cell shows
 the month. Higher inflation raises the expenses, the FI number and the
 planned one-offs; pay-ins rise with it only when they are set to. Unlike
