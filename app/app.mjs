@@ -2303,7 +2303,7 @@ function viewForecast() {
   const o = outlook(store);
   const { birthYear, inflation, coastPayIn, retirementAge, lifeExpectancy } = store.settings;
   if (F.ageIn(o.start, birthYear) > lifeExpectancy) {
-    return card("Forecast", h("p", null, "The forecast ends at ", settingsLink("general", `your life expectancy, ${lifeExpectancy}`), ".",
+    return card("Forecast", h("p", null, "The forecast ends at ", settingsLink("data", `your life expectancy, ${lifeExpectancy}`), ".",
       o.known ? ` Your latest portfolio month is ${monthLabel(o.start)}.` : null));
   }
   const rate = (g) => percentUnit.format(o.rates[g]);
@@ -2319,7 +2319,7 @@ function viewForecast() {
       h("li", null, `Amounts a month are as you entered them: pay-ins as in `, settingsLink("data"), ", and what the portfolio pays in today's money, the expenses with buffer less the income that counts then."),
       h("li", null, `Expenses rise by ${percentUnit.format(inflation)} inflation a year. Today's money takes it out of the portfolio's values again: what they would buy now.`),
       h("li", null, store.records.length ? `It starts from the portfolio in ${monthLabel(o.start)}, ${money(o.value)}.` : "It starts from 0, as there are no broker values yet."),
-      h("li", null, "Planned one-offs count in their month. A plan lasts when money is left at the end of ", settingsLink("general", `your life expectancy, ${lifeExpectancy}`), ".",
+      h("li", null, "Planned one-offs count in their month. A plan lasts when money is left at the end of ", settingsLink("data", `your life expectancy, ${lifeExpectancy}`), ".",
         store.income.some((item) => item.category === F.DEPOT) ? ` Taxes are left out, but for the income tax set on the ${F.DEPOT}.` : " Taxes are left out."),
       h("li", null, chartAge(store) < lifeExpectancy ? `The bar and the chart go to ${chartAge(store)}. Whether the money lasts is still worked out to ${lifeExpectancy}.` : `The bar and the chart go to ${lifeExpectancy}.`)));
   return h("div", null,
@@ -3173,10 +3173,8 @@ function generalForm(store) {
     const format = String(data.get("numberFormat"));
     const birthText = String(data.get("birthYear")).trim();
     const ageText = String(data.get("retirementAge")).trim();
-    const lifeText = String(data.get("lifeExpectancy")).trim();
     const born = birthText === "" ? null : Number(birthText);
     const age = Number(ageText);
-    const life = Number(lifeText);
     const thisYear = new Date().getFullYear();
     const { min: firstYear } = F.BIRTH_YEARS;
     const ages = F.RETIREMENT_AGES;
@@ -3185,11 +3183,9 @@ function generalForm(store) {
     else if (!F.NUMBER_FORMATS.includes(format)) error = "Number format: choose one from the list.";
     else if (born !== null && !(/^[0-9]{4}$/.test(birthText) && born >= firstYear && born <= thisYear)) error = `Year of birth: enter a year from ${firstYear} to ${thisYear}, or leave it empty.`;
     else if (!/^[0-9]+$/.test(ageText) || age < ages.min || age > ages.max) error = `Retirement age: enter whole years from ${ages.min} to ${ages.max}.`;
-    else if (!/^[0-9]+$/.test(lifeText) || life < Math.max(age, F.LIFE_EXPECTANCIES.min) || life > F.LIFE_EXPECTANCIES.max) {
-      error = `Life expectancy: enter whole years from ${Math.max(age, F.LIFE_EXPECTANCIES.min)} to ${F.LIFE_EXPECTANCIES.max}, never below the retirement age.`;
-    }
+    else if (age > lifeExpectancy) error = `Retirement age: at most your life expectancy, ${lifeExpectancy}, under Settings › Data.`;
     if (error) return showError(event.currentTarget, error);
-    commit(F.saveSettings(store, { currency: chosen, numberFormat: format, birthYear: born, retirementAge: age, lifeExpectancy: life }), "Settings saved.");
+    commit(F.saveSettings(store, { currency: chosen, numberFormat: format, birthYear: born, retirementAge: age }), "Settings saved.");
   } },
     field("Currency",
       h("select", { name: "currency", value: code }, codes.sort().map((c) => h("option", { value: c }, `${c} – ${currencyName(c)}`))),
@@ -3201,16 +3197,13 @@ function generalForm(store) {
     field("Retirement age", h("input", { name: "retirementAge", inputmode: "numeric", autocomplete: "off", value: String(retirementAge), required: true }),
       "The age you stop working at the latest. For employees usually when the state pension starts without deductions: 67 in Germany for everyone born in 1964 or later. The forecast works out when you could stop sooner.",
       "Retirement starts in January of the year you reach it."),
-    field("Life expectancy", h("input", { name: "lifeExpectancy", inputmode: "numeric", autocomplete: "off", value: String(lifeExpectancy), required: true }),
-      "The age your money should last to. The forecast ends with that year, and a plan lasts when money is left then. An Altersvorsorgedepot pays out until then too.",
-      "Planning to an age most people don't reach is the careful choice: 95 or 100 are common."),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, "Save")));
 }
 
 // What the FI number and the projections assume, and the emergency fund
 // to aim for.
 function assumptionsForm(store) {
-  const { withdrawalRate, bufferPercent, expectedReturn, inflation, emergencyMonths } = store.settings;
+  const { withdrawalRate, bufferPercent, expectedReturn, inflation, lifeExpectancy, retirementAge, emergencyMonths } = store.settings;
   return h("form", { class: "settings-form", onsubmit: (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -3218,6 +3211,9 @@ function assumptionsForm(store) {
     const buffer = F.parsePercent(data.get("bufferPercent"));
     const growth = F.parsePercent(data.get("expectedReturn"));
     const prices = F.parsePercent(data.get("inflation"));
+    const lifeText = String(data.get("lifeExpectancy")).trim();
+    const life = Number(lifeText);
+    const least = Math.max(retirementAge, F.LIFE_EXPECTANCIES.min);
     const emergencyText = String(data.get("emergencyMonths")).trim();
     const emergency = Number(emergencyText);
     let error = null;
@@ -3225,6 +3221,7 @@ function assumptionsForm(store) {
     else if (!buffer.ok || !(buffer.value >= 0 && buffer.value <= 100)) error = "Buffer: enter a percentage from 0 to 100.";
     else if (!growth.ok || !(growth.value >= 0 && growth.value <= 100)) error = "Expected return: enter a percentage from 0 to 100.";
     else if (!prices.ok || !(prices.value >= 0 && prices.value <= 100)) error = "Inflation: enter a percentage from 0 to 100.";
+    else if (!/^[0-9]+$/.test(lifeText) || life < least || life > F.LIFE_EXPECTANCIES.max) error = `Life expectancy: enter whole years from ${least} to ${F.LIFE_EXPECTANCIES.max}, never below the retirement age.`;
     else if (!/^[0-9]+$/.test(emergencyText) || emergency < F.EMERGENCY_MONTHS.min || emergency > F.EMERGENCY_MONTHS.max) error = `Emergency fund: enter whole months from ${F.EMERGENCY_MONTHS.min} to ${F.EMERGENCY_MONTHS.max}.`;
     if (error) return showError(event.currentTarget, error);
     commit(F.saveSettings(store, {
@@ -3232,6 +3229,7 @@ function assumptionsForm(store) {
       bufferPercent: buffer.value,
       expectedReturn: growth.value,
       inflation: prices.value,
+      lifeExpectancy: life,
       emergencyMonths: emergency,
     }), "Settings saved.");
   } },
@@ -3246,6 +3244,9 @@ function assumptionsForm(store) {
     field("Inflation (%)", h("input", { name: "inflation", inputmode: "decimal", value: plain.format(inflation), required: true }),
       "How much prices rise a year. The milestones, the Path to FI chart and the forecast raise your expenses and the FI number by it.",
       "Pay-ins rise by it only if you choose so under Future pay-ins."),
+    field("Life expectancy", h("input", { name: "lifeExpectancy", inputmode: "numeric", value: String(lifeExpectancy), required: true }),
+      "The age your money should last to. The forecast ends with that year, and a plan lasts when money is left then. An Altersvorsorgedepot pays out until then too.",
+      "Planning to an age most people don't reach is the careful choice: 95 or 100 are common. Never below the retirement age."),
     field("Emergency fund (months of expenses)", h("input", { name: "emergencyMonths", inputmode: "numeric", value: String(emergencyMonths), required: true }),
       "How many months of expenses you want to keep in emergency-fund accounts, apart from the portfolio: 3 to 6 are common. 0 sets no target.",
       "The dashboard says how far your emergency fund goes, at the foot of Net worth."),
