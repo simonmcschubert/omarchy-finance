@@ -1700,7 +1700,9 @@ function viewItems(kind) {
     // A start or end shows its age or month field for its choice.
     if (control instanceof HTMLSelectElement) control.dispatchEvent(new Event("change"));
   }
-  if (pension) showPension(form);
+  // Once the page is drawn: a redraw that keeps what was typed
+  // (keepingDrafts) puts it back after this.
+  if (pension) queueMicrotask(() => showPension(form));
 
   // The amount, how often, and when it starts and ends: for every expense
   // and income but a state pension.
