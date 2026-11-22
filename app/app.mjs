@@ -1669,7 +1669,8 @@ function viewItems(kind) {
         onchange: kind === "income" ? (event) => {
           const category = event.target.value;
           if ((category === F.STATE_PENSION) === pension) return;
-          const typed = Object.fromEntries(new FormData(event.target.form));
+          // Every field, also an age or month its start or end hides now.
+          const typed = Object.fromEntries([...event.target.form.elements].filter((control) => control.name).map((control) => [control.name, control.value]));
           const name = String(typed.name).trim();
           state.incomeDraft = { category, name: name === "" && category === F.STATE_PENSION ? F.STATE_PENSION : name, values: { ...draft?.values, ...typed } };
           state.focus = "#item-category";
