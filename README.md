@@ -284,6 +284,8 @@ Altersvorsorgedepot's.
 
 ![Income: a salary until retirement, and the state pension being edited, with how it is worked out](docs/income.png)
 
+![Income: the Altersvorsorgedepot being edited, worked out for working to 67, and its row under Later](docs/depot.png)
+
 ### Portfolio, net worth and returns
 
 Each account holds something: **invested** (brokers, ETF savings plans:
