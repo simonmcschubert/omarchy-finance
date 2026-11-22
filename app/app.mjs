@@ -1483,6 +1483,70 @@ function pensionWorking(inputs, startAge) {
 // age.
 const pensionAge = (store) => store.income.find((item) => item.category === F.STATE_PENSION)?.from?.age ?? F.GERMANY_2026.regularAge;
 
+// Germany: the Altersvorsorgedepot, income in the built-in category of that
+// name. The Income form shows these fields in place of the amount, how
+// often and when: what it pays is worked out for each plan (F.depotIncome),
+// from the account it is held in, what you pay in while you work and its
+// Zulagen, from the payout age until the life expectancy. `item` is the
+// income edited, or null: its inputs fill the fields, defaults otherwise.
+function depotFields(store, item) {
+  const d = item?.depot ?? null;
+  const r = F.DEPOT_RULES;
+  const accounts = store.accounts.filter((account) => account.kind === "pension");
+  return [
+    field("Account",
+      h("select", { name: "depotAccount", value: d?.account ?? "" },
+        h("option", { value: "" }, "None yet"),
+        accounts.map((account) => h("option", { value: account.id }, account.name))),
+      "Where you enter its value each month: an account that holds pension assets, under Settings › Accounts. Its latest value is what the depot holds; without one, it starts from 0."),
+    field("You pay in a month", h("input", { name: "depotContribution", class: "amount", inputmode: "decimal", autocomplete: "off", value: inputMoney(d?.contribution ?? r.contribution) }),
+      `From ${money(r.minimum / 12)} a month the state adds 50 % of the first ${money(r.firstTier)} a year and 25 % up to ${money(r.subsidised)}: ${money(F.depotAllowance(r.subsidised).total)} at most, at ${money(r.contribution)} a month. More gets no Zulage, and Finance takes ${money(r.contribution)} at most.`,
+      "Paid in while you work: each plan stops it when it stops working, as the Zulage needs you insured in the state pension (or self-employed). With a high income, the tax return brings more on top of the Zulage, paid to you."),
+    field("Kindergeld until", h("input", { name: "depotChildren", inputmode: "numeric", autocomplete: "off", placeholder: "2038, 2041", value: d ? d.children.join(", ") : "" }),
+      `For each child you get Kindergeld for, the last year: the year they turn 18, or up to 25 in training. Each adds 100 % of what you pay in, up to ${money(r.perChild)} a year.`),
+    field("Pays out from age", h("input", { name: "depotAge", inputmode: "numeric", autocomplete: "off", value: String(item?.from?.age ?? r.payoutAges.min) }),
+      `From ${r.payoutAges.min} to ${r.payoutAges.max}. It pays the same amount in today's money every month until your life expectancy (${r.payoutUntil} at the least), what is left growing meanwhile.`),
+    field("Costs a year (%)", h("input", { name: "depotCosts", inputmode: "decimal", autocomplete: "off", value: plain.format(d?.costs ?? 0.2) }),
+      "All costs of the depot and its funds, taken off the growth: about 0,1 to 0,3 % at brokers once their promotions end; a standard depot may cost 1 % at most."),
+    field("Income tax on it (%)", h("input", { name: "depotTax", inputmode: "decimal", autocomplete: "off", value: plain.format(d?.tax ?? 15) }),
+      "What it pays out is taxed in full as income: about 15 % next to a modest state pension, 0 % while your taxable income stays under the Grundfreibetrag (12.348 € in 2026).",
+      "Insured as a pensioner (KVdR), you pay no health insurance on it."),
+  ];
+}
+
+// Reads depotFields. Returns { startAge, inputs } (inputs as the item keeps
+// them) or { error }.
+function readDepot(data) {
+  const r = F.DEPOT_RULES;
+  const account = String(data.get("depotAccount") ?? "");
+  const contribution = F.parseMoney(data.get("depotContribution"));
+  const childrenText = String(data.get("depotChildren") ?? "").trim();
+  const years = childrenText === "" ? [] : childrenText.split(/[\s,;]+/).filter(Boolean);
+  const ageText = String(data.get("depotAge")).trim();
+  const startAge = Number(ageText);
+  const costs = readNumber(data.get("depotCosts"), 2);
+  const tax = readNumber(data.get("depotTax"), 2);
+  if (!contribution.ok || contribution.cents < 0 || contribution.cents > r.contribution) return { error: `You pay in a month: enter an amount from 0 to ${money(r.contribution)}.` };
+  if (years.length > 20 || !years.every((year) => /^[0-9]{4}$/.test(year) && Number(year) >= F.BIRTH_YEARS.min && Number(year) <= F.BIRTH_YEARS.max)) return { error: "Kindergeld until: enter a year for each child, such as 2038, 2041, or leave it empty." };
+  if (!/^[0-9]+$/.test(ageText) || startAge < r.payoutAges.min || startAge > r.payoutAges.max) return { error: `Pays out from age: enter whole years from ${r.payoutAges.min} to ${r.payoutAges.max}.` };
+  if (costs === null || costs >= 10) return { error: "Costs a year: enter a percentage below 10." };
+  if (tax === null || tax >= 100) return { error: "Income tax on it: enter a percentage." };
+  return { startAge, inputs: { account: account === "" ? null : account, contribution: contribution.cents, children: years.map(Number).sort((a, b) => a - b), costs, tax } };
+}
+
+// How an Altersvorsorgedepot comes about, for its row in the list: "150 € a
+// month + 540 € Zulagen a year · held in AVD · −15 % income tax".
+function depotWorking(store, item) {
+  const d = item.depot;
+  const account = store.accounts.find((a) => a.id === d.account);
+  const zulagen = F.depotAllowance(d.contribution * 12, d.children.filter((year) => year >= new Date().getFullYear()).length).total;
+  return [
+    d.contribution > 0 ? `${money(d.contribution)} a month + ${money(zulagen)} Zulagen a year` : "Nothing paid in",
+    account ? `held in ${account.name}` : "no account yet",
+    `−${percentUnit.format(d.tax)} income tax`,
+  ].join(" · ");
+}
+
 // Germany: health and care insurance at the minimum, as a voluntary member,
 // from retirement until the pension starts.
 function healthCard() {
@@ -1573,15 +1637,19 @@ function viewItems(kind) {
   }
 
   const categories = store.categories[kind];
-  // A state pension is worked out from Rentenpunkte: with State pension
-  // picked, the form shows those fields in place of the amount, how often,
-  // and when it starts and ends.
+  // A state pension is worked out from Rentenpunkte, an
+  // Altersvorsorgedepot from what is paid in: with either category picked,
+  // the form shows its fields in place of the amount, how often, and when
+  // it starts and ends.
   const draft = kind === "income" ? state.incomeDraft : null;
   const picked = draft?.category ?? editing?.category ?? "";
-  const pension = kind === "income" && picked === F.STATE_PENSION;
-  // One state pension: adding another, or moving income into it, offers to
+  const builtIn = (category) => (kind !== "income" ? null : category === F.STATE_PENSION ? "pension" : category === F.DEPOT ? "depot" : null);
+  const special = builtIn(picked);
+  const pension = special === "pension";
+  const depot = special === "depot";
+  // One of each: adding another, or moving income into one, offers to
   // edit the one there is.
-  const otherPension = pension && editing?.category !== F.STATE_PENSION ? items.find((item) => item.category === F.STATE_PENSION) ?? null : null;
+  const otherOne = special && editing?.category !== picked ? items.find((item) => item.category === picked) ?? null : null;
   const edit = (item) => {
     state.editing[kind] = item.id;
     if (kind === "income") state.incomeDraft = null;
@@ -1593,8 +1661,8 @@ function viewItems(kind) {
     state.editing[kind] = null;
     if (kind === "income") state.incomeDraft = null;
   };
-  const worked = pension ? h("output", { class: "worked-out", "aria-live": "polite" }, "–") : null;
-  const result = pension ? h("p", { class: "pension-result", "aria-live": "polite" }) : null;
+  const worked = special ? h("output", { class: "worked-out", "aria-live": "polite" }, "–") : null;
+  const result = special ? h("p", { class: "pension-result", "aria-live": "polite" }) : null;
   const showPension = (form) => {
     const data = new FormData(form);
     const r = readPension(data);
@@ -1607,14 +1675,47 @@ function viewItems(kind) {
     worked.textContent = `${money(r.net)} / month`;
     result.textContent = `${pensionWorking(r.inputs, r.startAge)} = ${money(r.net)} a month from age ${r.startAge}${year}, in today's money.`;
   };
+  // What the depot typed pays, for working to the retirement age, at the
+  // expected return.
+  const depotItem = (r, name, id) => ({ id, name, category: F.DEPOT, amount: 0, everyMonths: 1, from: { age: r.startAge }, until: null, pension: null, depot: r.inputs });
+  const showDepot = (form) => {
+    const r = readDepot(new FormData(form));
+    if (r.error || birthYear === null) {
+      worked.textContent = "–";
+      result.textContent = r.error ?? "It pays out from an age, which needs your year of birth, in Settings.";
+      return;
+    }
+    const income = F.depotIncome(store, depotItem(r, "", ""), retirement);
+    const { retirementAge, lifeExpectancy } = store.settings;
+    const until = Math.max(lifeExpectancy, F.DEPOT_RULES.payoutUntil);
+    worked.textContent = `${money(income.net)} / month`;
+    result.textContent = [
+      `${money(income.allowance)} Zulagen a year.`,
+      `Working to ${retirementAge}, it holds ${money(income.value)} at ${r.startAge} and pays ${money(income.net)} a month from then until ${until}, after ${percentUnit.format(r.inputs.tax)} income tax, in today's money.`,
+      "Each plan works it out again: stopping sooner pays in for fewer years.",
+    ].join(" ");
+  };
   const form = h("form", {
-    class: pension ? "item-form pension-form" : "item-form",
-    oninput: pension ? (event) => showPension(event.currentTarget) : null,
+    class: special ? "item-form pension-form" : "item-form",
+    oninput: pension ? (event) => showPension(event.currentTarget) : depot ? (event) => showDepot(event.currentTarget) : null,
     onsubmit: (event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
       const name = String(data.get("name")).trim();
       const category = String(data.get("category")).trim();
+      if (depot) {
+        const r = readDepot(data);
+        let error = name === "" ? "Enter a name." : r.error ?? null;
+        if (!error && birthYear === null) error = "It pays out from an age, which needs your year of birth, in Settings.";
+        if (error) return showError(event.currentTarget, error);
+        const typed = depotItem(r, name, editing?.id ?? F.newId());
+        const item = { ...typed, amount: F.depotIncome(store, typed, retirement).net };
+        const saved = F.saveItem(store, kind, item);
+        if (!saved.ok) return showError(event.currentTarget, `${saved.error}.`);
+        reset();
+        state.focus = "#item-name";
+        return commit(saved.store, `${editing ? "Saved" : "Added"} ${name}: ${money(item.amount)} a month from age ${r.startAge}, working to ${store.settings.retirementAge}.`);
+      }
       if (pension) {
         const r = readPension(data);
         let error = name === "" ? "Enter a name." : r.error ?? null;
@@ -1666,26 +1767,29 @@ function viewItems(kind) {
       h("span", { class: "field-label" }, h("label", { for: "item-category" }, "Category"),
         h("a", { class: "label-link", href: "#settings" }, categories.length ? "Edit" : "Add categories")),
       h("select", { id: "item-category", name: "category", value: picked,
-        // Into or out of State pension: the form draws its other fields.
+        // Into or out of State pension or Altersvorsorgedepot: the form
+        // draws its other fields.
         onchange: kind === "income" ? (event) => {
           const category = event.target.value;
-          if ((category === F.STATE_PENSION) === pension) return;
+          if (builtIn(category) === special) return;
           // Every field, also an age or month its start or end hides now.
           const typed = Object.fromEntries([...event.target.form.elements].filter((control) => control.name).map((control) => [control.name, control.value]));
           const name = String(typed.name).trim();
-          state.incomeDraft = { category, name: name === "" && category === F.STATE_PENSION ? F.STATE_PENSION : name, values: { ...draft?.values, ...typed } };
+          // A built-in category names an income without a name of its own.
+          const unnamed = name === "" || name === F.STATE_PENSION || name === F.DEPOT;
+          state.incomeDraft = { category, name: unnamed && builtIn(category) ? category : name, values: { ...draft?.values, ...typed } };
           state.focus = "#item-category";
           render();
         } : null },
         h("option", { value: "" }, "No category"),
         categories.map((c) => h("option", { value: c }, c)))),
-    pension ? [
-      h("div", { class: "field pension-amount" }, h("span", { class: "field-label" }, "Amount (net), worked out"), worked),
-      h("div", { class: "pension-fields" }, pensionFields(editing)),
+    special ? [
+      h("div", { class: "field pension-amount" }, h("span", { class: "field-label" }, depot ? "Amount (net), working to " + store.settings.retirementAge : "Amount (net), worked out"), worked),
+      h("div", { class: "pension-fields" }, pension ? pensionFields(editing) : depotFields(store, editing?.category === F.DEPOT ? editing : null)),
       result,
-      otherPension
-        ? h("p", { class: "pension-note" }, "There is a state pension already: ",
-            h("button", { type: "button", class: "link", onclick: () => edit(otherPension) }, `Edit ${otherPension.name}`))
+      otherOne
+        ? h("p", { class: "pension-note" }, pension ? "There is a state pension already: " : `There is an ${F.DEPOT} already: `,
+            h("button", { type: "button", class: "link", onclick: () => edit(otherOne) }, `Edit ${otherOne.name}`))
         : null,
     ] : regularFields(),
     h("div", { class: "form-actions" },
@@ -1703,9 +1807,10 @@ function viewItems(kind) {
   // Once the page is drawn: a redraw that keeps what was typed
   // (keepingDrafts) puts it back after this.
   if (pension) queueMicrotask(() => showPension(form));
+  if (depot) queueMicrotask(() => showDepot(form));
 
   // The amount, how often, and when it starts and ends: for every expense
-  // and income but a state pension.
+  // and income but a state pension and an Altersvorsorgedepot.
   function regularFields() {
     return [
       h("label", null, kind === "income" ? "Amount (net)" : "Amount", h("input", { name: "amount", class: "amount", inputmode: "decimal", autocomplete: "off", required: true, value: editing ? inputMoney(editing.amount) : "", placeholder: zero })),
@@ -1739,9 +1844,12 @@ function viewItems(kind) {
       windowText(item) ? h("div", { class: "sub" }, windowText(item)) : null,
       // Listed apart from their category, so they show it here.
       !active.includes(item) && item.category ? h("div", { class: "sub" }, item.category) : null,
-      // A state pension says how it comes about.
+      // A state pension and an Altersvorsorgedepot say how they come about.
       item.category === F.STATE_PENSION && kind === "income"
         ? h("div", { class: "sub" }, item.pension ? pensionWorking(item.pension, item.from.age) : "Edit it to work it out from your Rentenpunkte.")
+        : null,
+      item.category === F.DEPOT && kind === "income" && item.depot
+        ? h("div", { class: "sub" }, depotWorking(store, item), ` · for working to ${store.settings.retirementAge}: each plan has its own`)
         : null),
     h("div", { class: "num" }, money(F.monthlyAmount(item))),
     h("div", { class: "actions" },
@@ -1786,7 +1894,8 @@ function viewItems(kind) {
   return h("div", null,
     card([names.title, kind === "income"
       ? info("income", "Regular income after tax, such as a salary, rent or a pension. A yearly bonus counts as one twelfth a month.",
-          `For your state pension, pick the category ${F.STATE_PENSION}: its amount is worked out from your Rentenpunkte.`)
+          `For your state pension, pick the category ${F.STATE_PENSION}: its amount is worked out from your Rentenpunkte.`,
+          `For an ${F.DEPOT}, pick that category: what it pays is worked out for each plan from what you pay in while you work, with its Zulagen.`)
       : info("expenses", "Regular payments only, such as rent, insurance and subscriptions. A yearly one counts as one twelfth a month.",
           ["Pay-ins to broker accounts go under ", h("a", { href: "#portfolio" }, "Portfolio"), ", not here."])],
       summary,
@@ -2040,6 +2149,10 @@ const phaseKey = (kind) => h("span", { class: `phase-key ${kind}` }, PHASE_NAMES
 // month after its last one.
 const coastsFrom = (plan, months) => (plan.stopInvesting === null ? months[1] : F.addMonths(plan.stopInvesting, 1));
 
+// The age the Forecast and What if draw their plans to: CHART_AGE, or the
+// life expectancy when that comes first.
+const chartAge = (store) => Math.min(F.CHART_AGE, store.settings.lifeExpectancy);
+
 // A plan as the Forecast and What if draw it: { name, level, title (whether
 // its money lasts, longer), label (shorter), out (where it runs out, for
 // the bar: null when that is after the months shown), segments (its bar's
@@ -2054,13 +2167,13 @@ function planRow(store, o, months, plan, name) {
   const low = percentUnit.format(o.rates.low);
   const perMonth = (cents, sign) => `${sign}${money(cents)}/month`;
   const when = (month) => (month === months[1] ? "now" : String(age(month)));
-  // Lasts to SHOWN_AGE, even at the low growth; runs out at the low
-  // growth only; or at the expected return too.
+  // Lasts to the life expectancy, even at the low growth; runs out at the
+  // low growth only; or at the expected return too.
   const status = () => {
     const { low: atLow, mid: atMid } = plan.runsOut;
     if (atMid !== null) return { level: "bad", title: `Runs out at ${age(atMid)}`, out: { from: index(atMid), text: `Empty at ${age(atMid)}` } };
     if (atLow !== null) return { level: "risk", title: `Runs out at ${age(atLow)} if growth is ${low}`, out: { from: index(atLow), text: `${low}: empty at ${age(atLow)}` } };
-    return { level: "ok", title: `Lasts to ${F.SHOWN_AGE}, even at ${low} growth`, out: null };
+    return { level: "ok", title: `Lasts to ${store.settings.lifeExpectancy}, even at ${low} growth`, out: null };
   };
   // What starts a step while retired: an income that starts (a pension),
   // or later also an expense or income that starts or ends.
@@ -2111,7 +2224,7 @@ function planRow(store, o, months, plan, name) {
   };
   const s = status();
   const out = s.out && s.out.from < months.length ? s.out : null;
-  return { name, level: s.level, title: s.title, label: s.out ? s.out.text : `Lasts to ${F.SHOWN_AGE}`, out, segments: segments(), need: s.out ? need() : null, plan };
+  return { name, level: s.level, title: s.title, label: s.out ? s.out.text : `Lasts to ${store.settings.lifeExpectancy}`, out, segments: segments(), need: s.out ? need() : null, plan };
 }
 
 // The plans, as the page shows them: the answers to "When can you stop?",
@@ -2120,7 +2233,7 @@ function planRow(store, o, months, plan, name) {
 // each { key, question, answer ("now", an age, or null when the plan
 // doesn't happen before retirement), level, label (whether the money
 // lasts, or that it doesn't happen), title (longer) }; rows: planRow() of
-// each plan that happens, by key, drawn up to CHART_AGE; months: the
+// each plan that happens, by key, drawn up to chartAge(); months: the
 // months they are drawn for.
 function forecastPlans(store) {
   const { birthYear, retirementAge } = store.settings;
@@ -2128,8 +2241,8 @@ function forecastPlans(store) {
   const result = o.plans(inTodaysMoney() ? "today" : "nominal");
   if (!result) return null;
   const { months } = result;
-  // Each plan as drawn, up to CHART_AGE.
-  const drawn = (plan) => F.shownUntil({ months, plan }, birthYear, F.CHART_AGE);
+  // Each plan as drawn, up to chartAge().
+  const drawn = (plan) => F.shownUntil({ months, plan }, birthYear, chartAge(store));
   const age = (month) => F.ageIn(month, birthYear);
   const low = percentUnit.format(o.rates.low);
   const plans = Object.fromEntries(result.plans.map((plan) => [plan.key, plan]));
@@ -2188,9 +2301,9 @@ function viewForecast() {
       h("ul", null, missing)));
   }
   const o = outlook(store);
-  const { birthYear, inflation, coastPayIn, retirementAge } = store.settings;
-  if (F.ageIn(o.start, birthYear) > F.SHOWN_AGE) {
-    return card("Forecast", h("p", null, `The forecast ends at age ${F.SHOWN_AGE}.`,
+  const { birthYear, inflation, coastPayIn, retirementAge, lifeExpectancy } = store.settings;
+  if (F.ageIn(o.start, birthYear) > lifeExpectancy) {
+    return card("Forecast", h("p", null, "The forecast ends at ", settingsLink("general", `your life expectancy, ${lifeExpectancy}`), ".",
       o.known ? ` Your latest portfolio month is ${monthLabel(o.start)}.` : null));
   }
   const rate = (g) => percentUnit.format(o.rates[g]);
@@ -2198,16 +2311,17 @@ function viewForecast() {
     h("ul", null,
       h("li", null, `Stop investing: from then on, ${coastPayIn > 0 ? `paying in ${money(coastPayIn)} a month` : "without paying in"}, the portfolio still reaches the FI number by ${retirementAge} (Coast FI).`),
       h("li", null, "Stop working: as soon as the portfolio reaches the FI number."),
-      h("li", null, `Even at ${rate("low")}: the first age, from January, at which stopping work lasts to ${F.SHOWN_AGE} with only ${rate("low")} growth. Shown when stopping at FI runs out then.`),
+      h("li", null, `Even at ${rate("low")}: the first age, from January, at which stopping work lasts to ${lifeExpectancy} with only ${rate("low")} growth. Shown when stopping at FI runs out then.`),
       h("li", null, "At the latest: the retirement age, set in ", settingsLink("general"), "."),
-      h("li", null, `Lasts even at ${rate("low")} with: what a plan that runs out at ${rate("low")} would need when it stops investing or working, to last to ${F.SHOWN_AGE} with only ${rate("low")} growth from then on. In brackets, how much more that is than it would have then at ${rate("low")}.`),
+      h("li", null, `Lasts even at ${rate("low")} with: what a plan that runs out at ${rate("low")} would need when it stops investing or working, to last to ${lifeExpectancy} with only ${rate("low")} growth from then on. In brackets, how much more that is than it would have then at ${rate("low")}.`),
       h("li", null, `Each plan at the expected return, ${rate("mid")} a year before inflation. The band and the ${rate("low")} result keep the same dates, with ${rate("low")} to ${rate("high")} growth.`),
       h("li", null, "Growth is the same every year. Real markets are not, and bad years right after you stop working hurt most."),
       h("li", null, `Amounts a month are as you entered them: pay-ins as in `, settingsLink("data"), ", and what the portfolio pays in today's money, the expenses with buffer less the income that counts then."),
       h("li", null, `Expenses rise by ${percentUnit.format(inflation)} inflation a year. Today's money takes it out of the portfolio's values again: what they would buy now.`),
       h("li", null, store.records.length ? `It starts from the portfolio in ${monthLabel(o.start)}, ${money(o.value)}.` : "It starts from 0, as there are no broker values yet."),
-      h("li", null, `Planned one-offs count in their month. A plan lasts when money is left at ${F.SHOWN_AGE}. Taxes are left out.`),
-      h("li", null, `The bar and the chart go to ${F.CHART_AGE}. Whether the money lasts is still worked out to ${F.SHOWN_AGE}.`)));
+      h("li", null, "Planned one-offs count in their month. A plan lasts when money is left at the end of ", settingsLink("general", `your life expectancy, ${lifeExpectancy}`), ".",
+        store.income.some((item) => item.category === F.DEPOT) ? ` Taxes are left out, but for the income tax set on the ${F.DEPOT}.` : " Taxes are left out."),
+      h("li", null, chartAge(store) < lifeExpectancy ? `The bar and the chart go to ${chartAge(store)}. Whether the money lasts is still worked out to ${lifeExpectancy}.` : `The bar and the chart go to ${lifeExpectancy}.`)));
   return h("div", null,
     h("div", { class: "answers-head" }, h("h2", null, "When can you stop?", about), moneySwitch(drawForecast)),
     h("div", { id: "forecast-answers", class: "answers", role: "radiogroup", "aria-label": "When can you stop?" }),
@@ -2347,7 +2461,7 @@ function stopAges(store) {
 
 // Stop working at an age you pick: from January of that age, whatever the
 // portfolio has then (stopAfter), drawn as the Forecast draws its plans by
-// drawWhatIf, up to CHART_AGE. null once retirement has come, as
+// drawWhatIf, up to chartAge(). null once retirement has come, as
 // stopAfter() has it.
 function stopAtCard(store) {
   const o = outlook(store);
@@ -2358,8 +2472,10 @@ function stopAtCard(store) {
     ["What if you stopped working in January of the year you turn that age, whatever the portfolio has then, and lived off it from then on? Until then, you pay in as planned in ", settingsLink("data"), "."],
     `From ${min}, now, to ${max}, the retirement age.`,
     `As the Forecast draws its plans: the bar of the phases, and the portfolio at the expected return of ${rate("mid")}, with a band from ${rate("low")} to ${rate("high")} growth.`,
-    `The bar and the chart go to ${F.CHART_AGE}. Whether the money lasts is still worked out to ${F.SHOWN_AGE}, as on the Forecast.`,
-    `When the money runs out, the line under the name says what the portfolio would need when you stop, to last to ${F.SHOWN_AGE} even at ${rate("low")}.`);
+    chartAge(store) < store.settings.lifeExpectancy
+      ? `The bar and the chart go to ${chartAge(store)}. Whether the money lasts is still worked out to ${store.settings.lifeExpectancy}, your life expectancy, as on the Forecast.`
+      : `The bar and the chart go to ${store.settings.lifeExpectancy}, your life expectancy, as on the Forecast.`,
+    `When the money runs out, the line under the name says what the portfolio would need when you stop, to last to ${store.settings.lifeExpectancy} even at ${rate("low")}.`);
   const age = h("input", { id: "stop-age", name: "age", type: "number", min, max, step: 1, inputmode: "numeric", autocomplete: "off", required: true, value: String(picked) });
   return h("section", { class: "card forecast" },
     h("div", { class: "card-head" }, h("h2", null, "Stop working at an age you pick", about), moneySwitch(drawWhatIf)),
@@ -2374,7 +2490,7 @@ function stopAtCard(store) {
     h("div", { id: "stop-chart", class: "forecast-box" }));
 }
 
-// Draws the plan of the age picked on What if, up to CHART_AGE. An
+// Draws the plan of the age picked on What if, up to chartAge(). An
 // age that isn't one to pick says so, and the plan drawn before stays.
 function drawWhatIf() {
   const box = document.getElementById("stop-chart");
@@ -2394,7 +2510,7 @@ function drawWhatIf() {
   error.textContent = "";
   state.whatIf.age = age;
   const picked = o.stopAfter(F.monthFromIndex((birthYear + age) * 12 - 1), inTodaysMoney() ? "today" : "nominal");
-  const { months, plan } = F.shownUntil(picked, birthYear, F.CHART_AGE);
+  const { months, plan } = F.shownUntil(picked, birthYear, chartAge(store));
   const name = F.monthIndex(plan.retires) <= thisMonth() ? "Stop working now" : `Stop working at ${F.ageIn(plan.retires, birthYear)}`;
   const els = { title: document.getElementById("stop-title"), need: document.getElementById("stop-need"), keys: document.getElementById("stop-keys"), box };
   drawPlan(els, months, planRow(store, o, months, plan, name), { status: true });
@@ -2633,7 +2749,7 @@ function growthCard(store) {
   const cell = (c) => {
     const plan = c.plan ? " plan" : "";
     if (c.retires === null) return h("td", { class: `growth-cell never${plan}`, title: `Not before ${retirementAge}` }, "–");
-    const lasts = c.runsOut === null ? `lasts to ${F.SHOWN_AGE}` : `runs out at ${age(c.runsOut)}`;
+    const lasts = c.runsOut === null ? `lasts to ${store.settings.lifeExpectancy}` : `runs out at ${age(c.runsOut)}`;
     return h("td", { class: `growth-cell${plan}`, title: `Stop working in ${monthLabel(c.retires)}, at ${age(c.retires)}; ${lasts} at ${percentUnit.format(c.growth)} growth` },
       h("span", { class: "growth-age" }, String(age(c.retires))),
       c.runsOut === null ? null : h("span", { class: "growth-out" }, `empty at ${age(c.runsOut)}`));
@@ -2641,7 +2757,7 @@ function growthCard(store) {
   const about = info("growth and inflation",
     `When you could stop working, as Stop working counts it, if the portfolio grew by another return a year, or prices rose by another inflation, from now on. Marked: yours from Settings, ${percentUnit.format(expectedReturn)} and ${percentUnit.format(inflation)}.`,
     ["The return is before inflation. Inflation raises your expenses, the FI number and the planned one-offs; your pay-ins rise with it only if you choose so in ", settingsLink("data"), "."],
-    `Under an age, where the money then runs out at that return. Nothing when it lasts to ${F.SHOWN_AGE}; “–” when you can't stop before ${retirementAge}.`,
+    `Under an age, where the money then runs out at that return. Nothing when it lasts to ${store.settings.lifeExpectancy}; “–” when you can't stop before ${retirementAge}.`,
     "The Forecast shows your plan at 2 points less and more with the same dates. Here each return has its own: when you could stop at it.");
   return h("section", { class: "card" },
     h("div", { class: "card-head" }, h("h2", null, "Growth and inflation", about)),
@@ -2673,7 +2789,8 @@ function flatCard() {
   const endable = (kind, ended) => {
     const open = [...lists[kind].now, ...lists[kind].later];
     return [...open, ...store[kind].filter((item) => ended?.includes(item.id) && !open.includes(item))]
-      .filter((item) => !(item.from && "at" in item.from))
+      // Not what starts with retirement, nor an Altersvorsorgedepot.
+      .filter((item) => !(item.from && "at" in item.from) && item.category !== F.DEPOT)
       .sort((a, b) => F.monthlyAmount(b) - F.monthlyAmount(a) || a.name.localeCompare(b.name));
   };
   // A box for each expense or income the flat can end, ticked when it does.
@@ -3046,7 +3163,7 @@ function renderLockChoice() {
 // What seldom changes: how amounts are shown, and the year of birth and the
 // retirement age.
 function generalForm(store) {
-  const { currency: code, numberFormat, birthYear, retirementAge } = store.settings;
+  const { currency: code, numberFormat, birthYear, retirementAge, lifeExpectancy } = store.settings;
   const codes = Intl.supportedValuesOf("currency");
   if (!codes.includes(code)) codes.push(code);
   return h("form", { class: "settings-form", onsubmit: (event) => {
@@ -3056,8 +3173,10 @@ function generalForm(store) {
     const format = String(data.get("numberFormat"));
     const birthText = String(data.get("birthYear")).trim();
     const ageText = String(data.get("retirementAge")).trim();
+    const lifeText = String(data.get("lifeExpectancy")).trim();
     const born = birthText === "" ? null : Number(birthText);
     const age = Number(ageText);
+    const life = Number(lifeText);
     const thisYear = new Date().getFullYear();
     const { min: firstYear } = F.BIRTH_YEARS;
     const ages = F.RETIREMENT_AGES;
@@ -3066,8 +3185,11 @@ function generalForm(store) {
     else if (!F.NUMBER_FORMATS.includes(format)) error = "Number format: choose one from the list.";
     else if (born !== null && !(/^[0-9]{4}$/.test(birthText) && born >= firstYear && born <= thisYear)) error = `Year of birth: enter a year from ${firstYear} to ${thisYear}, or leave it empty.`;
     else if (!/^[0-9]+$/.test(ageText) || age < ages.min || age > ages.max) error = `Retirement age: enter whole years from ${ages.min} to ${ages.max}.`;
+    else if (!/^[0-9]+$/.test(lifeText) || life < Math.max(age, F.LIFE_EXPECTANCIES.min) || life > F.LIFE_EXPECTANCIES.max) {
+      error = `Life expectancy: enter whole years from ${Math.max(age, F.LIFE_EXPECTANCIES.min)} to ${F.LIFE_EXPECTANCIES.max}, never below the retirement age.`;
+    }
     if (error) return showError(event.currentTarget, error);
-    commit(F.saveSettings(store, { currency: chosen, numberFormat: format, birthYear: born, retirementAge: age }), "Settings saved.");
+    commit(F.saveSettings(store, { currency: chosen, numberFormat: format, birthYear: born, retirementAge: age, lifeExpectancy: life }), "Settings saved.");
   } },
     field("Currency",
       h("select", { name: "currency", value: code }, codes.sort().map((c) => h("option", { value: c }, `${c} – ${currencyName(c)}`))),
@@ -3079,6 +3201,9 @@ function generalForm(store) {
     field("Retirement age", h("input", { name: "retirementAge", inputmode: "numeric", autocomplete: "off", value: String(retirementAge), required: true }),
       "The age you stop working at the latest. For employees usually when the state pension starts without deductions: 67 in Germany for everyone born in 1964 or later. The forecast works out when you could stop sooner.",
       "Retirement starts in January of the year you reach it."),
+    field("Life expectancy", h("input", { name: "lifeExpectancy", inputmode: "numeric", autocomplete: "off", value: String(lifeExpectancy), required: true }),
+      "The age your money should last to. The forecast ends with that year, and a plan lasts when money is left then. An Altersvorsorgedepot pays out until then too.",
+      "Planning to an age most people don't reach is the careful choice: 95 or 100 are common."),
     h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary" }, "Save")));
 }
 
@@ -3371,12 +3496,16 @@ function accountList(store) {
     addLabel: "Add account",
     control: (row) => kindSelect({ value: row.kind, "aria-label": `What ${row.name} holds`, onchange: (event) => {
       const result = F.saveAccount(store, row.key, row.name, event.target.value);
-      if (result.ok) commit(result.store, `${row.name}: ${kindLabel(event.target.value)}.`);
+      if (result.ok) return commit(result.store, `${row.name}: ${kindLabel(event.target.value)}.`);
+      state.notice = { kind: "error", text: `Not changed: ${result.error}.` };
+      render();
     } }),
     addControl: () => kindSelect({ name: "kind", value: "invested", "aria-label": "What it holds" }),
     save: (id, name, data) => F.saveAccount(store, id, name, data?.get("kind") ?? undefined),
     remove: ({ key, name, count }) => {
-      if (!confirm(count ? `Delete ${name} and its ${count} monthly values?` : `Delete ${name}?`)) return;
+      // The Altersvorsorgedepot it holds starts from 0 without it.
+      const depot = store.income.some((item) => item.depot?.account === key) ? ` The ${F.DEPOT} under Income then starts from 0.` : "";
+      if (!confirm((count ? `Delete ${name} and its ${count} monthly values?` : `Delete ${name}?`) + depot)) return;
       commit(F.deleteAccount(store, key), `Deleted ${name}.`);
     },
   });
